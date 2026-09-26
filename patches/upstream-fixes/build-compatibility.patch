@@ -1584,3 +1584,9 @@ diff --git a/v8/BUILD.gn b/v8/BUILD.gn
  # Use pre-generated static root pointer values from static-roots.h.
 - v8_enable_static_roots = ""
 + v8_enable_static_roots = false
+diff --git a/tools/protoc_wrapper/protoc-gen-ts_proto.bat b/tools/protoc_wrapper/protoc-gen-ts_proto.bat
+--- a/tools/protoc_wrapper/protoc-gen-ts_proto.bat
++++ b/tools/protoc_wrapper/protoc-gen-ts_proto.bat
+@@ -7,1 +7,1 @@
+-python3 "%~dp0protoc-gen-ts_proto.py" %*
++python "%~dp0protoc-gen-ts_proto.py" %*
