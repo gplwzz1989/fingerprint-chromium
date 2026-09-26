@@ -1590,3 +1590,17 @@ diff --git a/tools/protoc_wrapper/protoc-gen-ts_proto.bat b/tools/protoc_wrapper
 @@ -7,1 +7,1 @@
 -python3 "%~dp0protoc-gen-ts_proto.py" %*
 +python "%~dp0protoc-gen-ts_proto.py" %*
+diff --git a/media/gpu/BUILD.gn b/media/gpu/BUILD.gn
+--- a/media/gpu/BUILD.gn
++++ b/media/gpu/BUILD.gn
+@@ -85,6 +85,10 @@ component("gpu") {
+   configs += [
+     "//build/config/compiler:wexit_time_destructors",
+     "//build/config/compiler:wglobal_constructors",
+   ]
+
+  if (is_clang) {
+    cflags_cc = [ "-Wno-c++98-compat-extra-semi" ]
+  }
+
+  public_deps = [
