@@ -1722,3 +1722,18 @@ diff --git a/components/translate/core/browser/translate_ranker_impl.cc b/compon
    return result;
 +#endif
  }
+diff --git a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc b/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
+--- a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
++++ b/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
+@@ -84,1 +84,1 @@
+-constexpr base::TimeDelta kFetchTimeout(base::Seconds(10));
++[[maybe_unused]] constexpr base::TimeDelta kFetchTimeout(base::Seconds(10));
+@@ -116,1 +116,1 @@
+-constexpr char kGoogEncodeResponseIfExecutable[] =
++[[maybe_unused]] constexpr char kGoogEncodeResponseIfExecutable[] =
+@@ -205,1 +205,1 @@
+-net::NetworkTrafficAnnotationTag GetNetworkTrafficAnnotation(
++[[maybe_unused]] net::NetworkTrafficAnnotationTag GetNetworkTrafficAnnotation(
+@@ -537,1 +537,1 @@
+-std::optional<std::string> GetAPIBodyPayload(std::string payload,
++[[maybe_unused]] std::optional<std::string> GetAPIBodyPayload(std::string payload,
