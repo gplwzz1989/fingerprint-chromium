@@ -1547,3 +1547,18 @@ diff --git a/v8/src/builtins/frames.tq b/v8/src/builtins/frames.tq
  }
  
  macro Cast<A : type extends Frame>(
+diff --git a/v8/src/objects/instance-type-inl.h b/v8/src/objects/instance-type-inl.h
+--- a/v8/src/objects/instance-type-inl.h
++++ b/v8/src/objects/instance-type-inl.h
+@@ -97,11 +97,7 @@ constexpr std::array<std::pair<InstanceTypeRange, TaggedAddressRange>, 9>
+         {{FIRST_SMALL_ORDERED_HASH_TABLE_TYPE,
+           LAST_SMALL_ORDERED_HASH_TABLE_TYPE},
+          {StaticReadOnlyRoot::kSmallOrderedHashMapMap,
+           StaticReadOnlyRoot::kSmallOrderedNameDictionaryMap}},
+-         {{FIRST_ABSTRACT_INTERNAL_CLASS_TYPE,
+-           LAST_ABSTRACT_INTERNAL_CLASS_TYPE},
+-          {StaticReadOnlyRoot::kAbstractInternalClassSubclass1Map,
+-           StaticReadOnlyRoot::kAbstractInternalClassSubclass2Map}},
+         {{FIRST_TURBOFAN_TYPE_TYPE, LAST_TURBOFAN_TYPE_TYPE},
+          {StaticReadOnlyRoot::kTurbofanBitsetTypeMap,
+           StaticReadOnlyRoot::kTurbofanOtherNumberConstantTypeMap}}}};
