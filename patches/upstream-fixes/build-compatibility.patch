@@ -1630,6 +1630,22 @@ diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_par
 @@ -241,1 +241,1 @@
 -  return basic_fonts.count(font_family) > 0;
 +  return basic_fonts->count(font_family) > 0;
+diff --git a/third_party/blink/renderer/core/BUILD.gn b/third_party/blink/renderer/core/BUILD.gn
+--- a/third_party/blink/renderer/core/BUILD.gn
++++ b/third_party/blink/renderer/core/BUILD.gn
+@@ -406,5 +406,6 @@ blink_core_sources("core") {
+    ":generate_eventhandler_names",
+    ":make_deprecation_info",
+    ":xml_ffi",
+    "//base",
++    "//components/ungoogled:ungoogled_switches",
+    "//components/attribution_reporting",
+@@ -432,5 +432,6 @@ blink_core_sources("core") {
+    "//third_party/blink/public:image_resources_grit",
+    "//third_party/blink/public:resources",
+    "//third_party/blink/public/common",
++    "//third_party/blink/common",
+    "//third_party/blink/public/mojom:web_feature_mojo_bindings",
 diff --git a/components/search_engines/template_url_service.cc b/components/search_engines/template_url_service.cc
 --- a/components/search_engines/template_url_service.cc
 +++ b/components/search_engines/template_url_service.cc
