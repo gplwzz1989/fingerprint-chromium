@@ -1644,8 +1644,25 @@ diff --git a/third_party/blink/renderer/core/BUILD.gn b/third_party/blink/render
     "//third_party/blink/public:image_resources_grit",
     "//third_party/blink/public:resources",
     "//third_party/blink/public/common",
-+    "//third_party/blink/common",
     "//third_party/blink/public/mojom:web_feature_mojo_bindings",
+diff --git a/third_party/blink/public/common/user_agent/user_agent_metadata.h b/third_party/blink/public/common/user_agent/user_agent_metadata.h
+--- a/third_party/blink/public/common/user_agent/user_agent_metadata.h
++++ b/third_party/blink/public/common/user_agent/user_agent_metadata.h
+@@ -103,11 +103,12 @@
+ bool BLINK_COMMON_EXPORT operator==(const UserAgentMetadata& a,
+                                     const UserAgentMetadata& b);
+ 
+ bool BLINK_COMMON_EXPORT operator==(const UserAgentOverride& a,
+                                     const UserAgentOverride& b);
+ 
+ 
+-void UpdateUserAgentMetadataFingerprint(UserAgentMetadata* metadata);
++void BLINK_COMMON_EXPORT UpdateUserAgentMetadataFingerprint(
++    UserAgentMetadata* metadata);
+ 
+-std::string GetUserAgentFingerprintBrandInfo();
++std::string BLINK_COMMON_EXPORT GetUserAgentFingerprintBrandInfo();
+ }  // namespace blink
 diff --git a/components/search_engines/template_url_service.cc b/components/search_engines/template_url_service.cc
 --- a/components/search_engines/template_url_service.cc
 +++ b/components/search_engines/template_url_service.cc
