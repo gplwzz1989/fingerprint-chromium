@@ -1746,3 +1746,12 @@ diff --git a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourci
 @@ -537,1 +537,1 @@
 -std::optional<std::string> GetAPIBodyPayload(std::string payload,
 +[[maybe_unused]] std::optional<std::string> GetAPIBodyPayload(std::string payload,
+
+diff --git a/content/browser/attribution_reporting/attribution_suitable_context.cc b/content/browser/attribution_reporting/attribution_suitable_context.cc
+--- a/content/browser/attribution_reporting/attribution_suitable_context.cc
++++ b/content/browser/attribution_reporting/attribution_suitable_context.cc
+@@ -37,5 +37,0 @@
+-bool UkmSourceIdAllowed(RenderFrameHostImpl* rfh) {
+-  return rfh->GetLifecycleState() !=
+-         RenderFrameHost::LifecycleState::kPrerendering;
+-}
