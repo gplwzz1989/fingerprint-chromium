@@ -1722,6 +1722,15 @@ diff --git a/components/translate/core/browser/translate_ranker_impl.cc b/compon
    return result;
 +#endif
  }
+diff --git a/components/autofill/core/browser/foundations/autofill_manager.cc b/components/autofill/core/browser/foundations/autofill_manager.cc
+--- a/components/autofill/core/browser/foundations/autofill_manager.cc
++++ b/components/autofill/core/browser/foundations/autofill_manager.cc
+@@ -789,2 +789,2 @@
+-            context.autofill_predictions = std::move(model_predictions);
++            break;
+@@ -792,2 +792,2 @@
+-            context.password_manager_predictions = std::move(model_predictions);
++            break;
 diff --git a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc b/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
 --- a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
 +++ b/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
