@@ -1702,3 +1702,9 @@ diff --git a/components/assist_ranker/ranker_url_fetcher.h b/components/assist_r
 @@ -76,1 +76,1 @@
 -  int retry_count_;
 +  [[maybe_unused]] int retry_count_;
+diff --git a/third_party/blink/renderer/modules/BUILD.gn b/third_party/blink/renderer/modules/BUILD.gn
+--- a/third_party/blink/renderer/modules/BUILD.gn
++++ b/third_party/blink/renderer/modules/BUILD.gn
+@@ -196,1 +196,2 @@
+     "//components/webrtc:thread_wrapper",
++    "//components/ungoogled:ungoogled_switches",
