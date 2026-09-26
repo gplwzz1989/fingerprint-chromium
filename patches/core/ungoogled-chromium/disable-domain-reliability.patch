@@ -707,7 +707,7 @@
        discarded_upload_count_++;
  
 -    if (discard_uploads_ || shutdown_) {
-+    if (true) {
++    if (/* 禁用不可达代码警告：DISABLES CODE */ (true)) {
        DVLOG(1) << "Discarding report instead of uploading.";
        UploadResult result;
        result.status = UploadResult::SUCCESS;
