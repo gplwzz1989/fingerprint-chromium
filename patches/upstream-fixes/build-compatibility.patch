@@ -1577,3 +1577,10 @@ diff --git a/v8/src/torque/implementation-visitor.cc b/v8/src/torque/implementat
 -        << "#include \"torque-generated/test/torque/test-torque-tq-inl.inc\"\n";
  
      // Generate forward declarations to avoid including any headers.
+diff --git a/v8/BUILD.gn b/v8/BUILD.gn
+--- a/v8/BUILD.gn
++++ b/v8/BUILD.gn
+@@ -148,2 +148,2 @@
+ # Use pre-generated static root pointer values from static-roots.h.
+- v8_enable_static_roots = ""
++ v8_enable_static_roots = false
