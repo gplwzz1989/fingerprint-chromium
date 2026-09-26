@@ -1690,3 +1690,15 @@ diff --git a/components/assist_ranker/ranker_url_fetcher.cc b/components/assist_
    return true;
 +#endif
  }
+diff --git a/components/assist_ranker/ranker_url_fetcher.cc b/components/assist_ranker/ranker_url_fetcher.cc
+--- a/components/assist_ranker/ranker_url_fetcher.cc
++++ b/components/assist_ranker/ranker_url_fetcher.cc
+@@ -24,1 +24,1 @@
+-const int kMaxRetry = 16;
++[[maybe_unused]] const int kMaxRetry = 16;
+diff --git a/components/assist_ranker/ranker_url_fetcher.h b/components/assist_ranker/ranker_url_fetcher.h
+--- a/components/assist_ranker/ranker_url_fetcher.h
++++ b/components/assist_ranker/ranker_url_fetcher.h
+@@ -76,1 +76,1 @@
+-  int retry_count_;
++  [[maybe_unused]] int retry_count_;
