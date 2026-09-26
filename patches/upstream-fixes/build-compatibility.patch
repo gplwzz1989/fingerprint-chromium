@@ -1562,3 +1562,18 @@ diff --git a/v8/src/objects/instance-type-inl.h b/v8/src/objects/instance-type-i
          {{FIRST_TURBOFAN_TYPE_TYPE, LAST_TURBOFAN_TYPE_TYPE},
           {StaticReadOnlyRoot::kTurbofanBitsetTypeMap,
            StaticReadOnlyRoot::kTurbofanOtherNumberConstantTypeMap}}}};
+diff --git a/v8/src/torque/implementation-visitor.cc b/v8/src/torque/implementation-visitor.cc
+--- a/v8/src/torque/implementation-visitor.cc
++++ b/v8/src/torque/implementation-visitor.cc
+@@ -5380,11 +5380,9 @@ void ImplementationVisitor::GenerateClassVerifiers(
+     cc_contents << "#include \"src/objects/all-objects-inl.h\"\n";
+ 
+     IncludeObjectMacrosScope object_macros(cc_contents);
+ 
+     NamespaceScope h_namespaces(h_contents, {"v8", "internal"});
+     NamespaceScope cc_namespaces(cc_contents, {"v8", "internal"});
+ 
+-    cc_contents
+-        << "#include \"torque-generated/test/torque/test-torque-tq-inl.inc\"\n";
+ 
+     // Generate forward declarations to avoid including any headers.
