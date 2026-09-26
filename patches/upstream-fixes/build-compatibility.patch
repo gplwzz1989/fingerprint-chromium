@@ -1763,3 +1763,16 @@ diff --git a/content/browser/file_system_access/file_system_access_safe_move_hel
 -  bool has_transient_user_activation_ GUARDED_BY_CONTEXT(sequence_checker_) =
 +  [[maybe_unused]] bool has_transient_user_activation_
 +      GUARDED_BY_CONTEXT(sequence_checker_) =
+
+diff --git a/components/browsing_data/content/browsing_data_model.cc b/components/browsing_data/content/browsing_data_model.cc
+--- a/components/browsing_data/content/browsing_data_model.cc
++++ b/components/browsing_data/content/browsing_data_model.cc
+@@ -475,1 +475,1 @@
+-void OnInterestGroupsLoaded(
++[[maybe_unused]] void OnInterestGroupsLoaded(
+@@ -488,1 +488,1 @@
+-void OnAttributionReportingLoaded(
++[[maybe_unused]] void OnAttributionReportingLoaded(
+@@ -500,1 +500,1 @@
+-void OnPrivateAggregationLoaded(
++[[maybe_unused]] void OnPrivateAggregationLoaded(
