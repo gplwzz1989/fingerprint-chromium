@@ -1514,3 +1514,11 @@ index 0000000000000000000000000000000000000000..b5eaca30f1ca71050d0df94514806969
 +#pragma endregion
 +
 +#endif // __WEBAUTHN_H_
+diff --git a/third_party/blink/common/BUILD.gn b/third_party/blink/common/BUILD.gn
+--- a/third_party/blink/common/BUILD.gn
++++ b/third_party/blink/common/BUILD.gn
+@@ -305,6 +305,7 @@ source_set("common") {
+   deps = [
+     "//base",
++    "//components/ungoogled:ungoogled_switches",
+     "//build:android_buildflags",
