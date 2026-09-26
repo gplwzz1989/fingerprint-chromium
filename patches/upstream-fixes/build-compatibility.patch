@@ -1627,3 +1627,6 @@ diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_par
      "BlinkMacSystemFont"
 -  };
 +  });
+@@ -241,1 +241,1 @@
+-  return basic_fonts.count(font_family) > 0;
++  return basic_fonts->count(font_family) > 0;
