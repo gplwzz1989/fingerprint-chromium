@@ -45,7 +45,8 @@
  
  void GCMClientImpl::InitializeMCSClient() {
    DCHECK(network_connection_tracker_);
-+  return;
++  if (network_connection_tracker_ != nullptr)
++    return;
    std::vector<GURL> endpoints;
    endpoints.push_back(gservices_settings_.GetMCSMainEndpoint());
    GURL fallback_endpoint = gservices_settings_.GetMCSFallbackEndpoint();
