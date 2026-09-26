@@ -1755,3 +1755,11 @@ diff --git a/content/browser/attribution_reporting/attribution_suitable_context.
 -  return rfh->GetLifecycleState() !=
 -         RenderFrameHost::LifecycleState::kPrerendering;
 -}
+
+diff --git a/content/browser/file_system_access/file_system_access_safe_move_helper.h b/content/browser/file_system_access/file_system_access_safe_move_helper.h
+--- a/content/browser/file_system_access/file_system_access_safe_move_helper.h
++++ b/content/browser/file_system_access/file_system_access_safe_move_helper.h
+@@ -96,1 +96,2 @@
+-  bool has_transient_user_activation_ GUARDED_BY_CONTEXT(sequence_checker_) =
++  [[maybe_unused]] bool has_transient_user_activation_
++      GUARDED_BY_CONTEXT(sequence_checker_) =
