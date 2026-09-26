@@ -1522,3 +1522,28 @@ diff --git a/third_party/blink/common/BUILD.gn b/third_party/blink/common/BUILD.
      "//base",
 +    "//components/ungoogled:ungoogled_switches",
      "//build:android_buildflags",
+     "//build:chromecast_buildflags",
+     "//media/capture:capture_base",
+     "//media/capture/mojom:video_capture_mojom_support",
+diff --git a/v8/src/builtins/frames.tq b/v8/src/builtins/frames.tq
+--- a/v8/src/builtins/frames.tq
++++ b/v8/src/builtins/frames.tq
+@@ -60,7 +60,7 @@ operator '.function' macro LoadFunctionFromFrame(f: Frame): JSFunction {
+ const kStandardFrameCallerFPOffset: constexpr int31
+    generates 'StandardFrameConstants::kCallerFPOffset';
+ 
+-operator '.caller' macro LoadCallerFromFrame(f: Frame): Frame {
++operator '.caller' macro _LoadCallerFromFrame(f: Frame): Frame {
+   const result: RawPtr = LoadPointerFromFrame(f, kStandardFrameCallerFPOffset);
+   return %RawDownCast<Frame>(result);
+ }
+@@ -100,7 +100,7 @@ operator '.context_or_frame_type' macro LoadContextOrFrameTypeFromFrame(
+       LoadObjectFromFrame(f, kStandardFrameContextOrFrameTypeOffset));
+ }
+ 
+-operator '==' macro FrameTypeEquals(f1: FrameType, f2: FrameType): bool {
++operator '==' macro _FrameTypeEquals(f1: FrameType, f2: FrameType): bool {
+   return TaggedEqual(f1, f2);
+ }
+ 
+ macro Cast<A : type extends Frame>(
