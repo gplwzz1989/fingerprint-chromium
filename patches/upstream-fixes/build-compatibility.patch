@@ -1792,6 +1792,13 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
 
+diff --git a/extensions/browser/updater/update_service.cc b/extensions/browser/updater/update_service.cc
+--- a/extensions/browser/updater/update_service.cc
++++ b/extensions/browser/updater/update_service.cc
+@@ -110,1 +110,1 @@ void UpdateService::OnCrxStateChange(
+-  bool should_perform_action_on_omaha_attributes = false;
++  [[maybe_unused]] bool should_perform_action_on_omaha_attributes = false;
+
 diff --git a/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc b/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
 --- a/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
 +++ b/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
