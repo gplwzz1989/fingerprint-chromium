@@ -1792,6 +1792,22 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
 
+diff --git a/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc b/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
+--- a/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
++++ b/components/safe_browsing/core/browser/safe_browsing_metrics_collector.cc
+@@ -27,1 +27,1 @@
+-const int kTimestampsMaxLength = 30;
++[[maybe_unused]] const int kTimestampsMaxLength = 30;
+@@ -32,1 +32,1 @@
+-const int kEventMaxDurationDay = 30;
++[[maybe_unused]] const int kEventMaxDurationDay = 30;
+@@ -42,1 +42,1 @@
+-std::string UserStateToPrefKey(const UserState& user_state) {
++[[maybe_unused]] std::string UserStateToPrefKey(const UserState& user_state) {
+@@ -46,1 +46,1 @@
+-base::Value TimeToPrefValue(const base::Time& time) {
++[[maybe_unused]] base::Value TimeToPrefValue(const base::Time& time) {
+
 diff --git a/chrome/common/google_url_loader_throttle.cc b/chrome/common/google_url_loader_throttle.cc
 --- a/chrome/common/google_url_loader_throttle.cc
 +++ b/chrome/common/google_url_loader_throttle.cc
