@@ -1792,6 +1792,16 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
 
+diff --git a/chrome/browser/media/router/discovery/mdns/dns_sd_device_lister.cc b/chrome/browser/media/router/discovery/mdns/dns_sd_device_lister.cc
+--- a/chrome/browser/media/router/discovery/mdns/dns_sd_device_lister.cc
++++ b/chrome/browser/media/router/discovery/mdns/dns_sd_device_lister.cc
+@@ -15,2 +15,3 @@
+-void FillServiceInfo(const ServiceDescription& service_description,
+-                     DnsSdService* service) {
++[[maybe_unused]] void FillServiceInfo(
++    const ServiceDescription& service_description,
++    DnsSdService* service) {
+
 diff --git a/extensions/browser/updater/update_service.cc b/extensions/browser/updater/update_service.cc
 --- a/extensions/browser/updater/update_service.cc
 +++ b/extensions/browser/updater/update_service.cc
