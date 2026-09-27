@@ -1792,6 +1792,21 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
 
+diff --git a/chrome/common/google_url_loader_throttle.cc b/chrome/common/google_url_loader_throttle.cc
+--- a/chrome/common/google_url_loader_throttle.cc
++++ b/chrome/common/google_url_loader_throttle.cc
+@@ -71,1 +71,2 @@
+-bool IsCoveredRequestBoundSessionStatus(RequestBoundSessionStatus status) {
++[[maybe_unused]] bool IsCoveredRequestBoundSessionStatus(
++    RequestBoundSessionStatus status) {
+
+diff --git a/chrome/common/google_url_loader_throttle.h b/chrome/common/google_url_loader_throttle.h
+--- a/chrome/common/google_url_loader_throttle.h
++++ b/chrome/common/google_url_loader_throttle.h
+@@ -91,1 +91,1 @@
+-  bool sends_cookies_ = false;
++  [[maybe_unused]] bool sends_cookies_ = false;
+
 diff --git a/components/security_interstitials/content/ssl_blocking_page_base.cc b/components/security_interstitials/content/ssl_blocking_page_base.cc
 --- a/components/security_interstitials/content/ssl_blocking_page_base.cc
 +++ b/components/security_interstitials/content/ssl_blocking_page_base.cc
