@@ -1776,3 +1776,14 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 @@ -500,1 +500,1 @@
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
+
+diff --git a/components/crash/core/app/crashpad.cc b/components/crash/core/app/crashpad.cc
+--- a/components/crash/core/app/crashpad.cc
++++ b/components/crash/core/app/crashpad.cc
+@@ -84,1 +84,1 @@ bool InitializeCrashpadImpl(bool initial_client,
+-#endif
++#else
+@@ -200,2 +200,3 @@ bool InitializeCrashpadImpl(bool initial_client,
+   }
+   return true;
++#endif
