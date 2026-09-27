@@ -1791,3 +1791,10 @@ diff --git a/components/browsing_data/content/browsing_data_model.cc b/component
 @@ -500,1 +500,1 @@
 -void OnPrivateAggregationLoaded(
 +[[maybe_unused]] void OnPrivateAggregationLoaded(
+
+diff --git a/components/security_interstitials/content/ssl_blocking_page_base.cc b/components/security_interstitials/content/ssl_blocking_page_base.cc
+--- a/components/security_interstitials/content/ssl_blocking_page_base.cc
++++ b/components/security_interstitials/content/ssl_blocking_page_base.cc
+@@ -17,1 +17,1 @@
+-PrefService* GetPrefs(content::WebContents* web_contents) {
++[[maybe_unused]] PrefService* GetPrefs(content::WebContents* web_contents) {
