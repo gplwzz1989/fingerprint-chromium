@@ -1846,3 +1846,29 @@ diff --git a/components/security_interstitials/content/ssl_blocking_page_base.cc
 @@ -17,1 +17,1 @@
 -PrefService* GetPrefs(content::WebContents* web_contents) {
 +[[maybe_unused]] PrefService* GetPrefs(content::WebContents* web_contents) {
+
+diff --git a/chrome/browser/search/search.cc b/chrome/browser/search/search.cc
+--- a/chrome/browser/search/search.cc
++++ b/chrome/browser/search/search.cc
+@@ -98,1 +98,2 @@
+-const TemplateURL* GetDefaultSearchProviderTemplateURL(Profile* profile) {
++[[maybe_unused]] const TemplateURL* GetDefaultSearchProviderTemplateURL(
++    Profile* profile) {
+@@ -145,1 +146,2 @@
+-bool IsURLAllowedForSupervisedUser(const GURL& url, Profile& profile) {
++[[maybe_unused]] bool IsURLAllowedForSupervisedUser(const GURL& url,
++                                                   Profile& profile) {
+
+diff --git a/chrome/browser/safe_browsing/advanced_protection_status_manager_desktop.cc b/chrome/browser/safe_browsing/advanced_protection_status_manager_desktop.cc
+--- a/chrome/browser/safe_browsing/advanced_protection_status_manager_desktop.cc
++++ b/chrome/browser/safe_browsing/advanced_protection_status_manager_desktop.cc
+@@ -74,1 +74,1 @@
+-  if (false) {
++  if ((false)) {
+
+diff --git a/components/embedder_support/BUILD.gn b/components/embedder_support/BUILD.gn
+--- a/components/embedder_support/BUILD.gn
++++ b/components/embedder_support/BUILD.gn
+@@ -57,1 +57,2 @@ static_library("user_agent") {
+     ":embedder_support",
++    "//components/ungoogled:ungoogled_switches",
