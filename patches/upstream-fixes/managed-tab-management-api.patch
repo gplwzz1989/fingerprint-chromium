@@ -1,0 +1,301 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -10,3 +10,4 @@
+ #include "base/gtest_prod_util.h"
+ #include "base/values.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/common/url_constants.h"
+@@ -116,2 +116,11 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
+  private:
++  void HandleGetManagedTabs(const base::Value::List& args);
++  void HandleCreateManagedTab(const base::Value::List& args);
++  void HandleActivateManagedTab(const base::Value::List& args);
++  void HandleNavigateManagedTab(const base::Value::List& args);
++  void HandleCloseManagedTab(const base::Value::List& args);
++  void HandleGetManagedTabStorageSnapshot(const base::Value::List& args);
++  void OnManagedTabStorageSnapshot(
++      base::Value callback_id,
++      chrome::ManagedTabContext::StorageSnapshot snapshot);
+   void HandleGetExtensions(const base::Value::List& args);
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -40,3 +40,4 @@
+ #include "chrome/browser/enterprise/identifiers/profile_id_service_factory.h"
+ #include "chrome/browser/enterprise/reporting/prefs.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/media/webrtc/multi_capture/multi_capture_data_service.h"
+@@ -42,2 +43,3 @@
+ #include "chrome/browser/signin/identity_manager_factory.h"
++#include "chrome/browser/ui/browser_finder.h"
+ #include "chrome/browser/ui/managed_ui.h"
+@@ -64,3 +66,4 @@
+ #include "extensions/buildflags/buildflags.h"
+ #include "management_ui_handler.h"
++#include "net/cookies/canonical_cookie.h"
+ #include "net/base/load_flags.h"
+@@ -88,3 +91,5 @@
+ #include "extensions/common/permissions/permissions_data.h"
+ 
++using chrome::ManagedTabContext;
++
+ #if BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
+@@ -217,2 +222,28 @@ void ManagementUIHandler::RegisterMessages() {
+   web_ui()->RegisterMessageCallback(
++      "getManagedTabs",
++      base::BindRepeating(&ManagementUIHandler::HandleGetManagedTabs,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "createManagedTab",
++      base::BindRepeating(&ManagementUIHandler::HandleCreateManagedTab,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "activateManagedTab",
++      base::BindRepeating(&ManagementUIHandler::HandleActivateManagedTab,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "navigateManagedTab",
++      base::BindRepeating(&ManagementUIHandler::HandleNavigateManagedTab,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "closeManagedTab",
++      base::BindRepeating(&ManagementUIHandler::HandleCloseManagedTab,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getManagedTabStorageSnapshot",
++      base::BindRepeating(
++          &ManagementUIHandler::HandleGetManagedTabStorageSnapshot,
++          base::Unretained(this)));
++
++  web_ui()->RegisterMessageCallback(
+       "getContextualManagedData",
+@@ -715,3 +746,149 @@ void ManagementUIHandler::RemoveManagementPromotionObserver(
+ }
+ 
++void ManagementUIHandler::HandleGetManagedTabs(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.empty()) {
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], ManagedTabContext::GetAllState());
++}
++
++void ManagementUIHandler::HandleCreateManagedTab(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.empty()) {
++    return;
++  }
++
++  GURL url;
++  if (args.size() > 1) {
++    if (!args[1].is_string()) {
++      RejectJavascriptCallback(args[0], base::Value("URL 参数无效"));
++      return;
++    }
++    url = GURL(args[1].GetString());
++    if (!url.is_empty() && !url.is_valid()) {
++      RejectJavascriptCallback(args[0], base::Value("URL 参数无效"));
++      return;
++    }
++  }
++
++  Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
++  ManagedTabContext* context =
++      ManagedTabContext::CreateNewTab(browser, url);
++  if (!context) {
++    RejectJavascriptCallback(args[0], base::Value("无法创建原生 Tab"));
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], context->GetState());
++}
++
++void ManagementUIHandler::HandleActivateManagedTab(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_string()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("缺少原生 Tab 标识"));
++    }
++    return;
++  }
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context || !context->Activate()) {
++    RejectJavascriptCallback(args[0], base::Value("无法激活原生 Tab"));
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++void ManagementUIHandler::HandleNavigateManagedTab(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 3 || !args[1].is_string() || !args[2].is_string()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("原生 Tab 导航参数无效"));
++    }
++    return;
++  }
++
++  const GURL url(args[2].GetString());
++  if (!url.is_valid()) {
++    RejectJavascriptCallback(args[0], base::Value("URL 参数无效"));
++    return;
++  }
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context || !context->NavigateTo(url)) {
++    RejectJavascriptCallback(args[0], base::Value("无法导航原生 Tab"));
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++void ManagementUIHandler::HandleCloseManagedTab(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_string()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("缺少原生 Tab 标识"));
++    }
++    return;
++  }
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context || !context->Close()) {
++    RejectJavascriptCallback(args[0], base::Value("无法关闭原生 Tab"));
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++void ManagementUIHandler::HandleGetManagedTabStorageSnapshot(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_string()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("缺少原生 Tab 标识"));
++    }
++    return;
++  }
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context) {
++    RejectJavascriptCallback(args[0], base::Value("原生 Tab 不存在"));
++    return;
++  }
++
++  context->GetStorageSnapshot(base::BindOnce(
++      &ManagementUIHandler::OnManagedTabStorageSnapshot,
++      weak_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void ManagementUIHandler::OnManagedTabStorageSnapshot(
++    base::Value callback_id,
++    ManagedTabContext::StorageSnapshot snapshot) {
++  base::Value::List cookies;
++  for (const net::CanonicalCookie& cookie : snapshot.cookies) {
++    base::Value::Dict cookie_data;
++    cookie_data.Set("name", cookie.Name());
++    cookie_data.Set("value", cookie.Value());
++    cookie_data.Set("domain", cookie.Domain());
++    cookie_data.Set("path", cookie.Path());
++    cookie_data.Set("secure", cookie.IsSecure());
++    cookie_data.Set("http_only", cookie.IsHttpOnly());
++    cookies.Append(std::move(cookie_data));
++  }
++
++  base::Value::Dict result;
++  result.Set("cookies", std::move(cookies));
++  result.Set("local_storage", std::move(snapshot.local_storage));
++  ResolveJavascriptCallback(callback_id, result);
++}
++
+ void ManagementUIHandler::HandleGetExtensions(const base::Value::List& args) {
+diff --git a/chrome/browser/resources/management/management_browser_proxy.ts b/chrome/browser/resources/management/management_browser_proxy.ts
+--- a/chrome/browser/resources/management/management_browser_proxy.ts
++++ b/chrome/browser/resources/management/management_browser_proxy.ts
+@@ -57,5 +57,30 @@ export interface ThreatProtectionInfo {
+   info: ThreatProtectionPermission[];
+   description: string;
+ }
+ 
++export interface ManagedTabState {
++  id: string;
++  url: string;
++  title: string;
++  load_progress: number;
++  storage_partition: string;
++  storage_partition_persistent: boolean;
++  hardware_concurrency: number;
++  user_agent: string;
++}
++
++export interface ManagedTabCookie {
++  name: string;
++  value: string;
++  domain: string;
++  path: string;
++  secure: boolean;
++  http_only: boolean;
++}
++
++export interface ManagedTabStorageSnapshot {
++  cookies: ManagedTabCookie[];
++  local_storage: {[key: string]: string};
++}
++
+ // <if expr="is_chromeos">
+@@ -123,2 +123,14 @@ export interface ManagementBrowserProxy {
+ export interface ManagementBrowserProxy {
++  getManagedTabs(): Promise<ManagedTabState[]>;
++
++  createManagedTab(url?: string): Promise<ManagedTabState>;
++
++  activateManagedTab(id: string): Promise<boolean>;
++
++  navigateManagedTab(id: string, url: string): Promise<boolean>;
++
++  closeManagedTab(id: string): Promise<boolean>;
++
++  getManagedTabStorageSnapshot(id: string): Promise<ManagedTabStorageSnapshot>;
++
+   getExtensions(): Promise<Extension[]>;
+@@ -190,2 +190,27 @@ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
+ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
++  getManagedTabs() {
++    return sendWithPromise('getManagedTabs');
++  }
++
++  createManagedTab(url?: string) {
++    return url === undefined ? sendWithPromise('createManagedTab') :
++                               sendWithPromise('createManagedTab', url);
++  }
++
++  activateManagedTab(id: string) {
++    return sendWithPromise('activateManagedTab', id);
++  }
++
++  navigateManagedTab(id: string, url: string) {
++    return sendWithPromise('navigateManagedTab', id, url);
++  }
++
++  closeManagedTab(id: string) {
++    return sendWithPromise('closeManagedTab', id);
++  }
++
++  getManagedTabStorageSnapshot(id: string) {
++    return sendWithPromise('getManagedTabStorageSnapshot', id);
++  }
++
+   getExtensions() {
++
+  void HandleGetExtensions(const base::Value::List& args);
