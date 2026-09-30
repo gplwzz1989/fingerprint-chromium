@@ -41,7 +41,7 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 +
  // static
  std::vector<ManagedTabContext*> ManagedTabContext::GetAll() {
-@@ -303,14 +303,22 @@
+@@ -303,14 +303,25 @@
  // static
  ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
                                                      const GURL& url) {
@@ -57,6 +57,9 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 +    const GURL& url,
 +    const std::string& managed_tab_id) {
 +  if (!browser || !IsValidId(managed_tab_id)) {
++    return nullptr;
++  }
++  if (FindById(managed_tab_id)) {
 +    return nullptr;
 +  }
 +
@@ -78,7 +81,7 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
 --- a/chrome/browser/ui/webui/management/management_ui_handler.cc
 +++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
-@@ -757,9 +758,21 @@ void ManagementUIHandler::HandleCreateManagedTab(
+@@ -757,9 +758,25 @@ void ManagementUIHandler::HandleCreateManagedTab(
      }
    }
  
@@ -90,6 +93,10 @@ diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrom
 +      return;
 +    }
 +    account_id = args[2].GetString();
++  }
++  if (!account_id.empty() && ManagedTabContext::FindById(account_id)) {
++    RejectJavascriptCallback(args[0], base::Value("账号已在其他 Tab 中打开"));
++    return;
 +  }
 +
    Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
