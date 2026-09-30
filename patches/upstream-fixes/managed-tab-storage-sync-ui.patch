@@ -1,0 +1,110 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -22,6 +22,15 @@ export interface ManagedTabCookie {
+   path: string;
+   secure: boolean;
+   http_only: boolean;
++  creation?: number;
++  last_access?: number;
++  expires?: number|null;
++  same_site?: number;
++  priority?: number;
++  partition_key?: {
++    top_level_site: string;
++    has_cross_site_ancestor: boolean;
++  };
+ }
+ 
+ export interface ManagedTabStorageSnapshot {
+@@ -29,3 +39,8 @@ export interface ManagedTabStorageSnapshot {
+   cookies: ManagedTabCookie[];
+   local_storage: {[key: string]: string};
++  storage_url?: string;
++  fingerprint?: {
++    user_agent: string;
++    hardware_concurrency: number;
++  };
+ }
+@@ -46,4 +60,6 @@ export interface FingerprintManagerBrowserProxy {
+   closeManagedTab(id: string): Promise<boolean>;
+   getManagedTabStorageSnapshot(
+       id: string): Promise<ManagedTabStorageSnapshot>;
++  writeManagedTabStorageSnapshot(
++      id: string, snapshot: ManagedTabStorageSnapshot): Promise<boolean>;
+ }
+@@ -84,5 +100,10 @@ export class FingerprintManagerBrowserProxyImpl
+   getManagedTabStorageSnapshot(id: string) {
+     return sendWithPromise('getManagedTabStorageSnapshot', id);
+   }
++
++  writeManagedTabStorageSnapshot(
++      id: string, snapshot: ManagedTabStorageSnapshot) {
++    return sendWithPromise('writeManagedTabStorageSnapshot', id, snapshot);
++  }
+ 
+   static getInstance(): FingerprintManagerBrowserProxy {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -210,5 +210,47 @@ export class FingerprintManagerUiElement extends
+     this.managedTabError_ = '存储快照已下载';
+   }
++
++  protected onImportStorageSnapshot_(id: string) {
++    const input = document.createElement('input');
++    input.type = 'file';
++    input.accept = '.json,application/json';
++    input.addEventListener('change', () => {
++      const file = input.files?.[0];
++      if (!file) {
++        return;
++      }
++
++      file.text().then(text => {
++        let snapshot: ManagedTabStorageSnapshot;
++        try {
++          snapshot = JSON.parse(text) as ManagedTabStorageSnapshot;
++        } catch {
++          this.managedTabError_ = '导入文件不是有效的 JSON';
++          return;
++        }
++
++        if (!snapshot || !Array.isArray(snapshot.cookies) ||
++            !snapshot.local_storage ||
++            typeof snapshot.local_storage !== 'object') {
++          this.managedTabError_ = '导入文件不是有效的存储快照';
++          return;
++        }
++
++        this.managedTabError_ = '';
++        this.browserProxy_.writeManagedTabStorageSnapshot(id, snapshot).then(
++            () => {
++              this.managedTabError_ = '存储与指纹配置已写入该 Tab';
++              this.getManagedTabs_();
++            },
++            () => {
++              this.managedTabError_ = '写入存储快照失败，请检查页面状态后重试';
++            });
++      }, () => {
++        this.managedTabError_ = '读取导入文件失败，请重试';
++      });
++    });
++    input.click();
++  }
+ 
+   protected getTabIndex_(index: number): string {
+     return String(index + 1).padStart(2, '0');
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -141,5 +141,9 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                         this.storageSnapshots_[tab.id] ? '收起存储' : '查看存储'}
+                   </button>
++                  <button class="tool-button" type="button"
++                      @click="${() => this.onImportStorageSnapshot_(tab.id)}">
++                    导入 JSON
++                  </button>
+                 </div>
+ 
+                 <div class="fingerprint-config">

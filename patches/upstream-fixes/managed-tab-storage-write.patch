@@ -1,0 +1,534 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -38,4 +38,6 @@ class ManagedTabContext final
+   using StorageSnapshotCallback =
+       base::OnceCallback<void(StorageSnapshot snapshot)>;
++  using StorageWriteCallback =
++      base::OnceCallback<void(bool success, std::string error)>;
+ 
+   ManagedTabContext(const ManagedTabContext&) = delete;
+@@ -76,4 +79,9 @@ class ManagedTabContext final
+   // its current primary main frame without modifying page state.
+   void GetStorageSnapshot(StorageSnapshotCallback callback);
++
++  // Replaces the cookies in this tab's partition and the localStorage values
++  // of its current primary main frame from a validated account snapshot.
++  void WriteStorageSnapshot(const base::Value::Dict& snapshot,
++                            StorageWriteCallback callback);
+ 
+  private:
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -4,5 +4,10 @@
+ #include "chrome/browser/ui/browser_tab_strip_model_delegate.h"
+ 
++#include <cmath>
++#include <memory>
++#include <optional>
+ #include <stddef.h>
++#include <utility>
+ 
++#include "base/barrier_closure.h"
+ #include "base/command_line.h"
+@@ -12,4 +16,5 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/json/json_writer.h"
+ #include "base/strings/utf_string_conversions.h"
+@@ -66,4 +71,5 @@
+ #include "content/public/browser/web_contents_delegate.h"
+ #include "services/network/public/mojom/cookie_manager.mojom.h"
+ #include "third_party/blink/public/common/web_preferences/web_preferences.h"
++#include "net/cookies/cookie_partition_key.h"
+ #include "ui/base/page_transition_types.h"
+@@ -93,4 +99,132 @@ void FinishStorageSnapshot(ManagedTabContext::StorageSnapshotCallback callback,
+   std::move(callback).Run(std::move(snapshot));
+ }
++
++struct StorageWriteCompletion {
++  explicit StorageWriteCompletion(
++      ManagedTabContext::StorageWriteCallback callback)
++      : callback(std::move(callback)) {}
++
++  ManagedTabContext::StorageWriteCallback callback;
++  bool cookies_succeeded = true;
++  bool cookies_finished = false;
++  bool local_storage_succeeded = false;
++  bool local_storage_finished = false;
++};
++
++void MaybeFinishStorageWrite(
++    const std::shared_ptr<StorageWriteCompletion>& completion) {
++  if (!completion->cookies_finished || !completion->local_storage_finished) {
++    return;
++  }
++
++  const bool success = completion->cookies_succeeded &&
++                       completion->local_storage_succeeded;
++  std::move(completion->callback)
++      .Run(success, success ? std::string() : "存储数据写入失败");
++}
++
++void OnCookieWriteResult(
++    const std::shared_ptr<StorageWriteCompletion>& completion,
++    const base::RepeatingClosure& done,
++    net::CookieAccessResult result) {
++  completion->cookies_succeeded &= result.status.IsInclude();
++  done.Run();
++}
++
++void WriteCanonicalCookies(
++    network::mojom::CookieManager* cookie_manager,
++    const std::shared_ptr<
++        std::vector<std::unique_ptr<net::CanonicalCookie>>>& cookies,
++    net::CookieOptions cookie_options,
++    const std::shared_ptr<StorageWriteCompletion>& completion) {
++  const base::RepeatingClosure cookies_done = base::BarrierClosure(
++      cookies->size(),
++      base::BindOnce(
++          [](const std::shared_ptr<StorageWriteCompletion>& completion) {
++            completion->cookies_finished = true;
++            MaybeFinishStorageWrite(completion);
++          },
++          completion));
++
++  for (const auto& cookie : *cookies) {
++    const std::string cookie_host = cookie->Domain().front() == '.'
++                                        ? cookie->Domain().substr(1)
++                                        : cookie->Domain();
++    const GURL source_url(
++        std::string(cookie->IsSecure() ? "https://" : "http://") +
++        cookie_host + "/");
++    cookie_manager->SetCanonicalCookie(
++        *cookie, source_url, cookie_options,
++        base::BindOnce(&OnCookieWriteResult, completion, cookies_done));
++  }
++  if (cookies->empty()) {
++    completion->cookies_finished = true;
++    MaybeFinishStorageWrite(completion);
++  }
++}
++
++void OnCookiesCleared(
++    network::mojom::CookieManager* cookie_manager,
++    const std::shared_ptr<
++        std::vector<std::unique_ptr<net::CanonicalCookie>>>& cookies,
++    net::CookieOptions cookie_options,
++    const std::shared_ptr<StorageWriteCompletion>& completion,
++    uint32_t) {
++  WriteCanonicalCookies(cookie_manager, cookies, std::move(cookie_options),
++                        completion);
++}
++
++void OnLocalStorageWriteResult(
++    const std::shared_ptr<StorageWriteCompletion>& completion,
++    base::Value result) {
++  completion->local_storage_succeeded =
++      result.is_bool() && result.GetBool();
++  completion->local_storage_finished = true;
++  MaybeFinishStorageWrite(completion);
++}
++
++bool GetCookieTime(const base::Value::Dict& cookie,
++                   const char* key,
++                   base::Time* result) {
++  const base::Value* value = cookie.Find(key);
++  if (!value) {
++    *result = base::Time::Now();
++    return true;
++  }
++
++  std::optional<double> milliseconds = value->GetIfDouble();
++  if (!milliseconds) {
++    if (std::optional<int> integer = value->GetIfInt()) {
++      milliseconds = *integer;
++    }
++  }
++  if (!milliseconds || !std::isfinite(*milliseconds)) {
++    return false;
++  }
++
++  *result = base::Time::FromJsTime(*milliseconds);
++  return true;
++}
++
++bool GetCookieExpiry(const base::Value::Dict& cookie, base::Time* result) {
++  const base::Value* value = cookie.Find("expires");
++  if (!value || value->is_none()) {
++    *result = base::Time();
++    return true;
++  }
++
++  std::optional<double> milliseconds = value->GetIfDouble();
++  if (!milliseconds) {
++    if (std::optional<int> integer = value->GetIfInt()) {
++      milliseconds = *integer;
++    }
++  }
++  if (!milliseconds || !std::isfinite(*milliseconds)) {
++    return false;
++  }
++
++  *result = base::Time::FromJsTime(*milliseconds);
++  return true;
++}
+ 
+ }  // namespace
+@@ -359,5 +449,171 @@ void ManagedTabContext::OnCookiesForStorageSnapshot(
+       ISOLATED_WORLD_ID_CHROME_INTERNAL);
+ }
++
++void ManagedTabContext::WriteStorageSnapshot(
++    const base::Value::Dict& snapshot,
++    StorageWriteCallback callback) {
++  if (!web_contents()) {
++    std::move(callback).Run(false, "原生 Tab 不可用");
++    return;
++  }
++
++  const base::Value::List* cookies = snapshot.FindList("cookies");
++  const base::Value::Dict* local_storage =
++      snapshot.FindDict("local_storage");
++  if (!cookies || !local_storage || cookies->size() > 5000) {
++    std::move(callback).Run(false, "存储快照格式无效");
++    return;
++  }
++
++  std::string local_storage_json;
++  if (!base::JSONWriter::Write(*local_storage, &local_storage_json) ||
++      local_storage_json.size() > 10 * 1024 * 1024) {
++    std::move(callback).Run(false, "LocalStorage 数据过大或格式无效");
++    return;
++  }
++  for (const auto& entry : *local_storage) {
++    if (!entry.second.is_string() || entry.first.size() > 1024 ||
++        entry.second.GetString().size() > 1024 * 1024) {
++      std::move(callback).Run(false, "LocalStorage 数据格式无效");
++      return;
++    }
++  }
++
++  std::vector<std::unique_ptr<net::CanonicalCookie>> canonical_cookies;
++  canonical_cookies.reserve(cookies->size());
++  for (const base::Value& value : *cookies) {
++    const base::Value::Dict* cookie = value.GetIfDict();
++    const std::string* name = cookie ? cookie->FindString("name") : nullptr;
++    const std::string* cookie_value =
++        cookie ? cookie->FindString("value") : nullptr;
++    const std::string* domain =
++        cookie ? cookie->FindString("domain") : nullptr;
++    const std::string* path = cookie ? cookie->FindString("path") : nullptr;
++    const std::optional<bool> secure = cookie
++                                           ? cookie->FindBool("secure")
++                                           : std::nullopt;
++    const std::optional<bool> http_only = cookie
++                                              ? cookie->FindBool("http_only")
++                                              : std::nullopt;
++    if (!cookie || !name || !cookie_value || !domain || !path ||
++        !secure || !http_only || name->size() > 4096 ||
++        cookie_value->size() > 4096 || domain->empty() || path->empty()) {
++      std::move(callback).Run(false, "Cookie 数据格式无效");
++      return;
++    }
++
++    const std::string cookie_host =
++        domain->front() == '.' ? domain->substr(1) : *domain;
++    const GURL source_url(std::string(*secure ? "https://" : "http://") +
++                          cookie_host + "/");
++    if (!source_url.is_valid() || !source_url.has_host()) {
++      std::move(callback).Run(false, "Cookie 域名无效");
++      return;
++    }
++
++    int same_site_value =
++        static_cast<int>(net::CookieSameSite::UNSPECIFIED);
++    if (std::optional<int> value = cookie->FindInt("same_site")) {
++      same_site_value = *value;
++    }
++    if (same_site_value < -1 || same_site_value > 2) {
++      std::move(callback).Run(false, "Cookie SameSite 配置无效");
++      return;
++    }
++
++    int priority_value = net::COOKIE_PRIORITY_DEFAULT;
++    if (std::optional<int> value = cookie->FindInt("priority")) {
++      priority_value = *value;
++    }
++    if (priority_value < net::COOKIE_PRIORITY_LOW ||
++        priority_value > net::COOKIE_PRIORITY_HIGH) {
++      std::move(callback).Run(false, "Cookie 优先级配置无效");
++      return;
++    }
++
++    base::Time creation_time;
++    base::Time last_access_time;
++    base::Time expiry_time;
++    if (!GetCookieTime(*cookie, "creation", &creation_time) ||
++        !GetCookieTime(*cookie, "last_access", &last_access_time) ||
++        !GetCookieExpiry(*cookie, &expiry_time)) {
++      std::move(callback).Run(false, "Cookie 时间字段无效");
++      return;
++    }
++
++    std::optional<net::CookiePartitionKey> partition_key;
++    if (const base::Value::Dict* serialized_key =
++            cookie->FindDict("partition_key")) {
++      const std::string* top_level_site =
++          serialized_key->FindString("top_level_site");
++      const std::optional<bool> cross_site_ancestor =
++          serialized_key->FindBool("has_cross_site_ancestor");
++      if (!top_level_site || !cross_site_ancestor) {
++        std::move(callback).Run(false, "Cookie 分区键无效");
++        return;
++      }
++      auto parsed_key = net::CookiePartitionKey::FromUntrustedInput(
++          *top_level_site, *cross_site_ancestor);
++      if (!parsed_key.has_value()) {
++        std::move(callback).Run(false, "Cookie 分区键无效");
++        return;
++      }
++      partition_key = std::move(parsed_key.value());
++    }
++
++    net::CookieInclusionStatus status;
++    auto canonical_cookie = net::CanonicalCookie::CreateSanitizedCookie(
++        source_url, *name, *cookie_value, *domain, *path, creation_time,
++        expiry_time, last_access_time, *secure, *http_only,
++        static_cast<net::CookieSameSite>(same_site_value),
++        static_cast<net::CookiePriority>(priority_value),
++        std::move(partition_key), &status);
++    if (!canonical_cookie) {
++      std::move(callback).Run(false, "Cookie 数据无法写入");
++      return;
++    }
++    canonical_cookies.push_back(std::move(canonical_cookie));
++  }
++
++  content::RenderFrameHost* frame_host = web_contents()->GetPrimaryMainFrame();
++  if (!frame_host || !frame_host->IsRenderFrameLive()) {
++    std::move(callback).Run(false, "当前页面尚未准备好写入 LocalStorage");
++    return;
++  }
++
++  auto completion = std::make_shared<StorageWriteCompletion>(
++      std::move(callback));
++  content::StoragePartition* storage_partition =
++      web_contents()->GetBrowserContext()->GetStoragePartition(
++          storage_partition_config_);
++  auto* cookie_manager =
++      storage_partition->GetCookieManagerForBrowserProcess();
++  net::CookieOptions cookie_options;
++  cookie_options.set_include_httponly();
++  cookie_options.set_same_site_cookie_context(
++      net::CookieOptions::SameSiteCookieContext::MakeInclusiveForSet());
++  auto cookies_to_write = std::make_shared<
++      std::vector<std::unique_ptr<net::CanonicalCookie>>>(
++      std::move(canonical_cookies));
++  cookie_manager->DeleteCookies(
++      network::mojom::CookieDeletionFilter::New(),
++      base::BindOnce(&OnCookiesCleared, cookie_manager, cookies_to_write,
++                     cookie_options, completion));
++
++  const std::u16string local_storage_script = base::UTF8ToUTF16(
++      "(() => {"
++      "const snapshot = " +
++      local_storage_json +
++      "; localStorage.clear();"
++      "for (const [key, value] of Object.entries(snapshot)) "
++      "localStorage.setItem(key, value); return true;"
++      "})()");
++  frame_host->ExecuteJavaScriptInIsolatedWorld(
++      local_storage_script,
++      base::BindOnce(&OnLocalStorageWriteResult, completion),
++      ISOLATED_WORLD_ID_CHROME_INTERNAL);
++  MaybeFinishStorageWrite(completion);
++}
+
+ ////////////////////////////////////////////////////////////////////////////////
+ // BrowserTabStripModelDelegate, public:
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -119,6 +119,14 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
+   void HandleCloseManagedTab(const base::Value::List& args);
+   void HandleGetManagedTabStorageSnapshot(const base::Value::List& args);
++  void HandleWriteManagedTabStorageSnapshot(const base::Value::List& args);
+   void OnManagedTabStorageSnapshot(
+       base::Value callback_id,
++      std::string tab_id,
+       chrome::ManagedTabContext::StorageSnapshot snapshot);
++  void OnManagedTabStorageSnapshotWritten(
++      base::Value callback_id,
++      std::string tab_id,
++      base::Value::Dict fingerprint,
++      bool success,
++      std::string error);
+   void HandleGetExtensions(const base::Value::List& args);
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -6,3 +6,4 @@
+ #include <algorithm>
+ #include <memory>
++#include <optional>
+ #include <set>
+@@ -47,3 +48,5 @@
+ #include "management_ui_handler.h"
+ #include "net/cookies/canonical_cookie.h"
++#include "net/cookies/cookie_partition_key.h"
++#include "url/origin.h"
+ #include "net/base/load_flags.h"
+@@ -219,6 +221,11 @@ void ManagementUIHandler::RegisterMessages() {
+       base::BindRepeating(
+           &ManagementUIHandler::HandleGetManagedTabStorageSnapshot,
+           base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "writeManagedTabStorageSnapshot",
++      base::BindRepeating(
++          &ManagementUIHandler::HandleWriteManagedTabStorageSnapshot,
++          base::Unretained(this)));
+ 
+   web_ui()->RegisterMessageCallback(
+       "getContextualManagedData",
+@@ -881,8 +888,9 @@ void ManagementUIHandler::HandleGetManagedTabStorageSnapshot(
+   context->GetStorageSnapshot(base::BindOnce(
+       &ManagementUIHandler::OnManagedTabStorageSnapshot,
+-      weak_factory_.GetWeakPtr(), args[0].Clone()));
++      weak_factory_.GetWeakPtr(), args[0].Clone(), args[1].GetString()));
+ }
+ 
+ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+     base::Value callback_id,
++    std::string tab_id,
+     ManagedTabContext::StorageSnapshot snapshot) {
+@@ -896,11 +903,38 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+     cookie_data.Set("path", cookie.Path());
+     cookie_data.Set("secure", cookie.IsSecure());
+     cookie_data.Set("http_only", cookie.IsHttpOnly());
++    cookie_data.Set("creation", cookie.CreationDate().ToJsTime());
++    cookie_data.Set("last_access", cookie.LastAccessDate().ToJsTime());
++    cookie_data.Set("expires", cookie.IsPersistent()
++                                   ? base::Value(cookie.ExpiryDate().ToJsTime())
++                                   : base::Value());
++    cookie_data.Set("same_site", static_cast<int>(cookie.SameSite()));
++    cookie_data.Set("priority", static_cast<int>(cookie.Priority()));
++    auto serialized_partition_key =
++        net::CookiePartitionKey::Serialize(cookie.PartitionKey());
++    if (serialized_partition_key.has_value()) {
++      base::Value::Dict partition_key;
++      partition_key.Set("top_level_site",
++                        serialized_partition_key->TopLevelSite());
++      partition_key.Set("has_cross_site_ancestor",
++                        serialized_partition_key->has_cross_site_ancestor());
++      cookie_data.Set("partition_key", std::move(partition_key));
++    }
+     cookies.Append(std::move(cookie_data));
+   }
+ 
+   base::Value::Dict result;
+   result.Set("cookies", std::move(cookies));
+   result.Set("local_storage", std::move(snapshot.local_storage));
++  if (ManagedTabContext* context = ManagedTabContext::FindById(tab_id)) {
++    base::Value::Dict state = context->GetState();
++    base::Value::Dict fingerprint;
++    const std::string* user_agent = state.FindString("user_agent");
++    fingerprint.Set("user_agent", user_agent ? *user_agent : "");
++    fingerprint.Set("hardware_concurrency",
++                    state.FindInt("hardware_concurrency").value_or(0));
++    result.Set("fingerprint", std::move(fingerprint));
++    result.Set("storage_url", context->current_url().spec());
++  }
+   ResolveJavascriptCallback(callback_id, result);
+ }
+@@ -907,3 +940,88 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+ 
++void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 3 || !args[1].is_string() || !args[2].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("存储写入参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& snapshot = args[2].GetDict();
++  if (!snapshot.FindList("cookies") || !snapshot.FindDict("local_storage")) {
++    RejectJavascriptCallback(args[0], base::Value("存储快照格式无效"));
++    return;
++  }
++
++  base::Value::Dict fingerprint;
++  if (const base::Value* fingerprint_value = snapshot.Find("fingerprint")) {
++    if (!fingerprint_value->is_dict()) {
++      RejectJavascriptCallback(args[0], base::Value("指纹配置格式无效"));
++      return;
++    }
++    const base::Value::Dict& input = fingerprint_value->GetDict();
++    const std::string* user_agent = input.FindString("user_agent");
++    const std::optional<int> hardware_concurrency =
++        input.FindInt("hardware_concurrency");
++    if (!user_agent || user_agent->size() > 512 ||
++        !hardware_concurrency || *hardware_concurrency < 0 ||
++        *hardware_concurrency > 64) {
++      RejectJavascriptCallback(args[0], base::Value("指纹配置格式无效"));
++      return;
++    }
++    fingerprint = input.Clone();
++  }
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context) {
++    RejectJavascriptCallback(args[0], base::Value("原生 Tab 不存在"));
++    return;
++  }
++
++  if (const std::string* storage_url = snapshot.FindString("storage_url")) {
++    const GURL snapshot_url(*storage_url);
++    if (!snapshot_url.is_valid() ||
++        url::Origin::Create(snapshot_url) !=
++            url::Origin::Create(context->current_url())) {
++      RejectJavascriptCallback(
++          args[0], base::Value("LocalStorage 所属来源与当前页面不一致，请先导航到对应网站"));
++      return;
++    }
++  }
++
++  context->WriteStorageSnapshot(
++      snapshot,
++      base::BindOnce(&ManagementUIHandler::OnManagedTabStorageSnapshotWritten,
++                     weak_factory_.GetWeakPtr(), args[0].Clone(),
++                     args[1].GetString(), std::move(fingerprint)));
++}
++
++void ManagementUIHandler::OnManagedTabStorageSnapshotWritten(
++    base::Value callback_id,
++    std::string tab_id,
++    base::Value::Dict fingerprint,
++    bool success,
++    std::string error) {
++  if (!success) {
++    RejectJavascriptCallback(callback_id, base::Value(std::move(error)));
++    return;
++  }
++
++  if (!fingerprint.empty()) {
++    ManagedTabContext* context = ManagedTabContext::FindById(tab_id);
++    const std::string* user_agent = fingerprint.FindString("user_agent");
++    const std::optional<int> hardware_concurrency =
++        fingerprint.FindInt("hardware_concurrency");
++    if (!context || !user_agent || !hardware_concurrency ||
++        !context->SetFingerprintUserAgent(*user_agent) ||
++        !context->SetFingerprintHardwareConcurrency(*hardware_concurrency)) {
++      RejectJavascriptCallback(callback_id, base::Value("指纹配置写入失败"));
++      return;
++    }
++  }
++
++  ResolveJavascriptCallback(callback_id, base::Value(true));
++}
+ 
+ void ManagementUIHandler::HandleGetExtensions(const base::Value::List& args) {
