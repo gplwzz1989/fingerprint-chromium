@@ -1,0 +1,28 @@
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -464,8 +464,13 @@
+ #else
+   // DevTools profiles are OffTheRecord, so hide it there.
+   show_avatar_toolbar_button = browser_->profile()->IsIncognitoProfile() ||
+                                browser_->profile()->IsGuestSession() ||
+                                browser_->profile()->IsRegularProfile();
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++  // The product account system is managed by the fingerprint manager UI.
++  show_avatar_toolbar_button = false;
++#endif
++
+   const std::string sab_value = base::CommandLine::ForCurrentProcess()->
+                                 GetSwitchValueASCII("show-avatar-button");
+diff --git a/chrome/browser/ui/toolbar/app_menu_model.cc b/chrome/browser/ui/toolbar/app_menu_model.cc
+--- a/chrome/browser/ui/toolbar/app_menu_model.cc
++++ b/chrome/browser/ui/toolbar/app_menu_model.cc
+@@ -1851,5 +1851,5 @@
+   AddSeparator(ui::NORMAL_SEPARATOR);
+ 
+-#if !BUILDFLAG(IS_CHROMEOS)
++#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_WIN)
+   sub_menus_.push_back(std::make_unique<ProfileSubMenuModel>(
+       this, browser()->profile(), browser()->window()->GetColorProvider()));
