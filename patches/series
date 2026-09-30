@@ -32,6 +32,7 @@ upstream-fixes/managed-tab-context.patch
 upstream-fixes/managed-tab-storage-partition.patch
 upstream-fixes/managed-tab-single-page-navigation.patch
 upstream-fixes/managed-tab-storage-snapshot.patch
+upstream-fixes/managed-tab-control-entry.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch

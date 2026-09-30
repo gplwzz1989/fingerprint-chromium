@@ -1,0 +1,41 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -44,5 +44,6 @@ class ManagedTabContext final
+   ~ManagedTabContext() override;
+ 
+   static std::string GenerateId();
++  static ManagedTabContext* FindById(const std::string& id);
+ 
+   const std::string& id() const { return id_; }
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -93,5 +93,27 @@ std::string ManagedTabContext::GenerateId() {
+   return base::Uuid::GenerateRandomV4().AsLowercaseString();
+ }
+ 
++// static
++ManagedTabContext* ManagedTabContext::FindById(const std::string& id) {
++  for (Browser* browser : *BrowserList::GetInstance()) {
++    if (!browser || !browser->tab_strip_model()) {
++      continue;
++    }
++
++    TabStripModel* tab_strip_model = browser->tab_strip_model();
++    for (int index = 0; index < tab_strip_model->count(); ++index) {
++      content::WebContents* contents =
++          tab_strip_model->GetWebContentsAt(index);
++      ManagedTabContext* tab_context =
++          ManagedTabContext::FromWebContents(contents);
++      if (tab_context && tab_context->id() == id) {
++        return tab_context;
++      }
++    }
++  }
++
++  return nullptr;
++}
++
+ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+     : content::WebContentsObserver(web_contents),
