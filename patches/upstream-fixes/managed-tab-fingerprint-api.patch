@@ -1,0 +1,244 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -66,6 +66,7 @@ class ManagedTabContext {
+   // override clears the per-tab override and restores the browser default.
+   void SetFingerprintUserAgentOverride(
+       const blink::UserAgentOverride& user_agent_override);
++  bool SetFingerprintUserAgent(const std::string& user_agent);
+   const blink::UserAgentOverride& fingerprint_user_agent_override() const {
+     return fingerprint_user_agent_override_;
+   }
+
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -286,7 +286,18 @@ void ManagedTabContext::SetFingerprintUserAgentOverride(
+   fingerprint_user_agent_override_ = web_contents()->GetUserAgentOverride();
+  }
+ 
++bool ManagedTabContext::SetFingerprintUserAgent(const std::string& user_agent) {
++  if (!web_contents()) {
++    return false;
++  }
++
++  blink::UserAgentOverride user_agent_override;
++  user_agent_override.ua_string_override = user_agent;
++  SetFingerprintUserAgentOverride(user_agent_override);
++  return true;
++}
++
+ bool ManagedTabContext::SetFingerprintHardwareConcurrency(
+     int hardware_concurrency) {
+   if (!web_contents() || hardware_concurrency < 0 || hardware_concurrency > 64) {
+ 
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -117,6 +117,7 @@ class ManagementUIHandler : public content::WebUIMessageHandler {
+  private:
+   void HandleGetManagedTabs(const base::Value::List& args);
+   void HandleCreateManagedTab(const base::Value::List& args);
++  void HandleConfigureManagedTabFingerprint(const base::Value::List& args);
+   void HandleActivateManagedTab(const base::Value::List& args);
+   void HandleNavigateManagedTab(const base::Value::List& args);
+   void HandleCloseManagedTab(const base::Value::List& args);
+
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -228,7 +228,12 @@ void ManagementUIHandler::RegisterMessages() {
+       "createManagedTab",
+       base::BindRepeating(&ManagementUIHandler::HandleCreateManagedTab,
+                           base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "configureManagedTabFingerprint",
++      base::BindRepeating(
++          &ManagementUIHandler::HandleConfigureManagedTabFingerprint,
++          base::Unretained(this)));
+   web_ui()->RegisterMessageCallback(
+       "activateManagedTab",
+       base::BindRepeating(&ManagementUIHandler::HandleActivateManagedTab,
+                           base::Unretained(this)));
+@@ -760,7 +766,42 @@ void ManagementUIHandler::HandleCreateManagedTab(
+ 
+   ResolveJavascriptCallback(args[0], context->GetState());
+  }
+ 
++void ManagementUIHandler::HandleConfigureManagedTabFingerprint(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 3 || !args[1].is_string() || !args[2].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("指纹配置参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& config = args[2].GetDict();
++  const std::string* user_agent = config.FindString("user_agent");
++  const base::Value* hardware_concurrency_value =
++      config.Find("hardware_concurrency");
++
++  if (!user_agent || user_agent->size() > 512 ||
++      !hardware_concurrency_value || !hardware_concurrency_value->is_int() ||
++      hardware_concurrency_value->GetInt() < 0 ||
++      hardware_concurrency_value->GetInt() > 64) {
++    RejectJavascriptCallback(args[0], base::Value("指纹配置参数无效"));
++    return;
++  }
++
++  const int hardware_concurrency = hardware_concurrency_value->GetInt();
++
++  ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
++  if (!context || !context->SetFingerprintUserAgent(*user_agent) ||
++      !context->SetFingerprintHardwareConcurrency(hardware_concurrency)) {
++    RejectJavascriptCallback(args[0], base::Value("无法应用指纹配置"));
++    return;
++  }
++
++  ResolveJavascriptCallback(args[0], context->GetState());
++}
++
+ void ManagementUIHandler::HandleActivateManagedTab(
+     const base::Value::List& args) {
+   AllowJavascript();
+
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -32,5 +32,8 @@ export interface FingerprintManagerBrowserProxy {
+   getManagedTabs(): Promise<ManagedTabState[]>;
+   createManagedTab(url?: string): Promise<ManagedTabState>;
++  configureManagedTabFingerprint(
++      id: string, userAgent: string,
++      hardwareConcurrency: number): Promise<ManagedTabState>;
+   activateManagedTab(id: string): Promise<boolean>;
+   navigateManagedTab(id: string, url: string): Promise<boolean>;
+   closeManagedTab(id: string): Promise<boolean>;
+@@ -51,7 +54,15 @@ export class FingerprintManagerBrowserProxyImpl
+     return url === undefined ? sendWithPromise('createManagedTab') :
+                                sendWithPromise('createManagedTab', url);
+   }
+ 
++  configureManagedTabFingerprint(
++      id: string, userAgent: string, hardwareConcurrency: number) {
++    return sendWithPromise('configureManagedTabFingerprint', id, {
++      user_agent: userAgent,
++      hardware_concurrency: hardwareConcurrency,
++    });
++  }
++
+   activateManagedTab(id: string) {
+     return sendWithPromise('activateManagedTab', id);
+   }
+
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -105,7 +105,26 @@ export class FingerprintManagerUiElement extends
+       this.onCreateManagedTab_();
+     }
+   }
+ 
++  protected onConfigureFingerprint_(source: Event, id: string) {
++    const button = source.currentTarget as HTMLElement;
++    const card = button.closest('.tab-card');
++    const userAgentInput =
++        card?.querySelector<HTMLInputElement>('.fingerprint-ua-input');
++    const hardwareConcurrencyInput =
++        card?.querySelector<HTMLInputElement>('.fingerprint-cores-input');
++    const hardwareConcurrency = Number(hardwareConcurrencyInput?.value || 0);
++    if (!Number.isInteger(hardwareConcurrency) || hardwareConcurrency < 0 ||
++        hardwareConcurrency > 64) {
++      this.managedTabError_ = '并发数必须是 0 到 64 的整数';
++      return;
++    }
++
++    this.runManagedTabAction_(
++        this.browserProxy_.configureManagedTabFingerprint(
++            id, userAgentInput?.value.trim() || '', hardwareConcurrency));
++  }
++
+   protected onActivateManagedTab_(id: string) {
+     this.runManagedTabAction_(this.browserProxy_.activateManagedTab(id));
+   }
+
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -157,5 +157,22 @@ export class FingerprintManagerUiElement extends
+                 </div>
+ 
++                <div class="fingerprint-config">
++                  <span class="tool-label">指纹配置</span>
++                  <input class="fingerprint-ua-input" type="text"
++                      .value="${tab.user_agent}"
++                      placeholder="User-Agent（留空恢复默认）"
++                      aria-label="User-Agent">
++                  <input class="fingerprint-cores-input" type="number"
++                      min="0" max="64"
++                      .value="${String(tab.hardware_concurrency)}"
++                      aria-label="硬件并发数">
++                  <button class="tool-button" type="button"
++                      @click="${(event: Event) =>
++                          this.onConfigureFingerprint_(event, tab.id)}">
++                    应用指纹
++                  </button>
++                </div>
++
+                 ${this.storageSnapshots_[tab.id] ? html`
+                   <div class="storage-panel">
+                     <div class="storage-heading">
+
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -547,5 +547,39 @@
+   opacity: .6;
+ }
+ 
++.fingerprint-config {
++  align-items: center;
++  border-top: 1px solid var(--fp-line);
++  display: flex;
++  gap: 10px;
++  margin-top: 12px;
++  padding-top: 12px;
++}
++
++.fingerprint-config input {
++  background: rgba(5, 10, 16, .72);
++  border: 1px solid var(--fp-line-strong);
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 10px;
++  height: 28px;
++  min-width: 0;
++  padding: 0 8px;
++}
++
++.fingerprint-config input:focus {
++  border-color: var(--fp-cyan);
++  color: var(--fp-text);
++  outline: none;
++}
++
++.fingerprint-ua-input {
++  flex: 1;
++}
++
++.fingerprint-cores-input {
++  width: 84px;
++}
++
+ .storage-panel {
+   background: rgba(7, 12, 18, .5);
+@@ -722,6 +744,7 @@
+ 
+   .tab-card-main,
+   .tab-card-tools,
++  .fingerprint-config {
+     align-items: stretch;
+     flex-direction: column;
+   }

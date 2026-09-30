@@ -143,8 +143,8 @@ extra/fingerprint/015-canvas-measure-text.patch
 extra/fingerprint/016-webgl-readPixels.patch
 extra/fingerprint/018-timezone.patch
 upstream-fixes/build-compatibility.patch
-@@
- upstream-fixes/managed-tab-management-api.patch
- upstream-fixes/managed-tab-management-ui.patch
-+upstream-fixes/management-ui-lint-fix.patch
- upstream-fixes/fingerprint-manager-webui.patch
+upstream-fixes/managed-tab-management-api.patch
+upstream-fixes/managed-tab-management-ui.patch
+upstream-fixes/management-ui-lint-fix.patch
+upstream-fixes/fingerprint-manager-webui.patch
+upstream-fixes/managed-tab-fingerprint-api.patch
