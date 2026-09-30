@@ -1,0 +1,140 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -54,7 +54,11 @@ class ManagedTabContext final
+   static std::string GenerateId();
++  static bool IsValidId(const std::string& id);
+   static std::vector<ManagedTabContext*> GetAll();
+   static base::Value::List GetAllState();
+   static ManagedTabContext* FindById(const std::string& id);
+   static ManagedTabContext* CreateNewTab(Browser* browser, const GURL& url);
++  static ManagedTabContext* CreateNewTab(Browser* browser,
++                                         const GURL& url,
++                                         const std::string& managed_tab_id);
+ 
+   const std::string& id() const { return id_; }
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -238,7 +238,24 @@
+ // static
+ std::string ManagedTabContext::GenerateId() {
+   return base::Uuid::GenerateRandomV4().AsLowercaseString();
+ }
+ 
++// static
++bool ManagedTabContext::IsValidId(const std::string& id) {
++  if (id.empty() || id.size() > 128) {
++    return false;
++  }
++
++  for (unsigned char character : id) {
++    if (!((character >= 'a' && character <= 'z') ||
++          (character >= 'A' && character <= 'Z') ||
++          (character >= '0' && character <= '9') || character == '-' ||
++          character == '_')) {
++      return false;
++    }
++  }
++  return true;
++}
++
+ // static
+ std::vector<ManagedTabContext*> ManagedTabContext::GetAll() {
+@@ -303,14 +303,22 @@
+ // static
+ ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
+                                                     const GURL& url) {
+-  if (!browser) {
+-    return nullptr;
+-  }
++  return CreateNewTab(browser, url, GenerateId());
++}
+ 
++// static
++ManagedTabContext* ManagedTabContext::CreateNewTab(
++    Browser* browser,
++    const GURL& url,
++    const std::string& managed_tab_id) {
++  if (!browser || !IsValidId(managed_tab_id)) {
++    return nullptr;
++  }
++
+   NavigateParams params(
+       browser, url.is_empty() ? browser->GetNewTabURL() : url,
+       ui::PAGE_TRANSITION_TYPED);
+   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+-  params.managed_tab_id = GenerateId();
++  params.managed_tab_id = managed_tab_id;
+   params.pwa_navigation_capturing_force_off = true;
+   Navigate(&params);
+@@ -333,5 +333,6 @@
+ base::Value::Dict ManagedTabContext::GetState() const {
+   base::Value::Dict state;
+   state.Set("id", id_);
++  state.Set("account_id", id_);
+   state.Set("url", current_url_.spec());
+   state.Set("title", base::UTF16ToUTF8(title_));
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -757,9 +758,21 @@ void ManagementUIHandler::HandleCreateManagedTab(
+     }
+   }
+ 
++  std::string account_id;
++  if (args.size() > 2) {
++    if (!args[2].is_string() ||
++        !ManagedTabContext::IsValidId(args[2].GetString())) {
++      RejectJavascriptCallback(args[0], base::Value("账号标识无效"));
++      return;
++    }
++    account_id = args[2].GetString();
++  }
++
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
+   ManagedTabContext* context =
+-      ManagedTabContext::CreateNewTab(browser, url);
++      account_id.empty()
++          ? ManagedTabContext::CreateNewTab(browser, url)
++          : ManagedTabContext::CreateNewTab(browser, url, account_id);
+   if (!context) {
+     RejectJavascriptCallback(args[0], base::Value("无法创建原生 Tab"));
+     return;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -7,5 +7,6 @@
+ export interface ManagedTabState {
+   id: string;
++  account_id: string;
+   url: string;
+   title: string;
+   load_progress: number;
+@@ -47,5 +48,6 @@ export interface FingerprintManagerBrowserProxy {
+ export interface FingerprintManagerBrowserProxy {
+   getManagedTabs(): Promise<ManagedTabState[]>;
+-  createManagedTab(url?: string): Promise<ManagedTabState>;
++  createManagedTab(
++      url?: string, accountId?: string): Promise<ManagedTabState>;
+   configureManagedTabFingerprint(
+       id: string, userAgent: string,
+@@ -65,9 +65,14 @@
+   getManagedTabs() {
+     return sendWithPromise('getManagedTabs');
+   }
+ 
+-  createManagedTab(url?: string) {
+-    return url === undefined ? sendWithPromise('createManagedTab') :
+-                               sendWithPromise('createManagedTab', url);
+-  }
++  createManagedTab(url?: string, accountId?: string) {
++    if (url === undefined && accountId === undefined) {
++      return sendWithPromise('createManagedTab');
++    }
++    if (accountId === undefined) {
++      return sendWithPromise('createManagedTab', url || '');
++    }
++    return sendWithPromise('createManagedTab', url || '', accountId);
++  }
+ 
