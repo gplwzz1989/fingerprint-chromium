@@ -42,6 +42,7 @@ upstream-fixes/managed-tab-management-api.patch
 upstream-fixes/managed-tab-management-ui.patch
 upstream-fixes/fingerprint-manager-webui.patch
 upstream-fixes/managed-tab-fingerprint-api.patch
+upstream-fixes/managed-tab-storage-export.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch

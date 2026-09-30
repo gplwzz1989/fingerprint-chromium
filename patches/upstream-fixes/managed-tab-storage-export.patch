@@ -1,0 +1,45 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -189,4 +189,22 @@ export class FingerprintManagerUiElement extends
+         });
+   }
+ 
++  protected onDownloadStorageSnapshot_(id: string) {
++    const snapshot = this.storageSnapshots_[id];
++    if (!snapshot) {
++      return;
++    }
++
++    const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
++      type: 'application/json',
++    });
++    const downloadUrl = URL.createObjectURL(blob);
++    const link = document.createElement('a');
++    link.href = downloadUrl;
++    link.download = `managed-tab-${id}.json`;
++    link.click();
++    setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
++    this.managedTabError_ = '存储快照已下载';
++  }
++
+   protected getTabIndex_(index: number): string {
+     return String(index + 1).padStart(2, '0');
+   }
+
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -186,5 +186,10 @@ export class FingerprintManagerUiElement extends
+                       <button class="tool-button" type="button"
+                           @click="${() => this.onCopyStorageSnapshot_(tab.id)}">
+                         复制 JSON
+                       </button>
++                      <button class="tool-button" type="button"
++                          @click="${() =>
++                              this.onDownloadStorageSnapshot_(tab.id)}">
++                        下载 JSON
++                      </button>
+                     </div>
+                     <div class="storage-columns">
+
