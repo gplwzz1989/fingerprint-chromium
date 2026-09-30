@@ -1,0 +1,55 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -8,10 +8,11 @@
+ #include <string>
+ 
+ #include "base/functional/callback.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/values.h"
+ #include "content/public/browser/storage_partition_config.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "content/public/browser/web_contents_user_data.h"
+ #include "net/cookies/canonical_cookie.h"
++#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+ #include "url/gurl.h"
+@@ -54,5 +55,13 @@ class ManagedTabContext final
+   }
+   const std::u16string& title() const { return title_; }
+   double load_progress() const { return load_progress_; }
+ 
++  // Applies a per-tab User-Agent and Client Hints override. Passing an empty
++  // override clears the per-tab override and restores the browser default.
++  void SetFingerprintUserAgentOverride(
++      const blink::UserAgentOverride& user_agent_override);
++  const blink::UserAgentOverride& fingerprint_user_agent_override() const {
++    return fingerprint_user_agent_override_;
++  }
++
+   // Reads the cookies in this tab's partition and the localStorage values of
+@@ -86,5 +93,6 @@ class ManagedTabContext final
+   GURL current_url_;
+   std::u16string title_;
+   double load_progress_ = 0.0;
++  blink::UserAgentOverride fingerprint_user_agent_override_;
+ 
+   base::WeakPtrFactory<ManagedTabContext> weak_factory_{this};
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -147,4 +148,15 @@ void ManagedTabContext::TitleWasSet(content::NavigationEntry* entry) {
+   }
+ }
+ 
++void ManagedTabContext::SetFingerprintUserAgentOverride(
++    const blink::UserAgentOverride& user_agent_override) {
++  if (!web_contents()) {
++    return;
++  }
++
++  web_contents()->SetUserAgentOverride(user_agent_override,
++                                       /*override_in_new_tabs=*/false);
++  fingerprint_user_agent_override_ = web_contents()->GetUserAgentOverride();
++}
++
+ void ManagedTabContext::GetStorageSnapshot(StorageSnapshotCallback callback) {
