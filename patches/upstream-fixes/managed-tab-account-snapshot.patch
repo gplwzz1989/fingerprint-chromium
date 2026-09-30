@@ -1,0 +1,37 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -37,4 +37,5 @@
+ export interface ManagedTabStorageSnapshot {
++  account_id?: string;
+   cookies: ManagedTabCookie[];
+   local_storage: {[key: string]: string};
+   storage_url?: string;
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -939,6 +939,7 @@
+   base::Value::Dict result;
+   result.Set("cookies", std::move(cookies));
+   result.Set("local_storage", std::move(snapshot.local_storage));
+   if (ManagedTabContext* context = ManagedTabContext::FindById(tab_id)) {
+     base::Value::Dict state = context->GetState();
++    result.Set("account_id", context->id());
+     base::Value::Dict fingerprint;
+@@ -991,7 +991,16 @@
+   ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
+   if (!context) {
+     RejectJavascriptCallback(args[0], base::Value("原生 Tab 不存在"));
+     return;
+   }
+ 
++  if (const base::Value* account_id_value = snapshot.Find("account_id")) {
++    if (!account_id_value->is_string() ||
++        !ManagedTabContext::IsValidId(account_id_value->GetString()) ||
++        account_id_value->GetString() != context->id()) {
++      RejectJavascriptCallback(args[0], base::Value("账号快照与目标 Tab 不一致"));
++      return;
++    }
++  }
++
+   if (const std::string* storage_url = snapshot.FindString("storage_url")) {
