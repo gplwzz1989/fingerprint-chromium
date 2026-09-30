@@ -1,0 +1,99 @@
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -321,36 +321,6 @@ Browser* BrowserTabStripModelDelegate::CreateNewStripWithTabs(
+     std::vector<NewStripContents> tabs,
+     const gfx::Rect& window_bounds,
+     bool maximize) {
+-  DCHECK(browser_->CanSupportWindowFeature(
+-      Browser::WindowFeature::kFeatureTabStrip));
+-
+-  // Create an empty new browser window the same size as the old one.
+-  Browser::CreateParams params(browser_->profile(), true);
+-  params.initial_bounds = window_bounds;
+-  params.initial_show_state = maximize ? ui::mojom::WindowShowState::kMaximized
+-                                       : ui::mojom::WindowShowState::kNormal;
+-  Browser* browser = Browser::Create(params);
+-  TabStripModel* new_model = browser->tab_strip_model();
+-
+-  for (size_t i = 0; i < tabs.size(); ++i) {
+-    NewStripContents item = std::move(tabs[i]);
+-
+-    // Enforce that there is an active tab in the strip at all times by forcing
+-    // the first web contents to be marked as active.
+-    if (i == 0) {
+-      item.add_types |= AddTabTypes::ADD_ACTIVE;
+-    }
+-
+-    content::WebContents* const raw_web_contents =
+-        item.tab.get()->GetContents();
+-    new_model->InsertDetachedTabAt(static_cast<int>(i), std::move(item.tab),
+-                                   item.add_types);
+-    // Make sure the loading state is updated correctly, otherwise the throbber
+-    // won't start if the page is loading.
+-    // TODO(beng): find a better way of doing this.
+-    static_cast<content::WebContentsDelegate*>(browser)->LoadingStateChanged(
+-        raw_web_contents, true);
+-  }
+-
+-  return browser;
++  // Managed browser mode keeps every native Tab in one parent window.
++  return nullptr;
+ }
+@@ -332,8 +332,5 @@ void BrowserTabStripModelDelegate::WillAddWebContents(
+ }
+ 
+ int BrowserTabStripModelDelegate::GetDragActions() const {
+-  return TabStripModelDelegate::TAB_TEAROFF_ACTION |
+-         (browser_->tab_strip_model()->count() > 1
+-              ? TabStripModelDelegate::TAB_MOVE_ACTION
+-              : 0);
++  return TabStripModelDelegate::TAB_MOVE_ACTION;
+ }
+@@ -356,15 +356,5 @@ void BrowserTabStripModelDelegate::MoveToExistingWindow(
+ void BrowserTabStripModelDelegate::MoveToExistingWindow(
+     const std::vector<int>& indices,
+     int browser_index) {
+-  std::vector<BrowserWindowInterface*> existing_browsers =
+-      browser_->GetFeatures().tab_menu_model_delegate()->GetOtherBrowserWindows(
+-          web_app::AppBrowserController::IsWebApp(browser_));
+-  size_t existing_browser_count = existing_browsers.size();
+-  if (static_cast<size_t>(browser_index) < existing_browser_count &&
+-      existing_browsers[browser_index]) {
+-    chrome::MoveTabsToExistingWindow(
+-        browser_,
+-        existing_browsers[browser_index]->GetBrowserForMigrationOnly(),
+-        indices);
+-  }
++  // Managed browser mode does not allow a Tab to leave its parent window.
+ }
+@@ -362,9 +362,4 @@ bool BrowserTabStripModelDelegate::CanMoveTabsToWindow(
+ bool BrowserTabStripModelDelegate::CanMoveTabsToWindow(
+     const std::vector<int>& indices) {
+-  return !indices.empty() &&
+-         browser_->GetFeatures()
+-             .tab_menu_model_delegate()
+-             ->GetOtherBrowserWindows(
+-                 web_app::AppBrowserController::IsWebApp(browser_))
+-             .size() > 0;
++  return false;
+ }
+@@ -367,5 +367,4 @@ void BrowserTabStripModelDelegate::MoveTabsToNewWindow(
+ void BrowserTabStripModelDelegate::MoveTabsToNewWindow(
+     const std::vector<int>& indices) {
+-  // chrome:: to disambiguate the free function from this method.
+-  chrome::MoveTabsToNewWindow(browser_, indices);
++  // Managed browser mode does not allow a Tab to leave its parent window.
+ }
+@@ -372,9 +372,5 @@ void BrowserTabStripModelDelegate::MoveGroupToNewWindow(
+ void BrowserTabStripModelDelegate::MoveGroupToNewWindow(
+     const tab_groups::TabGroupId& group) {
+-  TabGroupModel* group_model = browser_->tab_strip_model()->group_model();
+-  if (!group_model || !group_model->ContainsTabGroup(group)) {
+-    return;
+-  }
+-
+-  chrome::MoveGroupToNewWindow(browser_, group);
++  // Managed browser mode does not allow a Tab group to leave its parent
++  // window.
+ }
