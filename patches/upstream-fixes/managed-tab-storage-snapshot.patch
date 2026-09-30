@@ -1,0 +1,142 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -7,6 +7,10 @@
+ #include <string>
+ 
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/values.h"
+ #include "content/public/browser/storage_partition_config.h"
+ #include "content/public/browser/web_contents_observer.h"
+ #include "content/public/browser/web_contents_user_data.h"
++#include "net/cookies/canonical_cookie.h"
+ #include "url/gurl.h"
+@@ -30,5 +36,13 @@ class ManagedTabContext final
+     : public content::WebContentsObserver,
+       public content::WebContentsUserData<ManagedTabContext> {
+  public:
++  struct StorageSnapshot {
++    net::CookieList cookies;
++    base::Value local_storage;
++  };
++
++  using StorageSnapshotCallback =
++      base::OnceCallback<void(StorageSnapshot snapshot)>;
++
+   ManagedTabContext(const ManagedTabContext&) = delete;
+   ManagedTabContext& operator=(const ManagedTabContext&) = delete;
+@@ -50,4 +64,8 @@ class ManagedTabContext final
+   const std::u16string& title() const { return title_; }
+   double load_progress() const { return load_progress_; }
+ 
++  // Reads the cookies in this tab's partition and the localStorage values of
++  // its current primary main frame without modifying page state.
++  void GetStorageSnapshot(StorageSnapshotCallback callback);
++
+  private:
+@@ -64,4 +82,7 @@ class ManagedTabContext final
+   void LoadProgressChanged(double progress) override;
+   void TitleWasSet(content::NavigationEntry* entry) override;
+ 
++  void OnCookiesForStorageSnapshot(StorageSnapshotCallback callback,
++                                   const net::CookieList& cookies);
++
+   WEB_CONTENTS_USER_DATA_KEY_DECL();
+@@ -75,6 +96,8 @@ class ManagedTabContext final
+   GURL current_url_;
+   std::u16string title_;
+   double load_progress_ = 0.0;
++
++  base::WeakPtrFactory<ManagedTabContext> weak_factory_{this};
+ };
+
+ }  // namespace chrome
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -38,2 +38,3 @@
+ #include "chrome/browser/ui/web_applications/app_browser_controller.h"
++#include "chrome/common/chrome_isolated_world_ids.h"
+ #include "chrome/common/chrome_switches.h"
+@@ -50,9 +50,13 @@
+ #include "components/tabs/public/split_tab_id.h"
+ #include "components/tabs/public/split_tab_visual_data.h"
+ #include "components/tabs/public/tab_group.h"
++#include "content/public/browser/browser_context.h"
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/site_instance.h"
++#include "content/public/browser/storage_partition.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_delegate.h"
++#include "services/network/public/mojom/cookie_manager.mojom.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+@@ -66,4 +69,27 @@
+ namespace chrome {
+ 
++namespace {
++
++constexpr char16_t kLocalStorageSnapshotScript[] =
++    u"(() => {"
++    u"  const snapshot = {};"
++    u"  for (let index = 0; index < localStorage.length; ++index) {"
++    u"    const key = localStorage.key(index);"
++    u"    if (key !== null) snapshot[key] = localStorage.getItem(key);"
++    u"  }"
++    u"  return snapshot;"
++    u"})()";
++
++void FinishStorageSnapshot(ManagedTabContext::StorageSnapshotCallback callback,
++                           net::CookieList cookies,
++                           base::Value local_storage) {
++  ManagedTabContext::StorageSnapshot snapshot;
++  snapshot.cookies = std::move(cookies);
++  snapshot.local_storage = std::move(local_storage);
++  std::move(callback).Run(std::move(snapshot));
++}
++
++}  // namespace
++
+ // static
+ std::string ManagedTabContext::GenerateId() {
+@@ -127,5 +151,38 @@ void ManagedTabContext::TitleWasSet(content::NavigationEntry* entry) {
+   }
+ }
+ 
++void ManagedTabContext::GetStorageSnapshot(StorageSnapshotCallback callback) {
++  content::WebContents* contents = web_contents();
++  if (!contents) {
++    FinishStorageSnapshot(std::move(callback), {}, base::Value());
++    return;
++  }
++
++  content::StoragePartition* storage_partition =
++      contents->GetBrowserContext()->GetStoragePartition(
++          storage_partition_config_);
++  storage_partition->GetCookieManagerForBrowserProcess()->GetAllCookies(
++      base::BindOnce(&ManagedTabContext::OnCookiesForStorageSnapshot,
++                     weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void ManagedTabContext::OnCookiesForStorageSnapshot(
++    StorageSnapshotCallback callback,
++    const net::CookieList& cookies) {
++  content::RenderFrameHost* frame_host =
++      web_contents()->GetPrimaryMainFrame();
++  if (!frame_host || !frame_host->IsRenderFrameLive()) {
++    FinishStorageSnapshot(std::move(callback), net::CookieList(cookies),
++                          base::Value());
++    return;
++  }
++
++  frame_host->ExecuteJavaScriptInIsolatedWorld(
++      std::u16string(kLocalStorageSnapshotScript),
++      base::BindOnce(&FinishStorageSnapshot, std::move(callback),
++                     net::CookieList(cookies)),
++      ISOLATED_WORLD_ID_CHROME_INTERNAL);
++}
++
+ ////////////////////////////////////////////////////////////////////////////////
+ // BrowserTabStripModelDelegate, public:
