@@ -1,0 +1,10 @@
+diff --git a/chrome/browser/resources/management/management_ui.ts b/chrome/browser/resources/management/management_ui.ts
+--- a/chrome/browser/resources/management/management_ui.ts
++++ b/chrome/browser/resources/management/management_ui.ts
+@@ -311,7 +311,7 @@
+   protected onCreateManagedTab_() {
+     const input =
+-        this.shadowRoot!.querySelector<HTMLInputElement>('#managedTabUrl');
++        this.shadowRoot.querySelector<HTMLInputElement>('#managedTabUrl');
+     const url = input?.value.trim();
+     this.runManagedTabAction_(this.browserProxy_.createManagedTab(url ||

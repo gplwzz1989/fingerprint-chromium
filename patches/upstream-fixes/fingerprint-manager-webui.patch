@@ -1,0 +1,1460 @@
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -184,7 +184,9 @@
+ inline constexpr char kChromeUILocalStateHost[] = "local-state";
+ inline constexpr char kChromeUILocalStateURL[] = "chrome://local-state";
+ inline constexpr char kChromeUILocationInternalsHost[] = "location-internals";
++inline constexpr char kChromeUIFingerprintManagerHost[] =
++    "fingerprint-manager";
+ inline constexpr char kChromeUIManagementHost[] = "management";
+ inline constexpr char kChromeUIManagementURL[] = "chrome://management";
+ inline constexpr char16_t kChromeUIManagementURL16[] = u"chrome://management";
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -103,7 +103,8 @@
+       kChromeUIInterstitialHost,
+       kChromeUILocalStateHost,
+ #if !BUILDFLAG(IS_ANDROID)
++      kChromeUIFingerprintManagerHost,
+       kChromeUIManagementHost,
+ #endif
+       kChromeUIMediaEngagementHost,
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -90,4 +90,7 @@
+ #include "chrome/browser/ui/webui/commerce/shopping_insights_side_panel_ui.h"
+ #include "chrome/browser/ui/webui/downloads/downloads_ui.h"
+ #include "chrome/browser/ui/webui/feedback/feedback_ui.h"
++#if !BUILDFLAG(IS_CHROMEOS)
++#include "chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h"
++#endif  // !BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/webui/history/history_ui.h"
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -318,8 +318,11 @@
+   map.AddWebUIConfig(std::make_unique<ContextualTasksUIConfig>());
+   map.AddWebUIConfig(std::make_unique<CustomizeChromeUIConfig>());
+   map.AddWebUIConfig(std::make_unique<DownloadsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<FeedbackUIConfig>());
++#if !BUILDFLAG(IS_CHROMEOS)
++  map.AddWebUIConfig(std::make_unique<FingerprintManagerUIConfig>());
++#endif  // !BUILDFLAG(IS_CHROMEOS)
+   map.AddWebUIConfig(std::make_unique<HistoryUIConfig>());
+   map.AddWebUIConfig(std::make_unique<HistorySidePanelUIConfig>());
+   map.AddWebUIConfig(std::make_unique<HistoryClustersSidePanelUIConfig>());
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -1155,6 +1155,8 @@
+       "webui/feedback/feedback_handler.cc",
+       "webui/feedback/feedback_handler.h",
+       "webui/feedback/feedback_ui.cc",
+       "webui/feedback/feedback_ui.h",
++      "webui/fingerprint_manager/fingerprint_manager_ui.cc",
++      "webui/fingerprint_manager/fingerprint_manager_ui.h",
+       "webui/help/version_updater.h",
+       "webui/history/browsing_history_handler.cc",
+diff --git a/chrome/browser/resources/BUILD.gn b/chrome/browser/resources/BUILD.gn
+--- a/chrome/browser/resources/BUILD.gn
++++ b/chrome/browser/resources/BUILD.gn
+@@ -44,7 +44,8 @@
+       "data_sharing:resources",
+       "downloads:resources",
+       "feedback:resources",
++      "fingerprint_manager:resources",
+       "gaia_auth_host:resources",
+       "history:resources",
+       "inspect:resources",
+diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
+--- a/third_party/lit/v3_0/BUILD.gn
++++ b/third_party/lit/v3_0/BUILD.gn
+@@ -43,6 +43,7 @@
+     "//chrome/browser/resources/extensions_zero_state_promo:build_ts",
+     "//chrome/browser/resources/family_link_user_internals:build_ts",
+     "//chrome/browser/resources/feedback:build_ts",
++    "//chrome/browser/resources/fingerprint_manager:build_ts",
+     "//chrome/browser/resources/history:build_ts",
+     "//chrome/browser/resources/infobar_internals:build_ts",
+     "//chrome/browser/resources/intro:build_ts",
+diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
+--- a/tools/gritsettings/resource_ids.spec
++++ b/tools/gritsettings/resource_ids.spec
+@@ -444,4 +444,8 @@
+   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/feedback/resources.grd": {
+     "META": {"sizes": {"includes": [30],}},
+     "includes": [3980],
+   },
++  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/fingerprint_manager/resources.grd": {
++    "META": {"sizes": {"includes": [10]}},
++    "includes": [3990],
++  },
+   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/gaia_auth_host/resources.grd": {
+diff --git a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h
+@@ -0,0 +1,34 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_UI_H_
++
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++
++class FingerprintManagerUI;
++
++class FingerprintManagerUIConfig
++    : public content::DefaultWebUIConfig<FingerprintManagerUI> {
++ public:
++  FingerprintManagerUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUIFingerprintManagerHost) {}
++};
++
++// The Web UI controller for the fingerprint multi-account manager.
++class FingerprintManagerUI : public content::WebUIController {
++ public:
++  explicit FingerprintManagerUI(content::WebUI* web_ui);
++
++  FingerprintManagerUI(const FingerprintManagerUI&) = delete;
++  FingerprintManagerUI& operator=(const FingerprintManagerUI&) = delete;
++
++  ~FingerprintManagerUI() override;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_UI_H_
++
+diff --git a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h"
++
++#include "build/build_config.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/management/management_ui_handler.h"
++#include "chrome/common/webui_url_constants.h"
++#include "chrome/grit/fingerprint_manager_resources.h"
++#include "chrome/grit/fingerprint_manager_resources_map.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "ui/webui/webui_util.h"
++
++namespace {
++
++void CreateAndAddFingerprintManagerSource(Profile* profile) {
++  content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
++      profile, chrome::kChromeUIFingerprintManagerHost);
++  source->SetDefaultResource(IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
++  webui::SetupWebUIDataSource(
++      source, kFingerprintManagerResources,
++      IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
++}
++
++}  // namespace
++
++FingerprintManagerUI::FingerprintManagerUI(content::WebUI* web_ui)
++    : WebUIController(web_ui) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  CreateAndAddFingerprintManagerSource(profile);
++
++#if !BUILDFLAG(IS_CHROMEOS)
++  web_ui->AddMessageHandler(ManagementUIHandler::Create(profile));
++#endif  // !BUILDFLAG(IS_CHROMEOS)
++}
++
++FingerprintManagerUI::~FingerprintManagerUI() = default;
++
+diff --git a/chrome/browser/resources/fingerprint_manager/BUILD.gn b/chrome/browser/resources/fingerprint_manager/BUILD.gn
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/BUILD.gn
+@@ -0,0 +1,25 @@
++# Copyright 2026 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//chrome/common/features.gni")
++import("//ui/webui/resources/tools/build_webui.gni")
++
++assert(!is_android, "!is_android check failed")
++
++build_webui("build") {
++  grd_prefix = "fingerprint_manager"
++  static_files = [ "fingerprint_manager.html" ]
++  ts_files = [
++    "fingerprint_manager_browser_proxy.ts",
++    "fingerprint_manager_ui.html.ts",
++    "fingerprint_manager_ui.ts",
++  ]
++  css_files = [ "fingerprint_manager_ui.css" ]
++  ts_deps = [
++    "//third_party/lit/v3_0:build_ts",
++    "//ui/webui/resources/js:build_ts",
++  ]
++  webui_context_type = "trusted"
++}
++
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager.html b/chrome/browser/resources/fingerprint_manager/fingerprint_manager.html
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager.html
+@@ -0,0 +1,25 @@
++<!doctype html>
++<html lang="zh-CN">
++<head>
++  <meta charset="utf-8">
++  <meta name="viewport" content="width=device-width, user-scalable=yes">
++  <meta name="color-scheme" content="dark">
++  <title>指纹多账号管理器</title>
++  <style>
++    html,
++    body {
++      height: 100%;
++      margin: 0;
++    }
++
++    body {
++      overflow: hidden;
++    }
++  </style>
++  <script type="module" src="fingerprint_manager_ui.js"></script>
++</head>
++<body>
++  <fingerprint-manager-ui></fingerprint-manager-ui>
++</body>
++</html>
++
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -0,0 +1,75 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {sendWithPromise} from 'chrome://resources/js/cr.js';
++
++export interface ManagedTabState {
++  id: string;
++  url: string;
++  title: string;
++  load_progress: number;
++  storage_partition: string;
++  storage_partition_persistent: boolean;
++  hardware_concurrency: number;
++  user_agent: string;
++}
++
++export interface ManagedTabCookie {
++  name: string;
++  value: string;
++  domain: string;
++  path: string;
++  secure: boolean;
++  http_only: boolean;
++}
++
++export interface ManagedTabStorageSnapshot {
++  cookies: ManagedTabCookie[];
++  local_storage: {[key: string]: string};
++}
++
++export interface FingerprintManagerBrowserProxy {
++  getManagedTabs(): Promise<ManagedTabState[]>;
++  createManagedTab(url?: string): Promise<ManagedTabState>;
++  activateManagedTab(id: string): Promise<boolean>;
++  navigateManagedTab(id: string, url: string): Promise<boolean>;
++  closeManagedTab(id: string): Promise<boolean>;
++  getManagedTabStorageSnapshot(
++      id: string): Promise<ManagedTabStorageSnapshot>;
++}
++
++export class FingerprintManagerBrowserProxyImpl
++    implements FingerprintManagerBrowserProxy {
++  getManagedTabs() {
++    return sendWithPromise('getManagedTabs');
++  }
++
++  createManagedTab(url?: string) {
++    return url === undefined ? sendWithPromise('createManagedTab') :
++                               sendWithPromise('createManagedTab', url);
++  }
++
++  activateManagedTab(id: string) {
++    return sendWithPromise('activateManagedTab', id);
++  }
++
++  navigateManagedTab(id: string, url: string) {
++    return sendWithPromise('navigateManagedTab', id, url);
++  }
++
++  closeManagedTab(id: string) {
++    return sendWithPromise('closeManagedTab', id);
++  }
++
++  getManagedTabStorageSnapshot(id: string) {
++    return sendWithPromise('getManagedTabStorageSnapshot', id);
++  }
++
++  static getInstance(): FingerprintManagerBrowserProxy {
++    return instance || (instance = new FingerprintManagerBrowserProxyImpl());
++  }
++}
++
++let instance: FingerprintManagerBrowserProxy|null = null;
++
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -0,0 +1,200 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++
++import type {
++  FingerprintManagerBrowserProxy,
++  ManagedTabState,
++  ManagedTabStorageSnapshot,
++} from './fingerprint_manager_browser_proxy.js';
++import {FingerprintManagerBrowserProxyImpl} from
++    './fingerprint_manager_browser_proxy.js';
++import {getCss} from './fingerprint_manager_ui.css.js';
++import {getHtml} from './fingerprint_manager_ui.html.js';
++
++export class FingerprintManagerUiElement extends CrLitElement {
++  static get is() {
++    return 'fingerprint-manager-ui';
++  }
++
++  static override get styles() {
++    return getCss();
++  }
++
++  static override get properties() {
++    return {
++      managedTabs_: {type: Array},
++      loading_: {type: Boolean},
++      managedTabError_: {type: String},
++      storageSnapshots_: {type: Object},
++      storageLoadingId_: {type: String},
++    };
++  }
++
++  protected accessor managedTabs_: ManagedTabState[] = [];
++  protected accessor loading_: boolean = true;
++  protected accessor managedTabError_: string = '';
++  protected accessor storageSnapshots_: {
++    [id: string]: ManagedTabStorageSnapshot,
++  } = {};
++  protected accessor storageLoadingId_: string = '';
++
++  private browserProxy_: FingerprintManagerBrowserProxy =
++      FingerprintManagerBrowserProxyImpl.getInstance();
++
++  override render() {
++    return getHtml.bind(this)();
++  }
++
++  override connectedCallback() {
++    super.connectedCallback();
++    this.getManagedTabs_();
++  }
++
++  protected onRefresh_() {
++    this.getManagedTabs_();
++  }
++
++  private getManagedTabs_() {
++    this.loading_ = true;
++    this.browserProxy_.getManagedTabs().then(
++        managedTabs => {
++          this.managedTabs_ = managedTabs;
++          this.storageSnapshots_ = {};
++          this.loading_ = false;
++          this.managedTabError_ = '';
++        },
++        () => {
++          this.loading_ = false;
++          this.managedTabError_ = '无法读取原生 Tab 状态，请重试';
++        });
++  }
++
++  private runManagedTabAction_(action: Promise<unknown>) {
++    this.managedTabError_ = '';
++    action.then(
++        result => {
++          if (result === false) {
++            this.managedTabError_ = '原生 Tab 操作失败，请重试';
++            return;
++          }
++          this.getManagedTabs_();
++        },
++        () => {
++          this.managedTabError_ = '原生 Tab 操作失败，请重试';
++        });
++  }
++
++  protected onCreateManagedTab_() {
++    const input =
++        this.shadowRoot.querySelector<HTMLInputElement>('#managedTabUrl');
++    const url = input?.value.trim();
++    this.runManagedTabAction_(this.browserProxy_.createManagedTab(url ||
++                                                                  undefined));
++    if (input) {
++      input.value = '';
++    }
++  }
++
++  protected onCreateManagedTabKeydown_(event: KeyboardEvent) {
++    if (event.key === 'Enter') {
++      event.preventDefault();
++      this.onCreateManagedTab_();
++    }
++  }
++
++  protected onActivateManagedTab_(id: string) {
++    this.runManagedTabAction_(this.browserProxy_.activateManagedTab(id));
++  }
++
++  protected onCloseManagedTab_(id: string) {
++    this.runManagedTabAction_(this.browserProxy_.closeManagedTab(id));
++  }
++
++  protected onManagedTabNavigate_(source: Event, id: string) {
++    const element = source.currentTarget as HTMLElement;
++    const input = element.matches('input') ? element as HTMLInputElement :
++                                               element.parentElement?.querySelector<
++                                                   HTMLInputElement>(
++                                                   '.tab-navigation-input');
++    const url = input?.value.trim();
++    if (!url) {
++      this.managedTabError_ = '请输入要打开的网址';
++      return;
++    }
++    this.runManagedTabAction_(this.browserProxy_.navigateManagedTab(id, url));
++  }
++
++  protected onManagedTabNavigateKeydown_(event: KeyboardEvent, id: string) {
++    if (event.key === 'Enter') {
++      event.preventDefault();
++      this.onManagedTabNavigate_(event, id);
++    }
++  }
++
++  protected onStorageSnapshot_(id: string) {
++    if (this.storageSnapshots_[id]) {
++      const snapshots = {...this.storageSnapshots_};
++      delete snapshots[id];
++      this.storageSnapshots_ = snapshots;
++      return;
++    }
++
++    this.storageLoadingId_ = id;
++    this.managedTabError_ = '';
++    this.browserProxy_.getManagedTabStorageSnapshot(id).then(
++        snapshot => {
++          this.storageSnapshots_ = {...this.storageSnapshots_, [id]: snapshot};
++          this.storageLoadingId_ = '';
++        },
++        () => {
++          this.storageLoadingId_ = '';
++          this.managedTabError_ = '无法读取该 Tab 的存储数据，请重试';
++        });
++  }
++
++  protected onCopyStorageSnapshot_(id: string) {
++    const snapshot = this.storageSnapshots_[id];
++    if (!snapshot) {
++      return;
++    }
++
++    navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2)).then(
++        () => {
++          this.managedTabError_ = '存储快照已复制到剪贴板';
++        },
++        () => {
++          this.managedTabError_ = '复制存储快照失败，请重试';
++        });
++  }
++
++  protected getTabIndex_(index: number): string {
++    return String(index + 1).padStart(2, '0');
++  }
++
++  protected getLoadLabel_(tab: ManagedTabState): string {
++    if (tab.load_progress >= 1) {
++      return '就绪';
++    }
++    if (tab.load_progress <= 0) {
++      return '等待加载';
++    }
++    return `${Math.round(tab.load_progress * 100)}%`;
++  }
++
++  protected getStorageKeyCount_(snapshot: ManagedTabStorageSnapshot): number {
++    return Object.keys(snapshot.local_storage).length;
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    'fingerprint-manager-ui': FingerprintManagerUiElement;
++  }
++}
++
++customElements.define(
++    FingerprintManagerUiElement.is, FingerprintManagerUiElement);
++
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -0,0 +1,221 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++import {html} from '//resources/lit/v3_0/lit.rollup.js';
++
++import type {FingerprintManagerUiElement} from './fingerprint_manager_ui.js';
++
++export function getHtml(this: FingerprintManagerUiElement) {
++  // clang-format off
++  return html`
++<div class="manager-shell">
++  <header class="topbar">
++    <div class="brand-lockup">
++      <div class="brand-mark">FP</div>
++      <div>
++        <div class="brand-eyebrow">PRIVATE BROWSER SYSTEM</div>
++        <h1>指纹环境编排台</h1>
++      </div>
++    </div>
++    <div class="topbar-status">
++      <span class="status-dot"></span>
++      <span>本地控制台</span>
++    </div>
++  </header>
++
++  <div class="manager-body">
++    <aside class="side-rail">
++      <div class="rail-label">工作区</div>
++      <div class="rail-item rail-item-active">
++        <span class="rail-icon">01</span>
++        <span>环境总览</span>
++      </div>
++      <div class="rail-item rail-item-muted">
++        <span class="rail-icon">02</span>
++        <span>指纹配置</span>
++        <span class="rail-soon">即将支持</span>
++      </div>
++      <div class="rail-item rail-item-muted">
++        <span class="rail-icon">03</span>
++        <span>用户系统</span>
++        <span class="rail-soon">即将支持</span>
++      </div>
++      <div class="rail-footer">
++        <div class="rail-footer-line"></div>
++        <span>单父窗口模式</span>
++        <strong>已锁定</strong>
++      </div>
++    </aside>
++
++    <main class="workspace">
++      <section class="hero">
++        <div class="hero-copy">
++          <div class="section-kicker">ACCOUNT ISOLATION / 01</div>
++          <h2>让每个账号拥有自己的边界。</h2>
++          <p>每个原生 Tab 都是独立的身份环境，存储分区、并发配置和导航生命周期彼此隔离。</p>
++        </div>
++        <div class="hero-metric">
++          <span>活动环境</span>
++          <strong>${this.managedTabs_.length}</strong>
++          <small>独立 Tab 实例</small>
++        </div>
++      </section>
++
++      <section class="control-panel">
++        <div class="panel-heading">
++          <div>
++            <div class="section-kicker">LIVE ENVIRONMENTS</div>
++            <h3>原生 Tab 环境</h3>
++          </div>
++          <button class="refresh-button" type="button"
++              @click="${this.onRefresh_}">
++            刷新状态
++          </button>
++        </div>
++
++        <div class="create-bar">
++          <div class="create-prefix">新建环境 //</div>
++          <input id="managedTabUrl" type="url"
++              placeholder="输入网址，例如 https://example.com"
++              @keydown="${this.onCreateManagedTabKeydown_}">
++          <button class="primary-button" type="button"
++              @click="${this.onCreateManagedTab_}">
++            建立 Tab
++          </button>
++        </div>
++
++        <div class="message-bar" ?hidden="${!this.managedTabError_}">
++          ${this.managedTabError_}
++        </div>
++
++        ${this.loading_ ? html`
++          <div class="loading-state">
++            <span class="loading-line"></span>
++            正在读取环境状态…
++          </div>
++        ` : this.managedTabs_.length ? html`
++          <div class="tab-list">
++            ${this.managedTabs_.map((tab, index) => html`
++              <article class="tab-card">
++                <div class="tab-card-main">
++                  <div class="tab-number">${this.getTabIndex_(index)}</div>
++                  <div class="tab-identity">
++                    <div class="tab-title-line">
++                      <h4>${tab.title || '未命名环境'}</h4>
++                      <span class="load-state">${this.getLoadLabel_(tab)}</span>
++                    </div>
++                    <div class="tab-url" title="${tab.url}">
++                      ${tab.url || 'about:blank'}
++                    </div>
++                    <div class="tab-chips">
++                      <span class="tab-chip tab-chip-accent">${tab.id}</span>
++                      <span class="tab-chip">
++                        ${tab.storage_partition_persistent ? '持久化分区' : '临时分区'}
++                      </span>
++                      <span class="tab-chip">
++                        ${tab.hardware_concurrency > 0 ?
++                            `${tab.hardware_concurrency} 核并发` : '默认并发'}
++                      </span>
++                      ${tab.user_agent ? html`
++                        <span class="tab-chip">自定义 UA</span>
++                      ` : ''}
++                    </div>
++                  </div>
++                  <div class="tab-card-actions">
++                    <button class="text-button" type="button"
++                        @click="${() => this.onActivateManagedTab_(tab.id)}">
++                      切换
++                    </button>
++                    <button class="text-button text-button-danger" type="button"
++                        @click="${() => this.onCloseManagedTab_(tab.id)}">
++                      关闭
++                    </button>
++                  </div>
++                </div>
++
++                <div class="tab-card-tools">
++                  <div class="tab-navigation">
++                    <span class="tool-label">导航</span>
++                    <input class="tab-navigation-input" type="url"
++                        .value="${tab.url}"
++                        aria-label="导航地址"
++                        @keydown="${(event: KeyboardEvent) =>
++                            this.onManagedTabNavigateKeydown_(event, tab.id)}">
++                    <button class="tool-button" type="button"
++                        @click="${(event: Event) =>
++                            this.onManagedTabNavigate_(event, tab.id)}">
++                      执行
++                    </button>
++                  </div>
++                  <button class="storage-button" type="button"
++                      ?disabled="${this.storageLoadingId_ === tab.id}"
++                      @click="${() => this.onStorageSnapshot_(tab.id)}">
++                    ${this.storageLoadingId_ === tab.id ? '读取中…' :
++                        this.storageSnapshots_[tab.id] ? '收起存储' : '查看存储'}
++                  </button>
++                </div>
++
++                ${this.storageSnapshots_[tab.id] ? html`
++                  <div class="storage-panel">
++                    <div class="storage-heading">
++                      <div>
++                        <div class="section-kicker">STORAGE SNAPSHOT</div>
++                        <strong>
++                          ${this.storageSnapshots_[tab.id]!.cookies.length} Cookie ·
++                          ${this.getStorageKeyCount_(this.storageSnapshots_[tab.id]!)} LocalStorage
++                        </strong>
++                      </div>
++                      <button class="tool-button" type="button"
++                          @click="${() => this.onCopyStorageSnapshot_(tab.id)}">
++                        复制 JSON
++                      </button>
++                    </div>
++                    <div class="storage-columns">
++                      <div class="storage-column">
++                        <h5>Cookies</h5>
++                        ${this.storageSnapshots_[tab.id]!.cookies.length ?
++                            this.storageSnapshots_[tab.id]!.cookies.map(cookie => html`
++                          <div class="storage-entry">
++                            <code>${cookie.name}</code>
++                            <span title="${cookie.value}">${cookie.value}</span>
++                            <small>${cookie.domain}</small>
++                          </div>
++                        `) : html`
++                          <div class="storage-empty">没有 Cookie</div>
++                        `}
++                      </div>
++                      <div class="storage-column">
++                        <h5>LocalStorage</h5>
++                        ${this.getStorageKeyCount_(this.storageSnapshots_[tab.id]!) ?
++                            Object.entries(
++                                this.storageSnapshots_[tab.id]!.local_storage)
++                                .map(([key, value]) => html`
++                          <div class="storage-entry">
++                            <code>${key}</code>
++                            <span title="${value}">${value}</span>
++                          </div>
++                        `) : html`
++                          <div class="storage-empty">没有 LocalStorage 数据</div>
++                        `}
++                      </div>
++                    </div>
++                  </div>
++                ` : ''}
++              </article>
++            `)}
++          </div>
++        ` : html`
++          <div class="empty-state">
++            <div class="empty-orbit">00</div>
++            <h4>还没有原生 Tab 环境</h4>
++            <p>输入一个网址，建立第一个独立账号空间。</p>
++          </div>
++        `}
++      </section>
++    </main>
++  </div>
++</div>`;
++  // clang-format on
++}
++
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -0,0 +1,704 @@
++/* Copyright 2026 The Chromium Authors
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++/* #css_wrapper_metadata_start
++ * #type=style-lit
++ * #scheme=relative
++ * #css_wrapper_metadata_end */
++
++:host {
++  --fp-bg: #0c1118;
++  --fp-surface: #131b25;
++  --fp-surface-raised: #182431;
++  --fp-line: rgba(183, 206, 226, .14);
++  --fp-line-strong: rgba(183, 206, 226, .25);
++  --fp-text: #e7eef5;
++  --fp-muted: #8b9aaa;
++  --fp-faint: #5c6c7e;
++  --fp-cyan: #7dd3fc;
++  --fp-orange: #f5a66b;
++  --fp-danger: #f38b82;
++  background: var(--fp-bg);
++  color: var(--fp-text);
++  display: block;
++  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
++  height: 100%;
++  overflow: hidden;
++}
++
++button,
++input {
++  font: inherit;
++}
++
++button {
++  cursor: pointer;
++}
++
++button:focus-visible,
++input:focus-visible {
++  outline: 2px solid var(--fp-cyan);
++  outline-offset: 2px;
++}
++
++.manager-shell {
++  background-color: var(--fp-bg);
++  background-image: linear-gradient(rgba(125, 211, 252, .025) 1px, transparent 1px),
++    linear-gradient(90deg, rgba(125, 211, 252, .025) 1px, transparent 1px);
++  background-size: 36px 36px;
++  box-sizing: border-box;
++  height: 100%;
++  overflow: auto;
++  position: relative;
++}
++
++.manager-shell::after {
++  background: radial-gradient(circle, rgba(245, 166, 107, .13), transparent 66%);
++  content: '';
++  height: 420px;
++  pointer-events: none;
++  position: fixed;
++  right: -180px;
++  top: -210px;
++  width: 420px;
++}
++
++.topbar {
++  align-items: center;
++  border-bottom: 1px solid var(--fp-line);
++  box-sizing: border-box;
++  display: flex;
++  justify-content: space-between;
++  min-height: 76px;
++  padding: 0 34px;
++  position: relative;
++  z-index: 1;
++}
++
++.brand-lockup,
++.topbar-status,
++.tab-card-main,
++.tab-card-tools,
++.tab-navigation,
++.storage-heading {
++  align-items: center;
++  display: flex;
++}
++
++.brand-lockup {
++  gap: 12px;
++}
++
++.brand-mark {
++  align-items: center;
++  background: var(--fp-orange);
++  color: #24180e;
++  display: flex;
++  font-family: monospace;
++  font-size: 12px;
++  font-weight: 800;
++  height: 34px;
++  justify-content: center;
++  letter-spacing: -.5px;
++  transform: skew(-9deg);
++  width: 38px;
++}
++
++.brand-eyebrow,
++.section-kicker,
++.rail-label {
++  color: var(--fp-cyan);
++  font-family: monospace;
++  font-size: 10px;
++  font-weight: 700;
++  letter-spacing: 1.5px;
++}
++
++.brand-lockup h1 {
++  font-size: 16px;
++  font-weight: 600;
++  letter-spacing: .2px;
++  margin: 3px 0 0;
++}
++
++.topbar-status {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 11px;
++  gap: 8px;
++}
++
++.status-dot {
++  background: #8bd5a2;
++  border-radius: 50%;
++  box-shadow: 0 0 0 4px rgba(139, 213, 162, .12);
++  height: 6px;
++  width: 6px;
++}
++
++.manager-body {
++  display: flex;
++  min-height: calc(100% - 76px);
++  position: relative;
++  z-index: 1;
++}
++
++.side-rail {
++  border-right: 1px solid var(--fp-line);
++  box-sizing: border-box;
++  display: flex;
++  flex-direction: column;
++  flex-shrink: 0;
++  padding: 36px 18px 24px;
++  width: 224px;
++}
++
++.rail-label {
++  color: var(--fp-faint);
++  margin: 0 12px 14px;
++}
++
++.rail-item {
++  align-items: center;
++  border-left: 2px solid transparent;
++  color: var(--fp-muted);
++  display: flex;
++  font-size: 12px;
++  gap: 10px;
++  margin-bottom: 4px;
++  min-height: 40px;
++  padding: 0 12px;
++}
++
++.rail-item-active {
++  background: rgba(125, 211, 252, .08);
++  border-left-color: var(--fp-cyan);
++  color: var(--fp-text);
++}
++
++.rail-item-muted {
++  opacity: .62;
++}
++
++.rail-icon {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++}
++
++.rail-soon {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-left: auto;
++}
++
++.rail-footer {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++  line-height: 1.7;
++  margin: auto 12px 0;
++}
++
++.rail-footer-line {
++  background: var(--fp-line-strong);
++  height: 1px;
++  margin-bottom: 12px;
++  width: 26px;
++}
++
++.rail-footer strong {
++  color: #8bd5a2;
++  display: block;
++  font-weight: 500;
++}
++
++.workspace {
++  box-sizing: border-box;
++  margin: 0 auto;
++  max-width: 1160px;
++  padding: 48px 48px 70px;
++  width: 100%;
++}
++
++.hero {
++  align-items: flex-end;
++  display: flex;
++  gap: 36px;
++  justify-content: space-between;
++  margin-bottom: 38px;
++}
++
++.hero-copy {
++  max-width: 680px;
++}
++
++.hero h2 {
++  font-size: clamp(28px, 4vw, 46px);
++  font-weight: 500;
++  letter-spacing: -1.5px;
++  line-height: 1.08;
++  margin: 14px 0 14px;
++}
++
++.hero p {
++  color: var(--fp-muted);
++  font-size: 13px;
++  line-height: 1.7;
++  margin: 0;
++  max-width: 580px;
++}
++
++.hero-metric {
++  border-left: 1px solid var(--fp-line-strong);
++  box-sizing: border-box;
++  display: flex;
++  flex-direction: column;
++  min-width: 130px;
++  padding-left: 20px;
++}
++
++.hero-metric span,
++.hero-metric small {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 10px;
++}
++
++.hero-metric strong {
++  color: var(--fp-orange);
++  font-family: monospace;
++  font-size: 42px;
++  font-weight: 400;
++  line-height: 1.1;
++  margin: 5px 0 2px;
++}
++
++.control-panel {
++  background: rgba(19, 27, 37, .86);
++  border: 1px solid var(--fp-line);
++  box-shadow: 0 24px 70px rgba(0, 0, 0, .18);
++  padding: 26px;
++}
++
++.panel-heading {
++  align-items: flex-end;
++  display: flex;
++  justify-content: space-between;
++  margin-bottom: 22px;
++}
++
++.panel-heading h3 {
++  font-size: 19px;
++  font-weight: 500;
++  margin: 7px 0 0;
++}
++
++.refresh-button,
++.text-button,
++.storage-button,
++.tool-button,
++.primary-button {
++  border: 1px solid transparent;
++  box-sizing: border-box;
++  font-size: 11px;
++  min-height: 32px;
++  padding: 0 12px;
++}
++
++.refresh-button,
++.storage-button,
++.tool-button {
++  background: transparent;
++  border-color: var(--fp-line-strong);
++  color: var(--fp-muted);
++}
++
++.refresh-button:hover,
++.storage-button:hover,
++.tool-button:hover {
++  border-color: var(--fp-cyan);
++  color: var(--fp-cyan);
++}
++
++.create-bar {
++  align-items: center;
++  background: rgba(7, 12, 18, .55);
++  border: 1px solid var(--fp-line);
++  display: flex;
++  gap: 10px;
++  padding: 8px;
++}
++
++.create-prefix,
++.tool-label {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++  padding: 0 5px;
++  white-space: nowrap;
++}
++
++.create-bar input,
++.tab-navigation-input {
++  background: transparent;
++  border: 0;
++  color: var(--fp-text);
++  min-width: 0;
++  outline: 0;
++}
++
++.create-bar input {
++  flex: 1;
++  font-family: monospace;
++  font-size: 12px;
++  height: 34px;
++}
++
++.create-bar input::placeholder,
++.tab-navigation-input::placeholder {
++  color: var(--fp-faint);
++}
++
++.primary-button {
++  background: var(--fp-orange);
++  color: #27170c;
++  font-weight: 700;
++}
++
++.primary-button:hover {
++  background: #ffc18b;
++}
++
++.message-bar {
++  background: rgba(125, 211, 252, .08);
++  border-left: 2px solid var(--fp-cyan);
++  color: var(--fp-cyan);
++  font-family: monospace;
++  font-size: 11px;
++  margin-top: 14px;
++  padding: 9px 11px;
++}
++
++.loading-state,
++.empty-state {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 12px;
++  padding: 54px 20px;
++  text-align: center;
++}
++
++.loading-line {
++  background: var(--fp-cyan);
++  display: inline-block;
++  height: 1px;
++  margin-right: 8px;
++  vertical-align: middle;
++  width: 34px;
++}
++
++.tab-list {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  margin-top: 18px;
++}
++
++.tab-card {
++  background: var(--fp-surface);
++  border: 1px solid var(--fp-line);
++  transition: border-color 140ms ease, background-color 140ms ease;
++}
++
++.tab-card:hover {
++  background: var(--fp-surface-raised);
++  border-color: var(--fp-line-strong);
++}
++
++.tab-card-main {
++  gap: 14px;
++  padding: 17px 18px 14px;
++}
++
++.tab-number,
++.empty-orbit {
++  align-items: center;
++  border: 1px solid var(--fp-line-strong);
++  color: var(--fp-orange);
++  display: flex;
++  flex-shrink: 0;
++  font-family: monospace;
++  font-size: 11px;
++  height: 32px;
++  justify-content: center;
++  width: 32px;
++}
++
++.tab-identity {
++  min-width: 0;
++}
++
++.tab-title-line {
++  align-items: center;
++  display: flex;
++  gap: 9px;
++}
++
++.tab-title-line h4 {
++  font-size: 14px;
++  font-weight: 500;
++  margin: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.load-state {
++  border: 1px solid rgba(139, 213, 162, .35);
++  color: #8bd5a2;
++  font-family: monospace;
++  font-size: 9px;
++  padding: 3px 5px;
++  white-space: nowrap;
++}
++
++.tab-url {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 11px;
++  margin-top: 5px;
++  max-width: 640px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.tab-chips {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-top: 10px;
++}
++
++.tab-chip {
++  background: rgba(125, 211, 252, .05);
++  border: 1px solid var(--fp-line);
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 9px;
++  padding: 4px 6px;
++}
++
++.tab-chip-accent {
++  color: var(--fp-cyan);
++}
++
++.tab-card-actions {
++  display: flex;
++  gap: 6px;
++  margin-left: auto;
++}
++
++.text-button {
++  background: transparent;
++  border-color: var(--fp-line-strong);
++  color: var(--fp-cyan);
++}
++
++.text-button:hover {
++  background: rgba(125, 211, 252, .1);
++}
++
++.text-button-danger {
++  color: var(--fp-danger);
++}
++
++.tab-card-tools {
++  border-top: 1px solid var(--fp-line);
++  gap: 12px;
++  justify-content: space-between;
++  padding: 9px 18px;
++}
++
++.tab-navigation {
++  flex: 1;
++  min-width: 0;
++}
++
++.tab-navigation-input {
++  border-bottom: 1px solid var(--fp-line-strong);
++  flex: 1;
++  font-family: monospace;
++  font-size: 11px;
++  height: 28px;
++  padding: 0 4px;
++}
++
++.tab-navigation-input:focus {
++  border-bottom-color: var(--fp-cyan);
++}
++
++.storage-button:disabled {
++  cursor: wait;
++  opacity: .6;
++}
++
++.storage-panel {
++  background: rgba(7, 12, 18, .5);
++  border-top: 1px dashed var(--fp-line-strong);
++  padding: 17px 18px 20px;
++}
++
++.storage-heading {
++  justify-content: space-between;
++}
++
++.storage-heading strong {
++  display: block;
++  font-family: monospace;
++  font-size: 11px;
++  font-weight: 500;
++  margin-top: 7px;
++}
++
++.storage-columns {
++  display: grid;
++  gap: 18px;
++  grid-template-columns: 1fr 1fr;
++  margin-top: 16px;
++}
++
++.storage-column {
++  min-width: 0;
++}
++
++.storage-column h5 {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++  font-weight: 500;
++  letter-spacing: 1px;
++  margin: 0 0 8px;
++  text-transform: uppercase;
++}
++
++.storage-entry {
++  border-bottom: 1px solid var(--fp-line);
++  display: grid;
++  gap: 5px;
++  grid-template-columns: minmax(90px, .35fr) minmax(0, 1fr);
++  padding: 7px 0;
++}
++
++.storage-entry code {
++  color: var(--fp-cyan);
++  font-family: monospace;
++  font-size: 10px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.storage-entry span,
++.storage-entry small {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 10px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.storage-entry small {
++  grid-column: 2;
++}
++
++.storage-empty {
++  border: 1px dashed var(--fp-line);
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++  padding: 12px;
++}
++
++.empty-orbit {
++  border-color: var(--fp-orange);
++  margin: 0 auto 16px;
++}
++
++.empty-state h4 {
++  color: var(--fp-text);
++  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
++  font-size: 15px;
++  font-weight: 500;
++  margin: 0 0 8px;
++}
++
++.empty-state p {
++  margin: 0;
++}
++
++@media (max-width: 820px) {
++  .side-rail {
++    display: none;
++  }
++
++  .workspace {
++    padding: 34px 22px 50px;
++  }
++
++  .topbar {
++    padding: 0 22px;
++  }
++}
++
++@media (max-width: 620px) {
++  .hero {
++    align-items: flex-start;
++    flex-direction: column;
++    gap: 22px;
++  }
++
++  .hero-metric {
++    border-left: 0;
++    border-top: 1px solid var(--fp-line-strong);
++    padding-left: 0;
++    padding-top: 14px;
++    width: 100%;
++  }
++
++  .control-panel {
++    padding: 18px;
++  }
++
++  .create-bar {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .create-prefix {
++    padding: 4px 5px 0;
++  }
++
++  .create-bar input {
++    min-height: 34px;
++  }
++
++  .tab-card-main,
++  .tab-card-tools {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .tab-card-actions {
++    margin-left: 46px;
++  }
++
++  .storage-columns {
++    grid-template-columns: 1fr;
++  }
++}
++
