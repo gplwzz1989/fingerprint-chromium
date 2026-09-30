@@ -46,6 +46,7 @@ upstream-fixes/managed-tab-storage-export.patch
 upstream-fixes/managed-tab-storage-write.patch
 upstream-fixes/managed-tab-storage-sync-ui.patch
 upstream-fixes/managed-tab-account-id.patch
+upstream-fixes/managed-tab-account-ui.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch

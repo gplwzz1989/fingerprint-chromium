@@ -1,0 +1,44 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -77,10 +77,14 @@
+         <div class="create-bar">
+           <div class="create-prefix">新建环境 //</div>
+           <input id="managedTabUrl" type="url"
+               placeholder="输入网址，例如 https://example.com"
+               @keydown="${this.onCreateManagedTabKeydown_}">
++          <input id="managedTabAccountId" type="text"
++              placeholder="账号标识（可选，用于恢复 SaaS 账号环境）"
++              autocomplete="off"
++              @keydown="${this.onCreateManagedTabKeydown_}">
+           <button class="primary-button" type="button"
+               @click="${this.onCreateManagedTab_}">
+             建立 Tab
+           </button>
+         </div>
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -90,10 +90,16 @@
+   protected onCreateManagedTab_() {
+-    const input =
++    const urlInput =
+         this.shadowRoot.querySelector<HTMLInputElement>('#managedTabUrl');
+-    const url = input?.value.trim();
+-    this.runManagedTabAction_(this.browserProxy_.createManagedTab(url ||
+-                                                                  undefined));
+-    if (input) {
+-      input.value = '';
++    const accountInput = this.shadowRoot.querySelector<HTMLInputElement>(
++        '#managedTabAccountId');
++    const url = urlInput?.value.trim();
++    const accountId = accountInput?.value.trim();
++    this.runManagedTabAction_(this.browserProxy_.createManagedTab(
++        url || undefined, accountId || undefined));
++    if (urlInput) {
++      urlInput.value = '';
++    }
++    if (accountInput) {
++      accountInput.value = '';
+     }
+   }
