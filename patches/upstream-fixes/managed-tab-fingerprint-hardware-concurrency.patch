@@ -1,0 +1,127 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -63,7 +63,14 @@ class ManagedTabContext final
+   const blink::UserAgentOverride& fingerprint_user_agent_override() const {
+     return fingerprint_user_agent_override_;
+   }
+ 
++  // Sets the per-tab navigator.hardwareConcurrency value. Passing zero clears
++  // the override and restores the renderer's normal fingerprint behavior.
++  bool SetFingerprintHardwareConcurrency(int hardware_concurrency);
++  int fingerprint_hardware_concurrency() const {
++    return fingerprint_hardware_concurrency_;
++  }
++
+   // Reads the cookies in this tab's partition and the localStorage values of
+   // its current primary main frame without modifying page state.
+   void GetStorageSnapshot(StorageSnapshotCallback callback);
+@@ -98,6 +104,7 @@ class ManagedTabContext final
+   std::u16string title_;
+   double load_progress_ = 0.0;
+   blink::UserAgentOverride fingerprint_user_agent_override_;
++  int fingerprint_hardware_concurrency_ = 0;
+ 
+   base::WeakPtrFactory<ManagedTabContext> weak_factory_{this};
+ };
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -62,3 +62,4 @@
+ #include "content/public/browser/web_contents_delegate.h"
+ #include "services/network/public/mojom/cookie_manager.mojom.h"
++#include "third_party/blink/public/common/web_preferences/web_preferences.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+@@ -163,6 +164,23 @@ void ManagedTabContext::SetFingerprintUserAgentOverride(
+   web_contents()->SetUserAgentOverride(user_agent_override,
+                                        /*override_in_new_tabs=*/false);
+   fingerprint_user_agent_override_ = web_contents()->GetUserAgentOverride();
+ }
+ 
++bool ManagedTabContext::SetFingerprintHardwareConcurrency(
++    int hardware_concurrency) {
++  if (!web_contents() || hardware_concurrency < 0 || hardware_concurrency > 64) {
++    return false;
++  }
++
++  blink::web_pref::WebPreferences preferences =
++      web_contents()->GetOrCreateWebPreferences();
++  // Negative values are reserved as the renderer-side marker for a managed
++  // Tab override. Zero clears the marker and restores normal behavior.
++  preferences.number_of_cpu_cores =
++      hardware_concurrency == 0 ? 0 : -hardware_concurrency;
++  web_contents()->SetWebPreferences(preferences);
++  fingerprint_hardware_concurrency_ = hardware_concurrency;
++  return true;
++}
++
+ void ManagedTabContext::GetStorageSnapshot(StorageSnapshotCallback callback) {
+diff --git a/third_party/blink/renderer/core/execution_context/navigator_base.cc b/third_party/blink/renderer/core/execution_context/navigator_base.cc
+--- a/third_party/blink/renderer/core/execution_context/navigator_base.cc
++++ b/third_party/blink/renderer/core/execution_context/navigator_base.cc
+@@ -5,12 +5,19 @@
+ #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
+ 
++#include <optional>
++
+ #include "base/command_line.h"
+ #include "base/feature_list.h"
+ #include "components/ungoogled/ungoogled_switches.h"
+ #include "build/build_config.h"
+ #include "third_party/blink/public/common/features.h"
++#include "third_party/blink/public/web/web_view.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
++#include "third_party/blink/renderer/core/exported/web_view_impl.h"
++#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/navigator_concurrent_hardware.h"
+ #include "third_party/blink/renderer/core/geolocation/geolocation.h"
++#include "third_party/blink/renderer/core/page/chrome_client.h"
++#include "third_party/blink/renderer/core/page/page.h"
+ #include "third_party/blink/renderer/core/probe/core_probes.h"
+ #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+@@ -64,3 +71,29 @@
+ }
+ 
++std::optional<unsigned> GetManagedHardwareConcurrency(
++    ExecutionContext* execution_context) {
++  if (!execution_context || !execution_context->IsWindow()) {
++    return std::nullopt;
++  }
++
++  auto* window = To<LocalDOMWindow>(execution_context);
++  if (!window->GetFrame() || !window->GetFrame()->GetPage()) {
++    return std::nullopt;
++  }
++
++  WebViewImpl* web_view =
++      window->GetFrame()->GetPage()->GetChromeClient().GetWebView();
++  if (!web_view) {
++    return std::nullopt;
++  }
++
++  const int configured_value =
++      web_view->GetWebPreferences().number_of_cpu_cores;
++  if (configured_value >= -64 && configured_value < 0) {
++    return static_cast<unsigned>(-configured_value);
++  }
++
++  return std::nullopt;
++}
++
+ }  // namespace
+@@ -119,4 +152,13 @@ unsigned int NavigatorBase::hardwareConcurrency() const {
+-  unsigned int hardware_concurrency =
+-      NavigatorConcurrentHardware::hardwareConcurrency();
++  std::optional<unsigned> managed_hardware_concurrency =
++      GetManagedHardwareConcurrency(GetExecutionContext());
++  unsigned int hardware_concurrency;
++  if (managed_hardware_concurrency.has_value()) {
++    hardware_concurrency = managed_hardware_concurrency.value();
++  } else if (base::FeatureList::IsEnabled(blink::features::kReducedSystemInfo)) {
++    hardware_concurrency = 2;
++  } else {
++    hardware_concurrency =
++        NavigatorConcurrentHardware::hardwareConcurrency();
++  }
+ 
+   probe::ApplyHardwareConcurrencyOverride(
