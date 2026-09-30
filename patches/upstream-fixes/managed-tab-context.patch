@@ -1,0 +1,129 @@
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -10,6 +10,8 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/uuid.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/lifetime/browser_shutdown.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -50,6 +52,8 @@
+ #include "components/tabs/public/split_tab_id.h"
+ #include "components/tabs/public/split_tab_visual_data.h"
+ #include "components/tabs/public/tab_group.h"
++#include "content/public/browser/navigation_entry.h"
++#include "content/public/browser/navigation_handle.h"
+ #include "content/public/browser/site_instance.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_delegate.h"
+@@ -65,6 +65,35 @@
+ 
+ namespace chrome {
+ 
++ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
++    : content::WebContentsObserver(web_contents),
++      content::WebContentsUserData<ManagedTabContext>(*web_contents),
++      id_(base::Uuid::GenerateRandomV4().AsLowercaseString()),
++      current_url_(web_contents->GetURL()) {}
++
++ManagedTabContext::~ManagedTabContext() = default;
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(ManagedTabContext);
++
++void ManagedTabContext::DidFinishNavigation(
++    content::NavigationHandle* navigation_handle) {
++  if (!navigation_handle->IsInPrimaryMainFrame() ||
++      !navigation_handle->HasCommitted()) {
++    return;
++  }
++
++  current_url_ = navigation_handle->GetURL();
++}
++
++void ManagedTabContext::LoadProgressChanged(double progress) {
++  load_progress_ = progress;
++}
++
++void ManagedTabContext::TitleWasSet(content::NavigationEntry* entry) {
++  if (entry) {
++    title_ = entry->GetTitle();
++  }
++}
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ // BrowserTabStripModelDelegate, public:
+@@ -184,6 +212,7 @@ Browser* BrowserTabStripModelDelegate::CreateNewStripWithTabs(
+ void BrowserTabStripModelDelegate::WillAddWebContents(
+     content::WebContents* contents) {
+   TabHelpers::AttachTabHelpers(contents);
++  ManagedTabContext::CreateForWebContents(contents);
+ }
+ 
+ int BrowserTabStripModelDelegate::GetDragActions() const {
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -0,0 +1,59 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_MANAGED_TAB_MANAGED_TAB_CONTEXT_H_
++#define CHROME_BROWSER_MANAGED_TAB_MANAGED_TAB_CONTEXT_H_
++
++#include <string>
++
++#include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_contents_user_data.h"
++#include "url/gurl.h"
++
++namespace content {
++class NavigationEntry;
++class NavigationHandle;
++}  // namespace content
++
++namespace chrome {
++
++// Stores the browser-managed identity and runtime state for one native tab.
++// The object is attached to WebContents so later account isolation features can
++// resolve the managed environment from the active tab without using globals.
++class ManagedTabContext final
++    : public content::WebContentsObserver,
++      public content::WebContentsUserData<ManagedTabContext> {
++ public:
++  ManagedTabContext(const ManagedTabContext&) = delete;
++  ManagedTabContext& operator=(const ManagedTabContext&) = delete;
++
++  ~ManagedTabContext() override;
++
++  const std::string& id() const { return id_; }
++  const GURL& current_url() const { return current_url_; }
++  const std::u16string& title() const { return title_; }
++  double load_progress() const { return load_progress_; }
++
++ private:
++  friend class content::WebContentsUserData<ManagedTabContext>;
++
++  explicit ManagedTabContext(content::WebContents* web_contents);
++
++  // content::WebContentsObserver:
++  void DidFinishNavigation(
++      content::NavigationHandle* navigation_handle) override;
++  void LoadProgressChanged(double progress) override;
++  void TitleWasSet(content::NavigationEntry* entry) override;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++
++  const std::string id_;
++  GURL current_url_;
++  std::u16string title_;
++  double load_progress_ = 0.0;
++};
++
++}  // namespace chrome
++
++#endif  // CHROME_BROWSER_MANAGED_TAB_MANAGED_TAB_CONTEXT_H_
