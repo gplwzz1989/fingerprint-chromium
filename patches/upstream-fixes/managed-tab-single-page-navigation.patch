@@ -1,0 +1,19 @@
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -2141,2 +2141,15 @@ content::WebContents* Browser::AddNewContents(
+     bool* was_blocked) {
++  if (source && disposition != WindowOpenDisposition::CURRENT_TAB &&
++      disposition != WindowOpenDisposition::SAVE_TO_DISK) {
++    NavigateParams params(
++        this, target_url.is_empty() ? GURL("about:blank") : target_url,
++        ui::PAGE_TRANSITION_LINK);
++    params.source_contents = source;
++    params.is_renderer_initiated = true;
++    params.user_gesture = user_gesture;
++    params.original_user_gesture = user_gesture;
++    Navigate(&params);
++    return params.navigated_or_inserted_contents;
++  }
++
+   FullscreenController* fullscreen_controller = browser_window_features()

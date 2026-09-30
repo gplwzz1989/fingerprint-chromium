@@ -30,6 +30,7 @@ core/ungoogled-chromium/remove-unused-preferences-fields.patch
 upstream-fixes/restore-signin-pref-registration.patch
 upstream-fixes/managed-tab-context.patch
 upstream-fixes/managed-tab-storage-partition.patch
+upstream-fixes/managed-tab-single-page-navigation.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
