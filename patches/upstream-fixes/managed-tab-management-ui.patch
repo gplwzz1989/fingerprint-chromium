@@ -1,0 +1,463 @@
+diff --git a/chrome/browser/resources/management/management_ui.ts b/chrome/browser/resources/management/management_ui.ts
+--- a/chrome/browser/resources/management/management_ui.ts
++++ b/chrome/browser/resources/management/management_ui.ts
+@@ -20,3 +20,4 @@
+ // clang-format off
+ import type {Application, BrowserReportingResponse, Extension, ManagementBrowserProxy, ThreatProtectionInfo} from './management_browser_proxy.js';
++import type {ManagedTabState} from './management_browser_proxy.js';
+ import { ManagementBrowserProxyImpl, ReportingType} from './management_browser_proxy.js';
+@@ -130,3 +130,5 @@
+       managed_: {type: Boolean},
+       threatProtectionInfo_: {type: Object},
++      managedTabs_: {type: Array},
++      managedTabError_: {type: String},
+     };
+@@ -167,6 +167,8 @@
+   protected accessor managed_: boolean = false;
+   protected accessor applicationReportingSubtitle_: string = '';
+   protected accessor extensionReportingSubtitle_: string = '';
+   protected accessor threatProtectionInfo_: ThreatProtectionInfo|null = null;
++  protected accessor managedTabs_: ManagedTabState[] = [];
++  protected accessor managedTabError_: string = '';
+   private browserProxy_: ManagementBrowserProxy =
+       ManagementBrowserProxyImpl.getInstance();
+@@ -209,4 +209,5 @@
+     this.getExtensions_();
+     this.getManagedWebsites_();
+     this.getApplications_();
++    this.getManagedTabs_();
+     // Assign the promise result directly to the property
+@@ -280,9 +280,82 @@
+   private getApplications_() {
+     this.browserProxy_.getApplications().then(applications => {
+       this.applications_ = applications;
+     });
+   }
+ 
++  private getManagedTabs_() {
++    this.browserProxy_.getManagedTabs().then(
++        managedTabs => {
++          this.managedTabs_ = managedTabs;
++          this.managedTabError_ = '';
++        },
++        () => {
++          this.managedTabError_ = '无法读取原生 Tab 状态，请重试';
++        });
++  }
++
++  private runManagedTabAction_(action: Promise<unknown>) {
++    this.managedTabError_ = '';
++    action.then(
++        result => {
++          if (result === false) {
++            this.managedTabError_ = '原生 Tab 操作失败，请重试';
++            return;
++          }
++          this.getManagedTabs_();
++        },
++        () => {
++          this.managedTabError_ = '原生 Tab 操作失败，请重试';
++        });
++  }
++
++  protected onCreateManagedTab_() {
++    const input =
++        this.shadowRoot!.querySelector<HTMLInputElement>('#managedTabUrl');
++    const url = input?.value.trim();
++    this.runManagedTabAction_(this.browserProxy_.createManagedTab(url ||
++                                                                  undefined));
++    if (input) {
++      input.value = '';
++    }
++  }
++
++  protected onCreateManagedTabKeydown_(event: KeyboardEvent) {
++    if (event.key === 'Enter') {
++      event.preventDefault();
++      this.onCreateManagedTab_();
++    }
++  }
++
++  protected onActivateManagedTab_(id: string) {
++    this.runManagedTabAction_(this.browserProxy_.activateManagedTab(id));
++  }
++
++  protected onCloseManagedTab_(id: string) {
++    this.runManagedTabAction_(this.browserProxy_.closeManagedTab(id));
++  }
++
++  protected onManagedTabNavigate_(source: Event, id: string) {
++    const element = source.currentTarget as HTMLElement;
++    const input = element.matches('input') ? element as HTMLInputElement :
++                                               element.parentElement?.querySelector<
++                                                   HTMLInputElement>(
++                                                   '.managed-tab-navigation-input');
++    const url = input?.value.trim();
++    if (!url) {
++      this.managedTabError_ = '请输入要打开的网址';
++      return;
++    }
++    this.runManagedTabAction_(this.browserProxy_.navigateManagedTab(id, url));
++  }
++
++  protected onManagedTabNavigateKeydown_(event: KeyboardEvent, id: string) {
++    if (event.key === 'Enter') {
++      event.preventDefault();
++      this.onManagedTabNavigate_(event, id);
++    }
++  }
++
+   private getThreatProtectionInfo_() {
+     this.browserProxy_.getThreatProtectionInfo().then(info => {
+       this.threatProtectionInfo_ = info;
+diff --git a/chrome/browser/resources/management/management_ui.html.ts b/chrome/browser/resources/management/management_ui.html.ts
+--- a/chrome/browser/resources/management/management_ui.html.ts
++++ b/chrome/browser/resources/management/management_ui.html.ts
+@@ -28,2 +28,74 @@
+       ${getPromotionBannerHtml.call(this)}
++      <section class="managed-tabs-section">
++        <div class="managed-tabs-heading">
++          <div>
++            <div class="managed-tabs-kicker">指纹隔离控制台</div>
++            <h2>原生 Tab 环境</h2>
++            <p>每个 Tab 使用独立的存储分区和指纹配置，所有页面保持在当前窗口内。</p>
++          </div>
++          <div class="managed-tabs-count">${this.managedTabs_.length} 个环境</div>
++        </div>
++        <div class="managed-tabs-create">
++          <label for="managedTabUrl">新建环境</label>
++          <input id="managedTabUrl" type="url"
++              placeholder="输入网址，例如 https://example.com"
++              @keydown="${this.onCreateManagedTabKeydown_}">
++          <button class="managed-tab-primary" type="button"
++              @click="${this.onCreateManagedTab_}">新建 Tab</button>
++        </div>
++        <div class="managed-tab-error" ?hidden="${!this.managedTabError_}">
++          ${this.managedTabError_}
++        </div>
++        <div class="managed-tabs-list">
++          ${this.managedTabs_.length ? this.managedTabs_.map(tab => html`
++            <article class="managed-tab-row">
++              <div class="managed-tab-details">
++                <div class="managed-tab-title">
++                  ${tab.title || '未命名环境'}
++                </div>
++                <div class="managed-tab-url" title="${tab.url}">
++                  ${tab.url || 'about:blank'}
++                </div>
++                <div class="managed-tab-chips">
++                  <span class="managed-tab-chip">${tab.id}</span>
++                  <span class="managed-tab-chip">
++                    ${tab.storage_partition_persistent ? '持久化分区' : '临时分区'}
++                  </span>
++                  <span class="managed-tab-chip">
++                    ${tab.hardware_concurrency > 0 ?
++                        `${tab.hardware_concurrency} 核并发` : '默认并发'}
++                  </span>
++                </div>
++                <div class="managed-tab-navigation">
++                  <input class="managed-tab-navigation-input" type="url"
++                      .value="${tab.url}"
++                      aria-label="导航地址"
++                      @keydown="${(event: KeyboardEvent) =>
++                          this.onManagedTabNavigateKeydown_(event, tab.id)}">
++                  <button class="managed-tab-secondary" type="button"
++                      @click="${(event: Event) =>
++                          this.onManagedTabNavigate_(event, tab.id)}">
++                    导航
++                  </button>
++                </div>
++              </div>
++              <div class="managed-tab-actions">
++                <button class="managed-tab-secondary" type="button"
++                    @click="${() => this.onActivateManagedTab_(tab.id)}">
++                  切换
++                </button>
++                <button class="managed-tab-danger" type="button"
++                    @click="${() => this.onCloseManagedTab_(tab.id)}">
++                  关闭
++                </button>
++              </div>
++            </article>
++          `) : html`
++            <div class="managed-tab-empty">
++              <div class="managed-tab-empty-title">还没有原生 Tab 环境</div>
++              <div>输入网址后创建第一个隔离环境。</div>
++            </div>
++          `}
++        </div>
++      </section>
+ <if expr="is_chromeos">
+diff --git a/chrome/browser/resources/management/management_ui.css b/chrome/browser/resources/management/management_ui.css
+--- a/chrome/browser/resources/management/management_ui.css
++++ b/chrome/browser/resources/management/management_ui.css
+@@ -214,0 +215,269 @@
++
++.managed-tabs-section {
++  background: linear-gradient(135deg, var(--google-grey-900), #1f3348);
++  border-radius: 12px;
++  color: var(--google-grey-100);
++  margin: 20px;
++  min-height: 0;
++  overflow: hidden;
++  padding: 24px;
++  position: relative;
++}
++
++.managed-tabs-section::before {
++  background: #8ab4f8;
++  border-radius: 50%;
++  content: '';
++  height: 180px;
++  opacity: .12;
++  position: absolute;
++  right: -70px;
++  top: -100px;
++  width: 180px;
++}
++
++.managed-tabs-heading {
++  align-items: flex-start;
++  display: flex;
++  gap: 20px;
++  justify-content: space-between;
++  position: relative;
++}
++
++.managed-tabs-kicker {
++  color: #8ab4f8;
++  font-size: 11px;
++  font-weight: 700;
++  letter-spacing: 1.2px;
++  text-transform: uppercase;
++}
++
++.managed-tabs-heading h2 {
++  color: var(--google-grey-100);
++  font-size: 21px;
++  margin: 6px 0 0;
++}
++
++.managed-tabs-heading p {
++  color: var(--google-grey-300);
++  font-size: 13px;
++  margin: 8px 0 0;
++}
++
++.managed-tabs-count {
++  border: 1px solid rgba(138, 180, 248, .45);
++  border-radius: 20px;
++  color: #8ab4f8;
++  flex-shrink: 0;
++  font-size: 12px;
++  padding: 6px 10px;
++}
++
++.managed-tabs-create {
++  align-items: center;
++  display: flex;
++  gap: 10px;
++  margin-top: 20px;
++  position: relative;
++}
++
++.managed-tabs-create label {
++  color: var(--google-grey-300);
++  font-size: 12px;
++  font-weight: 500;
++  white-space: nowrap;
++}
++
++.managed-tabs-create input,
++.managed-tab-navigation-input {
++  background: rgba(0, 0, 0, .22);
++  border: 1px solid rgba(255, 255, 255, .24);
++  border-radius: 6px;
++  box-sizing: border-box;
++  color: var(--google-grey-100);
++  min-width: 0;
++  outline: none;
++  padding: 9px 11px;
++}
++
++.managed-tabs-create input {
++  flex: 1;
++}
++
++.managed-tabs-create input::placeholder,
++.managed-tab-navigation-input::placeholder {
++  color: var(--google-grey-400);
++}
++
++.managed-tabs-create input:focus,
++.managed-tab-navigation-input:focus {
++  border-color: #8ab4f8;
++  box-shadow: 0 0 0 2px rgba(138, 180, 248, .2);
++}
++
++.managed-tab-primary,
++.managed-tab-secondary,
++.managed-tab-danger {
++  border: 0;
++  border-radius: 6px;
++  cursor: pointer;
++  font-size: 12px;
++  font-weight: 500;
++  min-height: 34px;
++  padding: 0 13px;
++  transition: background-color 120ms ease, transform 120ms ease;
++  white-space: nowrap;
++}
++
++.managed-tab-primary:active,
++.managed-tab-secondary:active,
++.managed-tab-danger:active {
++  transform: translateY(1px);
++}
++
++.managed-tab-primary {
++  background: #8ab4f8;
++  color: #17283a;
++}
++
++.managed-tab-primary:hover {
++  background: #aecbfa;
++}
++
++.managed-tab-secondary {
++  background: rgba(255, 255, 255, .12);
++  color: var(--google-grey-100);
++}
++
++.managed-tab-secondary:hover {
++  background: rgba(255, 255, 255, .2);
++}
++
++.managed-tab-danger {
++  background: rgba(242, 139, 130, .14);
++  color: #f28b82;
++}
++
++.managed-tab-danger:hover {
++  background: rgba(242, 139, 130, .25);
++}
++
++.managed-tab-error {
++  background: rgba(242, 139, 130, .14);
++  border-left: 3px solid #f28b82;
++  color: #f28b82;
++  font-size: 12px;
++  margin-top: 14px;
++  padding: 8px 10px;
++}
++
++.managed-tabs-list {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin-top: 18px;
++  position: relative;
++}
++
++.managed-tab-row {
++  align-items: stretch;
++  background: rgba(255, 255, 255, .08);
++  border: 1px solid rgba(255, 255, 255, .1);
++  border-radius: 8px;
++  display: flex;
++  gap: 16px;
++  justify-content: space-between;
++  padding: 14px;
++}
++
++.managed-tab-details {
++  min-width: 0;
++}
++
++.managed-tab-title {
++  color: var(--google-grey-100);
++  font-size: 14px;
++  font-weight: 500;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.managed-tab-url {
++  color: var(--google-grey-300);
++  font-family: monospace;
++  font-size: 11px;
++  margin-top: 5px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.managed-tab-chips {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 6px;
++  margin-top: 10px;
++}
++
++.managed-tab-chip {
++  background: rgba(0, 0, 0, .18);
++  border-radius: 4px;
++  color: var(--google-grey-300);
++  font-family: monospace;
++  font-size: 10px;
++  padding: 4px 6px;
++}
++
++.managed-tab-navigation {
++  display: flex;
++  gap: 8px;
++  margin-top: 12px;
++  max-width: 620px;
++}
++
++.managed-tab-navigation-input {
++  flex: 1;
++  font-family: monospace;
++  font-size: 11px;
++}
++
++.managed-tab-actions {
++  align-items: center;
++  display: flex;
++  gap: 8px;
++  flex-shrink: 0;
++}
++
++.managed-tab-empty {
++  border: 1px dashed rgba(255, 255, 255, .28);
++  border-radius: 8px;
++  color: var(--google-grey-300);
++  font-size: 13px;
++  padding: 24px;
++  text-align: center;
++}
++
++.managed-tab-empty-title {
++  color: var(--google-grey-100);
++  font-size: 14px;
++  font-weight: 500;
++  margin-bottom: 6px;
++}
++
++@media (max-width: 700px) {
++  .managed-tabs-section {
++    margin: 12px;
++    padding: 18px;
++  }
++
++  .managed-tabs-create,
++  .managed-tab-row {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .managed-tab-actions {
++    justify-content: flex-end;
++  }
++}

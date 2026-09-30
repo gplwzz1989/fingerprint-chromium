@@ -39,6 +39,7 @@ upstream-fixes/managed-tab-state-entry.patch
 upstream-fixes/managed-tab-single-parent-window.patch
 upstream-fixes/managed-tab-control-api.patch
 upstream-fixes/managed-tab-management-api.patch
+upstream-fixes/managed-tab-management-ui.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
