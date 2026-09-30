@@ -35,6 +35,7 @@ upstream-fixes/managed-tab-storage-snapshot.patch
 upstream-fixes/managed-tab-control-entry.patch
 upstream-fixes/managed-tab-fingerprint-ua.patch
 upstream-fixes/managed-tab-fingerprint-hardware-concurrency.patch
+upstream-fixes/managed-tab-state-entry.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
