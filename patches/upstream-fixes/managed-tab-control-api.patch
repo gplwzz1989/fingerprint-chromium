@@ -1,0 +1,171 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -20,7 +20,10 @@
+ #include "url/gurl.h"
+ 
++class Browser;
++
+ namespace content {
+ class BrowserContext;
+ class NavigationEntry;
+ class NavigationHandle;
++class WebContents;
+ }  // namespace content
+@@ -50,6 +53,8 @@ class ManagedTabContext final
+   ~ManagedTabContext() override;
+ 
+   static std::string GenerateId();
+   static std::vector<ManagedTabContext*> GetAll();
++  static base::Value::List GetAllState();
+   static ManagedTabContext* FindById(const std::string& id);
++  static ManagedTabContext* CreateNewTab(Browser* browser, const GURL& url);
+ 
+@@ -81,6 +86,15 @@ class ManagedTabContext final
+   // Returns the current browser-managed state for management UI/API callers.
+   base::Value::Dict GetState() const;
+ 
++  // Navigates this managed Tab without creating another native Tab.
++  bool NavigateTo(const GURL& url);
++
++  // Activates this managed Tab in its existing parent window.
++  bool Activate();
++
++  // Closes this managed Tab through its existing parent window.
++  bool Close();
++
+   // Reads the cookies in this tab's partition and the localStorage values of
+   // its current primary main frame without modifying page state.
+   void GetStorageSnapshot(StorageSnapshotCallback callback);
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -23,5 +23,8 @@
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/browser_finder.h"
+ #include "chrome/browser/ui/browser_list.h"
+ #include "chrome/browser/ui/browser_live_tab_context.h"
++#include "chrome/browser/ui/browser_navigator.h"
++#include "chrome/browser/ui/browser_navigator_params.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+@@ -58,6 +61,8 @@
+ #include "components/tabs/public/tab_group.h"
+ #include "content/public/browser/browser_context.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/common/referrer.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/site_instance.h"
+@@ -69,3 +74,4 @@
+ #include "services/network/public/mojom/cookie_manager.mojom.h"
+ #include "third_party/blink/public/common/web_preferences/web_preferences.h"
++#include "ui/base/page_transition_types.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+@@ -126,7 +132,16 @@
+   }
+ 
+   return contexts;
+ }
+ 
++// static
++base::Value::List ManagedTabContext::GetAllState() {
++  base::Value::List states;
++  for (ManagedTabContext* context : GetAll()) {
++    states.Append(context->GetState());
++  }
++  return states;
++}
++
+ // static
+ ManagedTabContext* ManagedTabContext::FindById(const std::string& id) {
+@@ -147,4 +162,26 @@
+   return nullptr;
+ }
+ 
++// static
++ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
++                                                    const GURL& url) {
++  if (!browser) {
++    return nullptr;
++  }
++
++  NavigateParams params(
++      browser, url.is_empty() ? browser->GetNewTabURL() : url,
++      ui::PAGE_TRANSITION_TYPED);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  params.managed_tab_id = GenerateId();
++  params.pwa_navigation_capturing_force_off = true;
++  Navigate(&params);
++
++  if (!params.navigated_or_inserted_contents) {
++    return nullptr;
++  }
++
++  return FromWebContents(params.navigated_or_inserted_contents);
++}
++
+ base::Value::Dict ManagedTabContext::GetState() const {
+@@ -181,4 +217,14 @@
+   return state;
+ }
+ 
++bool ManagedTabContext::NavigateTo(const GURL& url) {
++  if (!web_contents() || !url.is_valid()) {
++    return false;
++  }
++
++  web_contents()->GetController().LoadURL(
++      url, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
++  return true;
++}
++
+ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+@@ -185,5 +230,46 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+       current_url_(web_contents->GetURL()) {}
+ 
+ ManagedTabContext::~ManagedTabContext() = default;
++
++bool ManagedTabContext::Activate() {
++  if (!web_contents()) {
++    return false;
++  }
++
++  Browser* browser = chrome::FindBrowserWithTab(web_contents());
++  if (!browser) {
++    return false;
++  }
++
++  const int index =
++      browser->tab_strip_model()->GetIndexOfWebContents(web_contents());
++  if (index < 0) {
++    return false;
++  }
++
++  browser->tab_strip_model()->ActivateTabAt(index);
++  return true;
++}
++
++bool ManagedTabContext::Close() {
++  if (!web_contents()) {
++    return false;
++  }
++
++  Browser* browser = chrome::FindBrowserWithTab(web_contents());
++  if (!browser) {
++    return false;
++  }
++
++  const int index =
++      browser->tab_strip_model()->GetIndexOfWebContents(web_contents());
++  if (index < 0) {
++    return false;
++  }
++
++  browser->tab_strip_model()->CloseWebContentsAt(
++      index, TabCloseTypes::CLOSE_USER_GESTURE);
++  return true;
++}
+ 
+ WEB_CONTENTS_USER_DATA_KEY_IMPL(ManagedTabContext);
