@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
-@@ -538,6 +538,43 @@
+@@ -538,10 +538,49 @@
    protected async onSaasRefresh_() {
      await Promise.all([
        this.loadSaasAccounts_(), this.loadSaasMembers_(), this.loadSaasSessions_(),
