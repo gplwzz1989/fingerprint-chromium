@@ -22,7 +22,7 @@ diff --git a/chrome/browser/sessions/session_restore.cc b/chrome/browser/session
 +    }
  
      RecordAppLaunchForTab(browser, tab, selected_index);
-@@ -462,6 +467,10 @@ class SessionRestoreImpl : public BrowserListObserver {
+@@ -462,7 +467,11 @@ class SessionRestoreImpl : public BrowserListObserver {
                                 std::vector<RestoredTab>& restored_tabs) {
      Browser* browser = nullptr;
      if (!created_tabbed_browser && always_create_tabbed_browser_) {
