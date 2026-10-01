@@ -62,6 +62,7 @@ upstream-fixes/managed-tab-saas-member-invite.patch
 upstream-fixes/managed-tab-saas-invite-accept.patch
 upstream-fixes/managed-tab-saas-batch-ops.patch
 upstream-fixes/managed-tab-saas-member-ui.patch
+upstream-fixes/managed-tab-saas-account-access-ui.patch
 upstream-fixes/hide-chromium-profile-ui.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch

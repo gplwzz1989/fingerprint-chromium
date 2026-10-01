@@ -1,0 +1,443 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -96,8 +96,21 @@ export interface SaasAccount {
+   created_at: string;
+   updated_at: string;
+ }
+ 
++export interface SaasAccountMember {
++  user_id: string;
++  email: string;
++  display_name: string;
++  role: string;
++  created_at: string;
++}
++
++export interface SaasAccountMemberList {
++  restricted: boolean;
++  members: SaasAccountMember[];
++}
++
+ export interface SaasDeviceSession {
+   session_id: string;
+   device_id: string;
+   device_name: string;
+@@ -285,8 +298,31 @@ export class FingerprintManagerSaasClient {
+           body: JSON.stringify({name, labels}),
+         });
+   }
+ 
++  async getAccountMembers(
++      accountId: string): Promise<SaasAccountMemberList> {
++    return this.request_<SaasAccountMemberList>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/members`);
++  }
++
++  async updateAccountMember(
++      accountId: string, userId: string,
++      role: string): Promise<SaasAccountMember> {
++    return this.request_<SaasAccountMember>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/members/` +
++            encodeURIComponent(userId), {
++          method: 'PATCH',
++          body: JSON.stringify({role}),
++        });
++  }
++
++  async removeAccountMember(accountId: string, userId: string): Promise<void> {
++    await this.request_<unknown>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/members/` +
++            encodeURIComponent(userId), {method: 'DELETE'});
++  }
++
+   async getAccountSnapshot(accountId: string): Promise<ManagedTabStorageSnapshot> {
+     const response = await this.request_<SaasAccountSnapshot>(
+         `/api/v1/accounts/${encodeURIComponent(accountId)}/snapshot`);
+     if (response.schema_version !== kSaasSnapshotSchemaVersion ||
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -8,8 +8,10 @@ import type {
+   FingerprintManagerBrowserProxy,
+   ManagedTabState,
+   ManagedTabStorageSnapshot,
+   SaasAccount,
++  SaasAccountMember,
++  SaasAccountMemberList,
+   SaasDeviceSession,
+   SaasWorkspace,
+   SaasWorkspaceMember,
+ } from './fingerprint_manager_browser_proxy.js';
+@@ -44,8 +46,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasUserEmail_: {type: String},
+       saasWorkspaces_: {type: Array},
+       saasMembers_: {type: Array},
+       saasAccounts_: {type: Array},
++      saasAccountMembers_: {type: Object},
++      saasAccountMembersAccountId_: {type: String},
+       saasSessions_: {type: Array},
+       saasWorkspaceId_: {type: String},
+       saasInviteToken_: {type: String},
+       saasInviteMode_: {type: Boolean},
+@@ -65,8 +69,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasUserEmail_: string = '';
+   protected accessor saasWorkspaces_: SaasWorkspace[] = [];
+   protected accessor saasMembers_: SaasWorkspaceMember[] = [];
+   protected accessor saasAccounts_: SaasAccount[] = [];
++  protected accessor saasAccountMembers_: SaasAccountMemberList|null = null;
++  protected accessor saasAccountMembersAccountId_: string = '';
+   protected accessor saasSessions_: SaasDeviceSession[] = [];
+   protected accessor saasWorkspaceId_: string = '';
+   protected accessor saasInviteToken_: string = '';
+   protected accessor saasInviteMode_: boolean = false;
+@@ -334,8 +340,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       if (!this.saasWorkspaces_.length) {
+         throw new Error('当前用户没有可访问的工作区');
+       }
+       this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
++      this.saasAccountMembers_ = null;
++      this.saasAccountMembersAccountId_ = '';
+       await this.loadSaasAccounts_();
+       await this.loadSaasMembers_();
+       await this.loadSaasSessions_();
+       this.saasConnected_ = true;
+@@ -368,8 +376,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasUserEmail_ = '';
+     this.saasWorkspaces_ = [];
+     this.saasMembers_ = [];
+     this.saasAccounts_ = [];
++    this.saasAccountMembers_ = null;
++    this.saasAccountMembersAccountId_ = '';
+     this.saasSessions_ = [];
+     this.saasWorkspaceId_ = '';
+     this.saasInviteToken_ = '';
+     this.saasInviteMode_ = false;
+@@ -380,15 +390,20 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected async onSaasWorkspaceChange_(event: Event) {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
+     this.saasInviteToken_ = '';
++    this.saasAccountMembers_ = null;
++    this.saasAccountMembersAccountId_ = '';
+     await this.loadSaasAccounts_();
+     await this.loadSaasMembers_();
+   }
+ 
+   protected async onSaasRefresh_() {
+     await Promise.all([
+       this.loadSaasAccounts_(), this.loadSaasMembers_(), this.loadSaasSessions_(),
++      this.saasAccountMembersAccountId_ ?
++          this.loadSaasAccountMembers_(this.saasAccountMembersAccountId_) :
++          Promise.resolve(),
+     ]);
+   }
+ 
+   private async loadSaasAccounts_() {
+@@ -406,8 +421,22 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       this.saasBusy_ = false;
+     }
+   }
+ 
++  private async loadSaasAccountMembers_(accountId: string) {
++    if (!this.saasClient_ || !accountId) {
++      return;
++    }
++    try {
++      const members = await this.saasClient_.getAccountMembers(accountId);
++      if (this.saasAccountMembersAccountId_ === accountId) {
++        this.saasAccountMembers_ = members;
++      }
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    }
++  }
++
+   private async loadSaasMembers_() {
+     if (!this.saasClient_ || !this.saasWorkspaceId_) {
+       return;
+     }
+@@ -487,8 +516,118 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       this.saasBusy_ = false;
+     }
+   }
+ 
++  protected async onSaasShowAccountMembers_(account: SaasAccount) {
++    if (!this.saasClient_ || !this.canManageMembers_() || this.saasBusy_) {
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    this.saasAccountMembersAccountId_ = account.account_id;
++    this.saasAccountMembers_ = null;
++    try {
++      this.saasAccountMembers_ = await this.saasClient_.getAccountMembers(
++          account.account_id);
++    } catch (error) {
++      this.saasAccountMembers_ = null;
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected onSaasHideAccountMembers_() {
++    this.saasAccountMembers_ = null;
++    this.saasAccountMembersAccountId_ = '';
++  }
++
++  protected isSaasAccountMemberAssigned_(userId: string): boolean {
++    return this.saasAccountMembers_?.members.some(
++        member => member.user_id === userId) === true;
++  }
++
++  protected async onSaasAddAccountMember_() {
++    if (!this.saasClient_ || !this.saasAccountMembersAccountId_ ||
++        this.saasBusy_ || !this.canManageMembers_()) {
++      return;
++    }
++    const userSelect = this.shadowRoot.querySelector<HTMLSelectElement>(
++        '#saasAccountMemberUser');
++    const roleSelect = this.shadowRoot.querySelector<HTMLSelectElement>(
++        '#saasAccountMemberRole');
++    const userId = userSelect?.value || '';
++    const role = roleSelect?.value || '';
++    if (!userId || !['editor', 'viewer'].includes(role)) {
++      this.saasError_ = '请选择成员并设置账号权限';
++      return;
++    }
++    if (this.isSaasAccountMemberAssigned_(userId)) {
++      this.saasError_ = '该成员已经拥有账号权限';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await this.saasClient_.updateAccountMember(
++          this.saasAccountMembersAccountId_, userId, role);
++      await this.loadSaasAccountMembers_(this.saasAccountMembersAccountId_);
++      this.saasError_ = '账号成员权限已添加';
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected async onSaasUpdateAccountMember_(
++      source: Event, member: SaasAccountMember) {
++    if (!this.saasClient_ || !this.saasAccountMembersAccountId_ ||
++        this.saasBusy_ || !this.canManageMembers_()) {
++      return;
++    }
++    const role = (source.currentTarget as HTMLSelectElement).value;
++    if (!['editor', 'viewer'].includes(role)) {
++      this.saasError_ = '账号成员角色无效';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await this.saasClient_.updateAccountMember(
++          this.saasAccountMembersAccountId_, member.user_id, role);
++      await this.loadSaasAccountMembers_(this.saasAccountMembersAccountId_);
++      this.saasError_ = `账号成员 ${member.email} 的权限已更新`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected async onSaasRemoveAccountMember_(member: SaasAccountMember) {
++    if (!this.saasClient_ || !this.saasAccountMembersAccountId_ ||
++        this.saasBusy_ || !this.canManageMembers_()) {
++      return;
++    }
++    if (!window.confirm(`确定移除账号成员权限 ${member.email} 吗？`)) {
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await this.saasClient_.removeAccountMember(
++          this.saasAccountMembersAccountId_, member.user_id);
++      await this.loadSaasAccountMembers_(this.saasAccountMembersAccountId_);
++      this.saasError_ = `账号成员 ${member.email} 的权限已移除`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
+   protected canManageMembers_(): boolean {
+     const workspace = this.saasWorkspaces_.find(
+         item => item.workspace_id === this.saasWorkspaceId_);
+     return workspace?.role === 'owner' || workspace?.role === 'admin';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -131,8 +131,15 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                     @click="${(event: Event) =>
+                         this.onSaasUpdateAccount_(event, account)}">
+                   保存
+                 </button>
++                ${this.canManageMembers_() ? html`
++                  <button class="tool-button" type="button"
++                      ?disabled="${this.saasBusy_}"
++                      @click="${() => this.onSaasShowAccountMembers_(account)}">
++                    成员权限
++                  </button>
++                ` : ''}
+                 <button class="tool-button" type="button"
+                     ?disabled="${this.saasBusy_}"
+                     @click="${() => this.onSaasRestore_(account)}">
+                   恢复到本地
+@@ -141,8 +148,81 @@ export function getHtml(this: FingerprintManagerUiElement) {
+             `) : html`
+               <div class="saas-empty">当前工作区还没有账号目录。可在下方本地 Tab 上点击“同步云端”创建。</div>
+             `}
+           </div>
++          ${this.saasAccountMembers_ && this.saasAccountMembersAccountId_ ? html`
++            <div class="saas-account-access-panel">
++              <div class="saas-subheading">
++                <span>账号成员权限 · ${this.saasAccounts_.find(
++                    item => item.account_id === this.saasAccountMembersAccountId_)?.name ||
++                    this.saasAccountMembersAccountId_}</span>
++                <small>${this.saasAccountMembers_.restricted ?
++                    `显式 ${this.saasAccountMembers_.members.length} 位` :
++                    '工作区开放'}</small>
++              </div>
++              <div class="saas-account-access-note">
++                ${this.saasAccountMembers_.restricted ?
++                    '仅显式成员和所有者/管理员可以访问；移除全部成员后恢复工作区开放。' :
++                    '当前账号对工作区成员开放，添加第一个成员后将切换为显式访问。'}
++              </div>
++              <div class="saas-account-member-picker">
++                <select id="saasAccountMemberUser" aria-label="账号成员">
++                  <option value="">选择成员</option>
++                  ${this.saasMembers_.filter(member =>
++                      member.role !== 'owner' && member.role !== 'admin' &&
++                      !this.isSaasAccountMemberAssigned_(member.user_id)).map(
++                          member => html`
++                            <option value="${member.user_id}">
++                              ${member.display_name || member.email} ·
++                              ${this.getSaasMemberRoleLabel_(member.role)}
++                            </option>
++                          `)}
++                </select>
++                <select id="saasAccountMemberRole" aria-label="账号成员权限">
++                  <option value="viewer">查看者</option>
++                  <option value="editor">编辑者</option>
++                </select>
++                <button class="tool-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasAddAccountMember_}">
++                  添加成员
++                </button>
++                <button class="text-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasHideAccountMembers_}">
++                  关闭
++                </button>
++              </div>
++              <div class="saas-member-list">
++                ${this.saasAccountMembers_.members.length ?
++                    this.saasAccountMembers_.members.map(member => html`
++                      <div class="saas-member-row">
++                        <div class="saas-session-mark">${this.getSaasMemberRoleLabel_(member.role).slice(0, 1)}</div>
++                        <div class="saas-member-copy">
++                          <strong>${member.display_name || '未设置显示名称'}</strong>
++                          <span>${member.email} · ${this.getSaasMemberRoleLabel_(member.role)}</span>
++                        </div>
++                        <select class="saas-member-role-select"
++                            .value="${member.role}"
++                            ?disabled="${this.saasBusy_}"
++                            @change="${(event: Event) =>
++                                this.onSaasUpdateAccountMember_(event, member)}"
++                            aria-label="账号成员权限">
++                          <option value="editor">编辑者</option>
++                          <option value="viewer">查看者</option>
++                        </select>
++                        <button class="tool-button text-button-danger" type="button"
++                            ?disabled="${this.saasBusy_}"
++                            @click="${() => this.onSaasRemoveAccountMember_(member)}">
++                          移除
++                        </button>
++                      </div>
++                    `) : html`
++                      <div class="saas-empty">当前没有显式账号成员。</div>
++                    `}
++              </div>
++            </div>
++          ` : ''}
+           ${this.canManageMembers_() ? html`
+             <div class="saas-invite-section">
+               <div class="saas-subheading">
+                 <span>邀请工作区成员</span>
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -616,8 +616,38 @@ button:disabled {
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
+ 
++.saas-account-access-panel {
++  border-top: 1px solid var(--fp-line);
++  margin-top: 18px;
++  padding-top: 15px;
++}
++
++.saas-account-access-note {
++  color: var(--fp-faint);
++  font-size: 10px;
++  line-height: 1.5;
++  margin-top: 8px;
++}
++
++.saas-account-member-picker {
++  align-items: center;
++  display: flex;
++  gap: 8px;
++  margin-top: 10px;
++}
++
++.saas-account-member-picker select {
++  background: rgba(5, 10, 16, .72);
++  border: 1px solid var(--fp-line-strong);
++  color: var(--fp-text);
++  font-family: monospace;
++  font-size: 10px;
++  min-width: 150px;
++  padding: 7px 9px;
++}
++
+ .saas-member-section {
+   border-top: 1px solid var(--fp-line);
+   margin-top: 18px;
+   padding-top: 15px;
+@@ -1190,8 +1220,17 @@ button:disabled {
+     align-items: stretch;
+     flex-direction: column;
+   }
+ 
++  .saas-account-member-picker {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
++  .saas-account-member-picker select {
++    min-width: 0;
++  }
++
+   .saas-session-row {
+     align-items: stretch;
+     flex-direction: column;
+     padding: 11px;
