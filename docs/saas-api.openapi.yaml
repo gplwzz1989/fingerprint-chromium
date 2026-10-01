@@ -1,0 +1,428 @@
+openapi: 3.1.0
+info:
+  title: 指纹账号管理器 SaaS API
+  version: 1.0.0
+  description: |
+    云端账号目录、会话、加密环境快照和设备租约接口。
+    Cookie、LocalStorage、代理和指纹等敏感数据只以客户端加密信封传输和存储。
+security:
+  - bearerAuth: []
+tags:
+  - name: 会话
+  - name: 工作区
+  - name: 账号
+  - name: 设备租约
+  - name: 审计
+paths:
+  /api/v1/sessions:
+    post:
+      tags: [会话]
+      summary: 创建本地代理会话
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: 会话创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/workspaces:
+    get:
+      tags: [工作区]
+      summary: 获取当前用户可访问的工作区
+      responses:
+        '200':
+          description: 工作区列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/workspaces/{workspace_id}/accounts:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [账号]
+      summary: 分页获取账号目录
+      parameters:
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: page_token
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 账号目录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [账号]
+      summary: 创建账号目录项
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: 账号创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/accounts/{account_id}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [账号]
+      summary: 获取账号最新环境快照
+      responses:
+        '200':
+          description: 加密快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSnapshot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [账号]
+      summary: 按版本写入账号环境快照
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: 当前客户端已确认的云端 revision；首次写入使用 0。
+          schema:
+            type: string
+            pattern: '^[0-9]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutAccountSnapshotRequest'
+      responses:
+        '200':
+          description: 快照写入成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSnapshot'
+        '409':
+          description: revision 冲突，客户端必须重新获取后由用户选择合并或覆盖
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictError'
+
+  /api/v1/accounts/{account_id}/leases:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [设备租约]
+      summary: 获取账号编辑租约
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+      responses:
+        '201':
+          description: 获取租约成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lease'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/accounts/{account_id}/leases/{lease_id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+      - name: lease_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+    delete:
+      tags: [设备租约]
+      summary: 释放账号编辑租约
+      responses:
+        '204':
+          description: 租约已释放
+
+  /api/v1/accounts/{account_id}/audit-events:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [审计]
+      summary: 查询账号操作审计
+      responses:
+        '200':
+          description: 审计事件列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEvent'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkspaceId:
+      name: workspace_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9_-]+$'
+  responses:
+    Unauthorized:
+      description: 身份认证失败
+    Forbidden:
+      description: 没有访问权限
+    NotFound:
+      description: 资源不存在
+    Conflict:
+      description: 资源版本或租约冲突
+  schemas:
+    CreateSessionRequest:
+      type: object
+      required: [email, password, device_id]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          writeOnly: true
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        device_name:
+          type: string
+          maxLength: 128
+    Session:
+      type: object
+      required: [access_token, expires_in, user]
+      properties:
+        access_token:
+          type: string
+          readOnly: true
+        refresh_token:
+          type: string
+          readOnly: true
+        expires_in:
+          type: integer
+          minimum: 1
+        user:
+          $ref: '#/components/schemas/User'
+    User:
+      type: object
+      required: [user_id, email]
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+    Workspace:
+      type: object
+      required: [workspace_id, name, role]
+      properties:
+        workspace_id:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, editor, viewer]
+    CreateAccountRequest:
+      type: object
+      required: [account_id, name]
+      properties:
+        account_id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        labels:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+    Account:
+      allOf:
+        - $ref: '#/components/schemas/CreateAccountRequest'
+        - type: object
+          required: [workspace_id, revision, updated_at]
+          properties:
+            workspace_id:
+              type: string
+            revision:
+              type: integer
+              minimum: 0
+            updated_at:
+              type: string
+              format: date-time
+    AccountPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        next_page_token:
+          type: string
+    AccountSnapshot:
+      type: object
+      required: [account_id, revision, schema_version, updated_at, envelope]
+      properties:
+        account_id:
+          type: string
+        revision:
+          type: integer
+          minimum: 0
+        schema_version:
+          type: integer
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+        device_id:
+          type: string
+        envelope:
+          $ref: '#/components/schemas/EncryptedSnapshotEnvelope'
+    PutAccountSnapshotRequest:
+      type: object
+      required: [schema_version, device_id, envelope]
+      properties:
+        schema_version:
+          type: integer
+          minimum: 1
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        envelope:
+          $ref: '#/components/schemas/EncryptedSnapshotEnvelope'
+    EncryptedSnapshotEnvelope:
+      type: object
+      required: [algorithm, nonce, ciphertext, tag]
+      properties:
+        algorithm:
+          type: string
+          enum: [AES-256-GCM]
+        key_wrap:
+          type: string
+          description: 用账号恢复密钥或租户密钥包装数据密钥后的密文。
+        nonce:
+          type: string
+          description: Base64 编码的随机 nonce。
+        ciphertext:
+          type: string
+          description: Base64 编码的快照密文，不包含 Cookie 或 LocalStorage 明文。
+        tag:
+          type: string
+          description: Base64 编码的 AEAD 认证标签。
+    Lease:
+      type: object
+      required: [lease_id, account_id, device_id, expires_at]
+      properties:
+        lease_id:
+          type: string
+        account_id:
+          type: string
+        device_id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    AuditEvent:
+      type: object
+      required: [event_id, action, created_at]
+      properties:
+        event_id:
+          type: string
+        action:
+          type: string
+          enum: [login, account_created, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
+        device_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ConflictError:
+      type: object
+      required: [code, message, current_revision]
+      properties:
+        code:
+          type: string
+          enum: [snapshot_revision_conflict]
+        message:
+          type: string
+        current_revision:
+          type: integer
+          minimum: 0
