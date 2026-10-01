@@ -1,0 +1,24 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -968,7 +968,10 @@ class FingerprintManagerUiElement extends PolymerElement {
+     }
+     if (snapshot.storage_url) {
+-      await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
++      if (!await this.browserProxy_.navigateManagedTab(
++          tab.id, snapshot.storage_url)) {
++        throw new Error('无法导航到云端账号页面，云端环境尚未恢复');
++      }
+     }
+     return tab;
+   }
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -1099,7 +1099,7 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
+   if (const std::string* storage_url = snapshot.FindString("storage_url")) {
+     const GURL snapshot_url(*storage_url);
+-    if (!snapshot_url.is_valid() ||
++    if (!ManagedTabContext::IsValidNavigationUrl(snapshot_url) ||
+         url::Origin::Create(snapshot_url) !=
+             url::Origin::Create(context->current_url())) {

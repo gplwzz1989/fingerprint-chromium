@@ -73,6 +73,7 @@ upstream-fixes/managed-tab-duplicate-isolation.patch
 upstream-fixes/managed-tab-saas-restore-environment.patch
 upstream-fixes/managed-tab-single-parent-navigate.patch
 upstream-fixes/managed-tab-navigation-validation.patch
+upstream-fixes/managed-tab-saas-restore-validation.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
