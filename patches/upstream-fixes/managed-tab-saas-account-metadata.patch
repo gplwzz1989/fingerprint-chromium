@@ -96,7 +96,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 index 0000000..0000000 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
-@@ -512,21 +512,28 @@ button:disabled {
+@@ -512,10 +512,15 @@ button:disabled {
  }
  
  .saas-account-copy {
@@ -113,7 +113,7 @@ index 0000000..0000000 100644
 +  box-sizing: border-box;
    display: block;
    overflow: hidden;
-@@ -534,7 +541,7 @@ button:disabled {
+@@ -534,9 +541,11 @@ button:disabled {
  }
  
 -.saas-account-copy strong {
