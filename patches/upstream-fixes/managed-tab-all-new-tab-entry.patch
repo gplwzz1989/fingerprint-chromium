@@ -1,0 +1,10 @@
+diff --git a/chrome/browser/ui/browser_tabstrip.cc b/chrome/browser/ui/browser_tabstrip.cc
+--- a/chrome/browser/ui/browser_tabstrip.cc
++++ b/chrome/browser/ui/browser_tabstrip.cc
+@@ -73,6 +73,7 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
+   NavigateParams params(browser, url, transition);
+   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  params.managed_tab_id = ManagedTabContext::GenerateId();
+   params.pwa_navigation_capturing_force_off = true;
+   Navigate(&params);
+   return params.navigated_or_inserted_contents;
