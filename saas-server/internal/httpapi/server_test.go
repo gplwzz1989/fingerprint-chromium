@@ -2,8 +2,13 @@ package httpapi
 
 import (
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gplwzz1989/fingerprint-chromium/saas-server/internal/config"
 )
 
 func TestAccountIDValidation(t *testing.T) {
@@ -80,5 +85,29 @@ func TestSnapshotLeaseState(t *testing.T) {
 	}
 	if state := snapshotLeaseState("device-a", "device-b", now.Add(time.Minute), now); state != "lease_conflict" {
 		t.Fatalf("other-device lease state = %q, want lease_conflict", state)
+	}
+}
+
+func TestCORSAllowsPatchPreflight(t *testing.T) {
+	server := &Server{cfg: config.Config{
+		AllowedOrigins: map[string]struct{}{
+			"https://manager.example": {},
+		},
+	}}
+	handler := server.withCORS(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodOptions, "/api/v1/accounts/account-01", nil)
+	request.Header.Set("Origin", "https://manager.example")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPatch)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if !strings.Contains(response.Header().Get("Access-Control-Allow-Methods"), http.MethodPatch) {
+		t.Fatal("preflight response did not allow PATCH")
 	}
 }
