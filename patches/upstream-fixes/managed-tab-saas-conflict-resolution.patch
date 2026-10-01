@@ -101,7 +101,7 @@ index 38c36d45..64d34174 100644
      this.saasAccountMembers_ = null;
      this.saasAccountMembersAccountId_ = '';
      await this.loadSaasAccounts_();
-@@ -1038,6 +1049,60 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -1038,6 +1049,65 @@ export class FingerprintManagerUiElement extends CrLitElement {
        }
        await this.loadSaasAccounts_();
        this.saasError_ = `账号 ${account.account_id} 已同步到云端，版本 ${savedRevision}`;
