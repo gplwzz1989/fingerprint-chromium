@@ -1,0 +1,77 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -264,6 +264,13 @@
+   async getWorkspaces(): Promise<SaasWorkspace[]> {
+     return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
+   }
++
++  async createWorkspace(name: string): Promise<SaasWorkspace> {
++    return this.request_<SaasWorkspace>('/api/v1/workspaces', {
++      method: 'POST',
++      body: JSON.stringify({name}),
++    });
++  }
+ 
+   async createWorkspaceInvite(
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -498,6 +498,38 @@
+   protected async onSaasWorkspaceChange_(event: Event) {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
+     this.saasInviteToken_ = '';
+     this.saasSnapshotConflict_ = null;
+     this.saasAccountMembers_ = null;
+     this.saasAccountMembersAccountId_ = '';
+     await this.loadSaasAccounts_();
+     await this.loadSaasMembers_();
+   }
++
++  protected async onSaasCreateWorkspace_() {
++    if (!this.saasClient_ || this.saasBusy_) {
++      return;
++    }
++    const name = window.prompt('请输入新的工作区名称')?.trim() || '';
++    if (!name) {
++      this.saasError_ = '工作区名称不能为空';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const workspace = await this.saasClient_.createWorkspace(name);
++      this.saasWorkspaces_ = [...this.saasWorkspaces_, workspace];
++      this.saasWorkspaceId_ = workspace.workspace_id;
++      this.saasInviteToken_ = '';
++      this.saasSnapshotConflict_ = null;
++      this.saasAccountMembers_ = null;
++      this.saasAccountMembersAccountId_ = '';
++      await this.loadSaasAccounts_();
++      await this.loadSaasMembers_();
++      this.saasError_ = `工作区 ${workspace.name} 已创建`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
+ 
+   protected async onSaasRefresh_() {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -109,6 +109,11 @@
+               ${this.saasWorkspaces_.map(workspace => html`
+                 <option value="${workspace.workspace_id}">${workspace.name}</option>
+               `)}
+             </select>
++            <button class="tool-button" type="button"
++                ?disabled="${this.saasBusy_}"
++                @click="${this.onSaasCreateWorkspace_}">
++              新建工作区
++            </button>
+             <button class="tool-button" type="button"
+                 ?disabled="${this.saasBusy_}"
+                 @click="${this.onSaasRefresh_}">
