@@ -16,6 +16,7 @@
 
 - 维护单父窗口和原生 Tab。
 - 为每个账号创建独立 `StoragePartition`。
+- 将受管理 Tab 内页面发起的新窗口或新 Tab 导航复用当前 Tab，保持单页模式。
 - 在渲染器进程启动时应用账号指纹种子。
 - 应用账号级代理、User-Agent 和硬件并发数。
 - 读取或写入 Cookie、LocalStorage 等账号数据。

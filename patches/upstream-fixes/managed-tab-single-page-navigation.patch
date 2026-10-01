@@ -1,7 +1,27 @@
+diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_navigator.cc
+--- a/chrome/browser/ui/browser_navigator.cc
++++ b/chrome/browser/ui/browser_navigator.cc
+@@ -145,6 +145,16 @@ bool AdjustNavigateParamsForURL(NavigateParams* params) {
+   Browser* managed_browser =
+       params->browser ? params->browser->GetBrowserForMigrationOnly()
+                       : nullptr;
++  if (managed_browser && managed_browser->is_type_normal() &&
++      params->source_contents && params->is_renderer_initiated &&
++      ManagedTabContext::FromWebContents(params->source_contents) &&
++      params->disposition != WindowOpenDisposition::CURRENT_TAB &&
++      params->disposition != WindowOpenDisposition::SAVE_TO_DISK &&
++      params->disposition !=
++          WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
++    // 页面内打开新窗口或新 Tab 时，保持单页模式并复用当前受管理 Tab。
++    params->disposition = WindowOpenDisposition::CURRENT_TAB;
++  }
+   if (managed_browser && managed_browser->is_type_normal() &&
+       managed_browser->CanSupportWindowFeature(
+           Browser::WindowFeature::kFeatureTabStrip) &&
 diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
 --- a/chrome/browser/ui/browser.cc
 +++ b/chrome/browser/ui/browser.cc
-@@ -2141,2 +2141,15 @@ content::WebContents* Browser::AddNewContents(
+@@ -2141,1 +2141,13 @@ content::WebContents* Browser::AddNewContents(
      bool* was_blocked) {
 +  if (source && disposition != WindowOpenDisposition::CURRENT_TAB &&
 +      disposition != WindowOpenDisposition::SAVE_TO_DISK) {
@@ -15,5 +35,3 @@ diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
 +    Navigate(&params);
 +    return params.navigated_or_inserted_contents;
 +  }
-+
-   FullscreenController* fullscreen_controller = browser_window_features()
