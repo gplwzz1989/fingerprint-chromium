@@ -37,7 +37,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 +      accountCreated = true;
 +      this.saasAccounts_ = [...this.saasAccounts_, account];
 +      const tab = await this.browserProxy_.createManagedTab(
-+          undefined, account.account_id);
++          'about:blank', account.account_id);
 +      await this.syncManagedTabToSaas_(tab);
 +      await this.loadSaasAccounts_();
 +      this.saasError_ = `账号 ${account.account_id} 已创建并同步到本地 Tab`;
