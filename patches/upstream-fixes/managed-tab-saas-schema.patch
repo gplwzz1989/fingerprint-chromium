@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
 --- a/chrome/browser/ui/webui/management/management_ui_handler.cc
 +++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
-@@ -112,6 +112,8 @@
+@@ -112,5 +112,7 @@
  namespace {
  
 +constexpr int kManagedTabSnapshotSchemaVersion = 1;
@@ -9,7 +9,7 @@ diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrom
  #if !BUILDFLAG(IS_CHROMEOS)
  
  bool IsBrowserManaged() {
-@@ -963,6 +965,7 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+@@ -963,5 +965,6 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
    }
  
    base::Value::Dict result;
