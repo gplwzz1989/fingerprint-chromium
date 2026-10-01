@@ -88,6 +88,15 @@ var migrations = []string{
     )`,
 	`CREATE INDEX IF NOT EXISTS workspace_invites_lookup_idx
      ON workspace_invites (workspace_id, lower(email), expires_at)`,
+	`CREATE TABLE IF NOT EXISTS account_members (
+        account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('editor', 'viewer')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (account_id, user_id)
+    )`,
+	`CREATE INDEX IF NOT EXISTS account_members_user_idx
+     ON account_members (user_id, account_id)`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

@@ -154,3 +154,24 @@ func TestWorkspaceMemberManagementPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountMemberPolicy(t *testing.T) {
+	if !canManageAccountMembers("owner") || !canManageAccountMembers("admin") {
+		t.Fatal("owner and admin should manage account members")
+	}
+	for _, role := range []string{"editor", "viewer"} {
+		if canManageAccountMembers(role) {
+			t.Fatalf("%s should not manage account members", role)
+		}
+	}
+	for _, role := range []string{"editor", "viewer"} {
+		if !validAccountMemberRole(role) {
+			t.Fatalf("validAccountMemberRole(%q) = false", role)
+		}
+	}
+	for _, role := range []string{"", "owner", "admin", "invalid"} {
+		if validAccountMemberRole(role) {
+			t.Fatalf("validAccountMemberRole(%q) = true", role)
+		}
+	}
+}

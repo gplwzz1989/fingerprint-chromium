@@ -51,6 +51,9 @@
 - `GET /api/v1/workspaces/{workspace_id}/accounts`
 - `POST /api/v1/workspaces/{workspace_id}/accounts`
 - `PATCH /api/v1/accounts/{account_id}`
+- `GET /api/v1/accounts/{account_id}/members`
+- `PATCH /api/v1/accounts/{account_id}/members/{user_id}`
+- `DELETE /api/v1/accounts/{account_id}/members/{user_id}`
 - `GET /api/v1/accounts/{account_id}/snapshot`
 - `PUT /api/v1/accounts/{account_id}/snapshot`
 - `POST /api/v1/accounts/{account_id}/leases`
@@ -63,6 +66,8 @@
 工作区所有者可以邀请管理员、编辑者或查看者；管理员可以邀请编辑者或查看者。创建邀请后，接口只返回一次原始邀请令牌，部署方应通过受控渠道交给受邀用户。令牌服务端只保存摘要，有效期为 7 天且只能接受一次。新用户通过 `/api/v1/invitations/accept` 设置密码；已有用户需要再次验证自己的密码后才能加入工作区。
 
 工作区成员可以读取成员列表。所有者可以调整或移除非所有者成员；管理员只能调整或移除编辑者和查看者。成员不能修改或移除自己，所有者成员不可被移除。
+
+账号默认对工作区成员开放。所有者或管理员可以为账号设置显式成员列表；设置后，编辑者和查看者只能访问被分配的账号，所有者和管理员仍然拥有全部访问权限。移除账号的最后一个显式成员后，账号恢复为工作区开放状态。工作区成员被移除时，其账号权限会一并清理。
 
 ## 安全边界
 

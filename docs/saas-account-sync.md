@@ -75,6 +75,9 @@ local_storage
 | `GET` | `/api/v1/workspaces/{workspace_id}/accounts` | 分页获取账号清单 |
 | `POST` | `/api/v1/workspaces/{workspace_id}/accounts` | 创建账号及其稳定标识 |
 | `PATCH` | `/api/v1/accounts/{account_id}` | 更新账号名称和标签 |
+| `GET` | `/api/v1/accounts/{account_id}/members` | 获取账号显式成员权限 |
+| `PATCH` | `/api/v1/accounts/{account_id}/members/{user_id}` | 设置账号成员权限 |
+| `DELETE` | `/api/v1/accounts/{account_id}/members/{user_id}` | 移除账号成员权限 |
 | `GET` | `/api/v1/accounts/{account_id}/snapshot` | 获取指定版本或最新快照 |
 | `PUT` | `/api/v1/accounts/{account_id}/snapshot` | 使用 `If-Match` 提交新快照 |
 | `POST` | `/api/v1/accounts/{account_id}/leases` | 获取设备编辑租约 |
@@ -112,6 +115,7 @@ local_storage
 - 服务端用户会话、设备会话列表与撤销、工作区成员角色、账号目录、客户端加密快照、版本冲突、设备租约和审计记录；
 - 服务端工作区成员邀请与受邀用户密码初始化；
 - 服务端工作区成员列表、角色调整和成员移除，并限制所有者与管理员的管理边界；
+- 服务端账号级成员权限，可将账号限制为显式分配的编辑者或查看者；
 - 浏览器 WebUI 的 SaaS 登录、工作区账号列表、加密同步和恢复；
 - 浏览器 WebUI 支持单个或批量同步/恢复账号环境；批量操作按账号串行执行，单个账号失败不会中断其他账号，并返回成功数与失败原因；
 - 受控的 `fingerprint-saas bootstrap-user` 首个用户初始化流程。
@@ -121,7 +125,7 @@ local_storage
 后续按以下顺序推进：
 
 1. 真实 PostgreSQL 环境下的初始化、登录、同步和租约集成测试。
-2. 成员移除、角色调整和 SaaS 计费/配额边界。
+2. 浏览器 WebUI 的账号级成员权限管理，以及 SaaS 计费/配额边界。
 3. 客户端安全凭证存储和登录状态恢复策略。
 4. IndexedDB 等扩展存储的明确支持范围和一致性测试。
 

@@ -54,6 +54,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}", s.handleUpdateAccount)
+	mux.HandleFunc("GET /api/v1/accounts/{account_id}/members", s.handleListAccountMembers)
+	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}/members/{user_id}", s.handleUpdateAccountMember)
+	mux.HandleFunc("DELETE /api/v1/accounts/{account_id}/members/{user_id}", s.handleRemoveAccountMember)
 	mux.HandleFunc("GET /api/v1/accounts/{account_id}/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("PUT /api/v1/accounts/{account_id}/snapshot", s.handlePutSnapshot)
 	mux.HandleFunc("POST /api/v1/accounts/{account_id}/leases", s.handleAcquireLease)
@@ -881,6 +884,16 @@ func (s *Server) handleRemoveWorkspaceMember(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
 		return
 	}
+	if _, err := tx.ExecContext(r.Context(), `
+		DELETE FROM account_members am
+		USING accounts a
+		WHERE a.account_id = am.account_id
+		  AND a.workspace_id = $1::uuid
+		  AND am.user_id = $2::uuid`, workspaceID, targetUserID); err != nil {
+		s.logger.Error("清理工作区成员账号权限失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("提交工作区成员移除失败", "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
@@ -948,8 +961,25 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		       created_at, updated_at
 		FROM accounts
 		WHERE workspace_id = $1::uuid
+		  AND (
+			EXISTS (
+				SELECT 1 FROM workspace_members privileged
+				WHERE privileged.workspace_id = accounts.workspace_id
+				  AND privileged.user_id = $2::uuid
+				  AND privileged.role IN ('owner', 'admin')
+			)
+			OR NOT EXISTS (
+				SELECT 1 FROM account_members restricted
+				WHERE restricted.account_id = accounts.account_id
+			)
+			OR EXISTS (
+				SELECT 1 FROM account_members assigned
+				WHERE assigned.account_id = accounts.account_id
+				  AND assigned.user_id = $2::uuid
+			)
+		  )
 		ORDER BY account_id
-		LIMIT $2 OFFSET $3`, workspaceID, pageSize+1, offset)
+		LIMIT $3 OFFSET $4`, workspaceID, userID, pageSize+1, offset)
 	if err != nil {
 		s.logger.Error("查询账号目录失败", "error", err.Error())
 		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号目录")
@@ -1154,6 +1184,224 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("写入账号更新审计失败", "error", err.Error())
 	}
 	writeJSON(w, http.StatusOK, account)
+}
+
+type updateAccountMemberRequest struct {
+	Role string `json:"role"`
+}
+
+type accountMemberResponse struct {
+	UserID      string `json:"user_id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type accountMemberListResponse struct {
+	Restricted bool                    `json:"restricted"`
+	Members    []accountMemberResponse `json:"members"`
+}
+
+func (s *Server) handleListAccountMembers(w http.ResponseWriter, r *http.Request) {
+	userID, _, _, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.PathValue("account_id")
+	if !validAccountID(accountID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "账号标识无效")
+		return
+	}
+	_, role, ok := s.accountAccess(r.Context(), userID, accountID)
+	if !ok || !canManageAccountMembers(role) {
+		writeError(w, http.StatusForbidden, "forbidden", "没有管理该账号成员的权限")
+		return
+	}
+
+	var restricted bool
+	if err := s.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM account_members WHERE account_id = $1
+		)`, accountID).Scan(&restricted); err != nil {
+		s.logger.Error("查询账号成员范围失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号成员范围")
+		return
+	}
+
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT am.user_id::text, u.email, u.display_name, am.role, am.created_at
+		FROM account_members am
+		JOIN users u ON u.id = am.user_id
+		WHERE am.account_id = $1
+		ORDER BY lower(u.email), u.id`, accountID)
+	if err != nil {
+		s.logger.Error("查询账号成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号成员")
+		return
+	}
+	defer rows.Close()
+	members := make([]accountMemberResponse, 0)
+	for rows.Next() {
+		var member accountMemberResponse
+		var createdAt time.Time
+		if err := rows.Scan(&member.UserID, &member.Email, &member.DisplayName,
+			&member.Role, &createdAt); err != nil {
+			s.logger.Error("读取账号成员失败", "error", err.Error())
+			writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号成员")
+			return
+		}
+		member.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Error("遍历账号成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号成员")
+		return
+	}
+	writeJSON(w, http.StatusOK, accountMemberListResponse{
+		Restricted: restricted,
+		Members:    members,
+	})
+}
+
+func (s *Server) handleUpdateAccountMember(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.PathValue("account_id")
+	targetUserID := r.PathValue("user_id")
+	if !validAccountID(accountID) || !looksLikeUUID(targetUserID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "成员标识无效")
+		return
+	}
+	workspaceID, actorRole, ok := s.accountAccess(r.Context(), userID, accountID)
+	if !ok || !canManageAccountMembers(actorRole) {
+		writeError(w, http.StatusForbidden, "forbidden", "没有管理该账号成员的权限")
+		return
+	}
+
+	var request updateAccountMemberRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
+	if !validAccountMemberRole(request.Role) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "账号成员角色无效")
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始保存账号成员权限事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "保存账号成员权限失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+
+	var targetWorkspaceID, targetWorkspaceRole string
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT a.workspace_id::text, wm.role
+		FROM accounts a
+		JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
+		WHERE a.account_id = $1 AND wm.user_id = $2::uuid
+		FOR SHARE`,
+		accountID, targetUserID).Scan(&targetWorkspaceID, &targetWorkspaceRole)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "目标用户不是该工作区成员")
+			return
+		}
+		s.logger.Error("查询账号成员所属工作区失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "保存账号成员权限失败，请稍后重试")
+		return
+	}
+	if targetWorkspaceID != workspaceID {
+		writeError(w, http.StatusForbidden, "forbidden", "目标用户不属于该账号工作区")
+		return
+	}
+	if targetWorkspaceRole == "owner" || targetWorkspaceRole == "admin" {
+		writeError(w, http.StatusConflict, "conflict", "所有者或管理员无需单独分配账号权限")
+		return
+	}
+
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO account_members (account_id, user_id, role)
+		VALUES ($1, $2::uuid, $3)
+		ON CONFLICT (account_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+		accountID, targetUserID, request.Role)
+	if err != nil {
+		s.logger.Error("保存账号成员权限失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "保存账号成员权限失败，请稍后重试")
+		return
+	}
+
+	var member accountMemberResponse
+	var createdAt time.Time
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT am.user_id::text, u.email, u.display_name, am.role, am.created_at
+		FROM account_members am
+		JOIN users u ON u.id = am.user_id
+		WHERE am.account_id = $1 AND am.user_id = $2::uuid`,
+		accountID, targetUserID).Scan(&member.UserID, &member.Email,
+		&member.DisplayName, &member.Role, &createdAt)
+	if err != nil {
+		s.logger.Error("读取更新后的账号成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "保存账号成员权限失败，请稍后重试")
+		return
+	}
+	member.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交账号成员权限事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "保存账号成员权限失败，请稍后重试")
+		return
+	}
+	if err := s.writeAudit(r.Context(), userID, "account_member_role_updated", accountID, deviceID); err != nil {
+		s.logger.Error("写入账号成员权限审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusOK, member)
+}
+
+func (s *Server) handleRemoveAccountMember(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.PathValue("account_id")
+	targetUserID := r.PathValue("user_id")
+	if !validAccountID(accountID) || !looksLikeUUID(targetUserID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "成员标识无效")
+		return
+	}
+	if _, role, ok := s.accountAccess(r.Context(), userID, accountID); !ok ||
+		!canManageAccountMembers(role) {
+		writeError(w, http.StatusForbidden, "forbidden", "没有管理该账号成员的权限")
+		return
+	}
+
+	result, err := s.db.ExecContext(r.Context(), `
+		DELETE FROM account_members
+		WHERE account_id = $1 AND user_id = $2::uuid`, accountID, targetUserID)
+	if err != nil {
+		s.logger.Error("移除账号成员权限失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除账号成员权限失败，请稍后重试")
+		return
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Error("读取账号成员移除结果失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除账号成员权限失败，请稍后重试")
+		return
+	}
+	if count == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "账号成员权限不存在")
+		return
+	}
+	if err := s.writeAudit(r.Context(), userID, "account_member_removed", accountID, deviceID); err != nil {
+		s.logger.Error("写入账号成员移除审计失败", "error", err.Error())
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type encryptedSnapshotEnvelope struct {
@@ -1602,7 +1850,19 @@ func (s *Server) accountAccess(ctx context.Context, userID, accountID string) (s
 		SELECT a.workspace_id::text, wm.role
 		FROM accounts a
 		JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
-		WHERE a.account_id = $1 AND wm.user_id = $2::uuid`,
+		WHERE a.account_id = $1 AND wm.user_id = $2::uuid
+		  AND (
+			wm.role IN ('owner', 'admin')
+			OR NOT EXISTS (
+				SELECT 1 FROM account_members restricted
+				WHERE restricted.account_id = a.account_id
+			)
+			OR EXISTS (
+				SELECT 1 FROM account_members assigned
+				WHERE assigned.account_id = a.account_id
+				  AND assigned.user_id = $2::uuid
+			)
+		  )`,
 		accountID, userID).Scan(&workspaceID, &role)
 	if err != nil {
 		if err != sql.ErrNoRows {
@@ -1615,6 +1875,14 @@ func (s *Server) accountAccess(ctx context.Context, userID, accountID string) (s
 
 func canEdit(role string) bool {
 	return role == "owner" || role == "admin" || role == "editor"
+}
+
+func canManageAccountMembers(role string) bool {
+	return role == "owner" || role == "admin"
+}
+
+func validAccountMemberRole(role string) bool {
+	return role == "editor" || role == "viewer"
 }
 
 func validWorkspaceInviteRole(role string) bool {

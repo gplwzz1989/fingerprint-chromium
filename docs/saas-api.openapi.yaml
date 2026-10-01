@@ -351,6 +351,65 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/accounts/{account_id}/members:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [账号]
+      summary: 获取账号成员权限
+      description: restricted 为 false 时，工作区所有成员都可访问；所有者和管理员始终拥有访问权限。
+      responses:
+        '200':
+          description: 账号成员权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountMemberList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{account_id}/members/{user_id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [账号]
+      summary: 设置账号成员权限
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAccountMemberRequest'
+      responses:
+        '200':
+          description: 账号成员权限已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountMember'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [账号]
+      summary: 移除账号成员权限
+      responses:
+        '204':
+          description: 账号成员权限已移除
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/accounts/{account_id}/leases:
     parameters:
       - $ref: '#/components/parameters/AccountId'
@@ -667,6 +726,42 @@ components:
             $ref: '#/components/schemas/Account'
         next_page_token:
           type: string
+    AccountMember:
+      type: object
+      required: [user_id, email, display_name, role, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: [editor, viewer]
+        created_at:
+          type: string
+          format: date-time
+    AccountMemberList:
+      type: object
+      required: [restricted, members]
+      properties:
+        restricted:
+          type: boolean
+          description: 是否已设置显式成员列表；为 false 时工作区成员默认可访问。
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountMember'
+    UpdateAccountMemberRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [editor, viewer]
     AccountSnapshot:
       type: object
       required: [account_id, revision, schema_version, updated_at, envelope]
@@ -750,7 +845,7 @@ components:
           type: string
         action:
           type: string
-          enum: [login, token_refreshed, logout, session_revoked, member_invited, member_joined, account_created, account_updated, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
+          enum: [login, token_refreshed, logout, session_revoked, member_invited, member_joined, member_role_updated, member_removed, account_created, account_updated, account_member_role_updated, account_member_removed, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
         device_id:
           type: string
         created_at:
