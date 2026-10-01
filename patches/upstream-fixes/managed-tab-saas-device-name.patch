@@ -1,0 +1,83 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -133,13 +133,19 @@ export class FingerprintManagerSaasClient {
+ 
+   static async login(
+       baseUrl: string, email: string, password: string,
+-      deviceId: string): Promise<FingerprintManagerSaasClient> {
++      deviceId: string,
++      deviceName: string): Promise<FingerprintManagerSaasClient> {
+     const normalizedBaseUrl = normalizeSaasBaseUrl(baseUrl);
+     const response = await fetch(`${normalizedBaseUrl}/api/v1/sessions`, {
+       method: 'POST',
+       headers: {'Content-Type': 'application/json'},
+       credentials: 'omit',
+-      body: JSON.stringify({email, password, device_id: deviceId}),
++      body: JSON.stringify({
++        email,
++        password,
++        device_id: deviceId,
++        device_name: deviceName,
++      }),
+     });
+     const session = await parseSaasResponse<SaasSession>(response);
+     const passwordKey = await importSnapshotPasswordKey(password);
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -305,9 +305,12 @@ export class FingerprintManagerUiElement extends CrLitElement {
+         this.shadowRoot.querySelector<HTMLInputElement>('#saasEmail');
+     const passwordInput =
+         this.shadowRoot.querySelector<HTMLInputElement>('#saasPassword');
++    const deviceNameInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasDeviceName');
+     const baseUrl = baseUrlInput?.value.trim() || '';
+     const email = emailInput?.value.trim() || '';
+     const password = passwordInput?.value || '';
++    const deviceName = deviceNameInput?.value.trim() || '当前浏览器';
+     if (!baseUrl || !email || !password) {
+       this.saasError_ = '请输入 SaaS 地址、邮箱和密码';
+       return;
+@@ -317,7 +320,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasError_ = '';
+     try {
+       const client = await FingerprintManagerSaasClient.login(
+-          baseUrl, email, password, crypto.randomUUID());
++          baseUrl, email, password, crypto.randomUUID(), deviceName);
+       this.saasClient_ = client;
+       this.saasUserEmail_ = client.user.email;
+       this.saasWorkspaces_ = await client.getWorkspaces();
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -163,6 +163,13 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                 @keydown="${(event: KeyboardEvent) => {
+                   if (event.key === 'Enter') this.onSaasLogin_();
+                 }}">
++            <input id="saasDeviceName" type="text"
++                placeholder="设备名称（可选）"
++                autocomplete="off"
++                maxlength="128"
++                @keydown="${(event: KeyboardEvent) => {
++                  if (event.key === 'Enter') this.onSaasLogin_();
++                }}">
+             <button class="primary-button" type="button"
+                 ?disabled="${this.saasBusy_}"
+                 @click="${this.onSaasLogin_}">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -631,7 +631,7 @@ button:disabled {
+ .saas-login-grid {
+   display: grid;
+   gap: 9px;
+-  grid-template-columns: 1.4fr 1fr 1fr auto;
++  grid-template-columns: 1.3fr 1fr 1fr 1fr auto;
+ }
+ 
+ .saas-login-grid input {
