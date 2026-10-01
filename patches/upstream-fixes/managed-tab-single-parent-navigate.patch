@@ -1,0 +1,26 @@
+diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_navigator.cc
+--- a/chrome/browser/ui/browser_navigator.cc
++++ b/chrome/browser/ui/browser_navigator.cc
+@@ -142,6 +142,22 @@ bool IncognitoModeForced(const Profile* profile) {
+ // Returns true on success. Otherwise, if changing params leads the browser
+ // into an erroneous state, returns false.
+ bool AdjustNavigateParamsForURL(NavigateParams* params) {
++  Browser* managed_browser =
++      params->browser ? params->browser->GetBrowserForMigrationOnly()
++                      : nullptr;
++  if (managed_browser && managed_browser->is_type_normal() &&
++      managed_browser->CanSupportWindowFeature(
++          Browser::WindowFeature::kFeatureTabStrip) &&
++      (params->disposition == WindowOpenDisposition::NEW_WINDOW ||
++       params->disposition == WindowOpenDisposition::NEW_POPUP)) {
++    // Keep programmatic window requests inside the single managed parent
++    // window and give the new Tab an independent storage partition.
++    params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    if (params->managed_tab_id.empty() && !params->contents_to_insert) {
++      params->managed_tab_id = ManagedTabContext::GenerateId();
++    }
++  }
++
+   // Check for some chrome:// pages which we always want to open in a
+   // non-incognito window. Note that even though a ChromeOS guest session is
+   // technically an incognito window, these URLs are allowed.
