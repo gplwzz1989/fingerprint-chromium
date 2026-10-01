@@ -2,7 +2,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_br
 index ee883ac2..a7d94230 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
-@@ -50,6 +50,342 @@ export interface ManagedTabStorageSnapshot {
+@@ -50,6 +50,367 @@ export interface ManagedTabStorageSnapshot {
    };
  }
  
@@ -417,7 +417,7 @@ index 2619d9f7..eb230e40 100644
  
    override render() {
      return getHtml.bind(this)();
-@@ -270,6 +292,164 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -270,6 +292,183 @@ export class FingerprintManagerUiElement extends CrLitElement {
      input.click();
    }
  
