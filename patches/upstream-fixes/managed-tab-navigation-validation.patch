@@ -1,0 +1,39 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -59,6 +59,7 @@ class ManagedTabContext final
+   static std::string GenerateId();
+   static bool IsValidId(const std::string& id);
++  static bool IsValidNavigationUrl(const GURL& url);
+   static std::vector<ManagedTabContext*> GetAll();
+   static base::Value::List GetAllState();
+   static ManagedTabContext* FindById(const std::string& id);
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -292,6 +292,11 @@ bool ManagedTabContext::IsValidId(const std::string& id) {
+   return true;
+ }
++
++// static
++bool ManagedTabContext::IsValidNavigationUrl(const GURL& url) {
++  return url.SchemeIsHTTPOrHTTPS() || url == GURL("about:blank");
++}
++
+ // static
+ std::vector<ManagedTabContext*> ManagedTabContext::GetAll() {
+@@ -509,6 +514,9 @@ ManagedTabContext* ManagedTabContext::CreateNewTab(
+   if (!browser || !IsValidId(managed_tab_id)) {
+     return nullptr;
+   }
++  if (!url.is_empty() && !IsValidNavigationUrl(url)) {
++    return nullptr;
++  }
+   if (FindById(managed_tab_id)) {
+     return nullptr;
+   }
+@@ -574,7 +582,7 @@ bool ManagedTabContext::NavigateTo(const GURL& url) {
+-  if (!web_contents() || !url.is_valid()) {
++  if (!web_contents() || !IsValidNavigationUrl(url)) {
+     return false;
+   }
