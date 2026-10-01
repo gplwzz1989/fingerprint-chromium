@@ -94,6 +94,10 @@ index ee883ac2..a7d94230 100644
 +        session.refresh_token, session.user);
 +  }
 +
++  async revokeSession(): Promise<void> {
++    await this.request_<unknown>('/api/v1/sessions/revoke', {method: 'POST'});
++  }
++
 +  async getWorkspaces(): Promise<SaasWorkspace[]> {
 +    return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
 +  }
@@ -461,14 +465,26 @@ index 2619d9f7..eb230e40 100644
 +    }
 +  }
 +
-+  protected onSaasLogout_() {
++  protected async onSaasLogout_() {
++    const client = this.saasClient_;
++    if (!client || this.saasBusy_) {
++      return;
++    }
++    this.saasBusy_ = true;
++    let logoutError = '';
++    try {
++      await client.revokeSession();
++    } catch (error) {
++      logoutError = `本地已退出，但云端会话撤销失败：${getSaasErrorMessage(error)}`;
++    }
 +    this.saasClient_ = null;
 +    this.saasConnected_ = false;
 +    this.saasUserEmail_ = '';
 +    this.saasWorkspaces_ = [];
 +    this.saasAccounts_ = [];
 +    this.saasWorkspaceId_ = '';
-+    this.saasError_ = '';
++    this.saasError_ = logoutError;
++    this.saasBusy_ = false;
 +  }
 +
 +  protected async onSaasWorkspaceChange_(event: Event) {

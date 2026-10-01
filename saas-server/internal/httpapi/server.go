@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /api/v1/sessions", s.handleCreateSession)
 	mux.HandleFunc("POST /api/v1/sessions/refresh", s.handleRefreshSession)
+	mux.HandleFunc("POST /api/v1/sessions/revoke", s.handleRevokeSession)
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
@@ -250,6 +251,31 @@ func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
 			DisplayName: displayName,
 		},
 	})
+}
+
+func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	userID, sessionID, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.db.ExecContext(r.Context(), `
+		UPDATE sessions SET revoked_at = now()
+		WHERE id = $1::uuid AND user_id = $2::uuid AND revoked_at IS NULL`,
+		sessionID, userID)
+	if err != nil {
+		s.logger.Error("撤销会话失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "退出登录失败，请稍后重试")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "登录状态已失效")
+		return
+	}
+	if err := s.writeAudit(r.Context(), userID, "logout", "", deviceID); err != nil {
+		s.logger.Error("写入退出审计失败", "error", err.Error())
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type workspaceResponse struct {

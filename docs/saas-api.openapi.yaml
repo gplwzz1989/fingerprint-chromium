@@ -65,6 +65,16 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/sessions/revoke:
+    post:
+      tags: [会话]
+      summary: 撤销当前设备会话
+      responses:
+        '204':
+          description: 会话已撤销
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/workspaces:
     get:
       tags: [工作区]
@@ -449,7 +459,7 @@ components:
           type: string
         action:
           type: string
-          enum: [login, token_refreshed, account_created, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
+          enum: [login, token_refreshed, logout, account_created, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
         device_id:
           type: string
         created_at:

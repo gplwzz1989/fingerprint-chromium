@@ -41,6 +41,7 @@
 
 - `POST /api/v1/sessions`
 - `POST /api/v1/sessions/refresh`
+- `POST /api/v1/sessions/revoke`
 - `GET /api/v1/workspaces`
 - `GET /api/v1/workspaces/{workspace_id}/accounts`
 - `POST /api/v1/workspaces/{workspace_id}/accounts`
