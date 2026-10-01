@@ -75,9 +75,9 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 +
 +  blink::web_pref::WebPreferences preferences =
 +      web_contents()->GetOrCreateWebPreferences();
-+  // Negative values are reserved as the renderer-side marker for a managed
-+  // Tab override. Zero clears the marker and restores normal behavior.
-+  preferences.number_of_cpu_cores = -fingerprint_hardware_concurrency_;
++  // Managed Tabs carry the fingerprint switch into their renderer, so a
++  // positive value here is the per-Tab hardware concurrency override.
++  preferences.number_of_cpu_cores = fingerprint_hardware_concurrency_;
 +  web_contents()->SetWebPreferences(preferences);
 +}
 +
@@ -138,8 +138,10 @@ diff --git a/third_party/blink/renderer/core/execution_context/navigator_base.cc
 +
 +  const int configured_value =
 +      web_view->GetWebPreferences().number_of_cpu_cores;
-+  if (configured_value >= -64 && configured_value < 0) {
-+    return static_cast<unsigned>(-configured_value);
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          switches::kFingerprint) &&
++      configured_value > 0 && configured_value <= 64) {
++    return static_cast<unsigned>(configured_value);
 +  }
 +
 +  return std::nullopt;
