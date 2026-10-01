@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
-@@ -968,7 +968,10 @@ class FingerprintManagerUiElement extends PolymerElement {
+@@ -968,6 +968,9 @@ class FingerprintManagerUiElement extends PolymerElement {
      }
      if (snapshot.storage_url) {
 -      await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
@@ -15,7 +15,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
 --- a/chrome/browser/ui/webui/management/management_ui_handler.cc
 +++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
-@@ -1099,7 +1099,7 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
+@@ -1099,5 +1099,5 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
    if (const std::string* storage_url = snapshot.FindString("storage_url")) {
      const GURL snapshot_url(*storage_url);
 -    if (!snapshot_url.is_valid() ||
