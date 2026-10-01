@@ -1,0 +1,139 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -565,8 +565,117 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       }
+     }
+   }
+ 
++  private async syncManagedTabToSaas_(tab: ManagedTabState): Promise<number> {
++    if (!this.saasClient_ || !this.saasWorkspaceId_) {
++      throw new Error('请先登录 SaaS 并选择工作区');
++    }
++    const snapshot =
++        await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
++    let account = this.saasAccounts_.find(
++        item => item.account_id === tab.account_id);
++    if (!account) {
++      account = await this.saasClient_.createAccount(
++          this.saasWorkspaceId_, tab.account_id, tab.title || tab.account_id);
++    }
++    const lease = await this.saasClient_.acquireLease(account.account_id);
++    try {
++      const saved = await this.saasClient_.putAccountSnapshot(
++          account.account_id, account.revision, snapshot);
++      return saved.revision;
++    } finally {
++      await this.saasClient_.releaseLease(account.account_id, lease.lease_id);
++    }
++  }
++
++  protected async onSaasSyncAllManagedTabs_() {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并选择工作区';
++      return;
++    }
++    if (!this.managedTabs_.length) {
++      this.saasError_ = '当前没有可同步的本地 Tab';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    let successCount = 0;
++    const failures: string[] = [];
++    try {
++      for (const tab of this.managedTabs_) {
++        try {
++          await this.syncManagedTabToSaas_(tab);
++          ++successCount;
++        } catch (error) {
++          failures.push(`${tab.account_id || tab.id}: ${getSaasErrorMessage(error)}`);
++        }
++      }
++      await this.loadSaasAccounts_();
++      this.saasError_ = failures.length ?
++          `已同步 ${successCount} 个，${failures.length} 个失败：${failures.join('；')}` :
++          `已将 ${successCount} 个本地 Tab 同步到云端`;
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  private async restoreSaasAccount_(account: SaasAccount) {
++    if (!this.saasClient_) {
++      throw new Error('请先登录 SaaS');
++    }
++    const snapshot =
++        await this.saasClient_.getAccountSnapshot(account.account_id);
++    let tab = this.managedTabs_.find(
++        item => item.account_id === account.account_id);
++    if (!tab) {
++      tab = await this.browserProxy_.createManagedTab(
++          snapshot.storage_url || undefined, account.account_id,
++          snapshot.proxy_rules || undefined,
++          snapshot.fingerprint_seed || undefined);
++    }
++    if (snapshot.fingerprint) {
++      await this.browserProxy_.configureManagedTabFingerprint(
++          tab.id, snapshot.fingerprint.user_agent,
++          snapshot.fingerprint.hardware_concurrency);
++    }
++    if (snapshot.storage_url) {
++      await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
++    }
++    await this.writeSnapshotWithRetry_(tab.id, snapshot);
++  }
++
++  protected async onSaasRestoreAll_() {
++    if (!this.saasClient_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS';
++      return;
++    }
++    if (!this.saasAccounts_.length) {
++      this.saasError_ = '当前工作区没有可恢复的云端账号';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    let successCount = 0;
++    const failures: string[] = [];
++    try {
++      for (const account of this.saasAccounts_) {
++        try {
++          await this.restoreSaasAccount_(account);
++          ++successCount;
++        } catch (error) {
++          failures.push(`${account.account_id}: ${getSaasErrorMessage(error)}`);
++        }
++      }
++      await this.getManagedTabs_();
++      this.saasError_ = failures.length ?
++          `已恢复 ${successCount} 个，${failures.length} 个失败：${failures.join('；')}` :
++          `已恢复 ${successCount} 个云端账号到本地 Tab`;
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+       this.saasError_ = '请先登录 SaaS 并选择工作区';
+       return;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -99,2 +99,12 @@
+             </button>
++            <button class="tool-button tool-button-cloud" type="button"
++                ?disabled="${this.saasBusy_ || !this.managedTabs_.length}"
++                @click="${this.onSaasSyncAllManagedTabs_}">
++              同步全部本地
++            </button>
++            <button class="tool-button tool-button-cloud" type="button"
++                ?disabled="${this.saasBusy_ || !this.saasAccounts_.length}"
++                @click="${this.onSaasRestoreAll_}">
++              恢复全部云端
++            </button>
+             <button class="text-button text-button-danger" type="button"
