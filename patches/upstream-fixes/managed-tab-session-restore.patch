@@ -15,7 +15,7 @@ diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/m
    static void ConfigureNetworkContextParams(
        const content::StoragePartitionConfig& config,
        network::mojom::NetworkContextParams* network_context_params);
-@@ -84,5 +84,11 @@ class ManagedTabContext final
+@@ -84,5 +84,12 @@ class ManagedTabContext final
        const std::string& managed_tab_id,
        const std::string& proxy_rules,
        const std::string& fingerprint_seed);
@@ -39,7 +39,7 @@ diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/m
 diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
 --- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
 +++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
-@@ -113,6 +113,11 @@ base::flat_map<std::string, std::string>& ManagedTabFingerprintSeeds() {
+@@ -113,5 +113,10 @@ base::flat_map<std::string, std::string>& ManagedTabFingerprintSeeds() {
    return *seeds;
  }
  
@@ -50,7 +50,7 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 +
  bool ParseManagedTabProxyRules(const std::string& proxy_rules,
                                 net::ProxyConfig::ProxyRules* parsed_rules) {
-@@ -350,6 +355,49 @@ bool ManagedTabContext::IsValidNetworkProxy(const std::string& proxy_rules) {
+@@ -350,6 +355,54 @@ bool ManagedTabContext::IsValidNetworkProxy(const std::string& proxy_rules) {
    return ParseManagedTabProxyRules(proxy_rules, &parsed_rules);
  }
  
@@ -125,7 +125,7 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
  // static
  void ManagedTabContext::ConfigureNetworkContextParams(
      const content::StoragePartitionConfig& config,
-@@ -536,7 +597,11 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+@@ -536,6 +597,11 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
                ? GetFingerprintSeedForId(id_)
                : std::string()),
 -      current_url_(web_contents->GetURL()) {}
@@ -141,13 +141,13 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 diff --git a/chrome/browser/ui/browser_live_tab_context.cc b/chrome/browser/ui/browser_live_tab_context.cc
 --- a/chrome/browser/ui/browser_live_tab_context.cc
 +++ b/chrome/browser/ui/browser_live_tab_context.cc
-@@ -23,6 +23,7 @@
+@@ -23,4 +23,5 @@
  #include "chrome/browser/sessions/tab_restore_service_factory.h"
  #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
  #include "chrome/browser/ui/browser.h"
 +#include "chrome/browser/managed_tab/managed_tab_context.h"
  #include "chrome/browser/ui/browser_commands.h"
-@@ -160,7 +161,28 @@ sessions::LiveTab* BrowserLiveTabContext::GetActiveLiveTab() const {
+@@ -160,6 +161,27 @@ sessions::LiveTab* BrowserLiveTabContext::GetActiveLiveTab() const {
  std::map<std::string, std::string> BrowserLiveTabContext::GetExtraDataForTab(
      int index) const {
 -  return std::map<std::string, std::string>();
@@ -179,13 +179,13 @@ diff --git a/chrome/browser/ui/browser_live_tab_context.cc b/chrome/browser/ui/b
 diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
 --- a/chrome/browser/ui/browser_tabrestore.cc
 +++ b/chrome/browser/ui/browser_tabrestore.cc
-@@ -10,6 +11,7 @@
+@@ -10,4 +11,5 @@
  
  #include "build/build_config.h"
  #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
 +#include "chrome/browser/managed_tab/managed_tab_context.h"
  #include "chrome/browser/profiles/profile.h"
-@@ -31,6 +32,8 @@
+@@ -31,5 +32,7 @@
  #include "content/public/browser/navigation_entry.h"
  #include "content/public/browser/render_widget_host_view.h"
  #include "content/public/browser/restore_type.h"
