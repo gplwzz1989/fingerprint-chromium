@@ -1,0 +1,61 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -112,6 +112,8 @@
+ namespace {
+ 
++constexpr int kManagedTabSnapshotSchemaVersion = 1;
++
+ #if !BUILDFLAG(IS_CHROMEOS)
+ 
+ bool IsBrowserManaged() {
+@@ -963,6 +965,7 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+   }
+ 
+   base::Value::Dict result;
++  result.Set("schema_version", kManagedTabSnapshotSchemaVersion);
+   result.Set("cookies", std::move(cookies));
+   result.Set("local_storage", std::move(snapshot.local_storage));
+@@ -994,6 +997,13 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
+   }
+ 
+   const base::Value::Dict& snapshot = args[2].GetDict();
++  if (const base::Value* schema_version = snapshot.Find("schema_version")) {
++    if (!schema_version->is_int() ||
++        schema_version->GetInt() != kManagedTabSnapshotSchemaVersion) {
++      RejectJavascriptCallback(args[0], base::Value("不支持的存储快照版本"));
++      return;
++    }
++  }
+   if (!snapshot.FindList("cookies") || !snapshot.FindDict("local_storage")) {
+     RejectJavascriptCallback(args[0], base::Value("存储快照格式无效"));
+     return;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -36,6 +36,7 @@ export interface ManagedTabCookie {
+ }
+ 
+ export interface ManagedTabStorageSnapshot {
++  schema_version?: number;
+   account_id?: string;
+   proxy_rules?: string;
+   fingerprint_seed?: string;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -246,9 +246,12 @@ export class FingerprintManagerUiElement extends
+           return;
+         }
+ 
+-        if (!snapshot || !Array.isArray(snapshot.cookies) ||
++        if (!snapshot ||
++            (snapshot.schema_version !== undefined &&
++             snapshot.schema_version !== 1) ||
++            !Array.isArray(snapshot.cookies) ||
+             !snapshot.local_storage ||
+             typeof snapshot.local_storage !== 'object') {
+-          this.managedTabError_ = '导入文件不是有效的存储快照';
++          this.managedTabError_ = '导入文件不是有效的存储快照或版本不受支持';
+           return;
+         }

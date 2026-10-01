@@ -49,6 +49,7 @@ upstream-fixes/managed-tab-account-id.patch
 upstream-fixes/managed-tab-account-ui.patch
 upstream-fixes/managed-tab-account-snapshot.patch
 upstream-fixes/managed-tab-saas-network-proxy.patch
+upstream-fixes/managed-tab-saas-schema.patch
 upstream-fixes/hide-chromium-profile-ui.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
