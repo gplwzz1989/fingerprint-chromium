@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
-@@ -264,6 +264,13 @@
+@@ -264,5 +264,12 @@
    async getWorkspaces(): Promise<SaasWorkspace[]> {
      return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
    }
@@ -17,7 +17,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_br
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
-@@ -498,6 +498,38 @@
+@@ -498,12 +498,41 @@
    protected async onSaasWorkspaceChange_(event: Event) {
      const select = event.currentTarget as HTMLSelectElement;
      this.saasWorkspaceId_ = select.value;
@@ -62,7 +62,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
-@@ -109,6 +109,11 @@
+@@ -109,7 +109,12 @@
                ${this.saasWorkspaces_.map(workspace => html`
                  <option value="${workspace.workspace_id}">${workspace.name}</option>
                `)}
