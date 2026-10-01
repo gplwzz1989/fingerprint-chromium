@@ -1,0 +1,14 @@
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -2153,2 +2153,8 @@ content::WebContents* Browser::AddNewContents(
+     return params.navigated_or_inserted_contents;
+   }
++  if (!source && (disposition == WindowOpenDisposition::NEW_WINDOW ||
++                  disposition == WindowOpenDisposition::NEW_POPUP)) {
++    return chrome::AddSelectedTabWithURL(
++        this, target_url.is_empty() ? GURL("about:blank") : target_url,
++        ui::PAGE_TRANSITION_LINK);
++  }
+ 
+   FullscreenController* fullscreen_controller = browser_window_features()
