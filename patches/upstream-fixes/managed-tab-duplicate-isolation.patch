@@ -1,0 +1,51 @@
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -39,6 +39,7 @@
+ #include "chrome/browser/favicon/favicon_utils.h"
+ #include "chrome/browser/feedback/show_feedback_page.h"
+ #include "chrome/browser/lifetime/application_lifetime.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/media/router/media_router_feature.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -357,6 +358,11 @@ content::WebContents* DuplicateTabAt(Browser* browser,
+   content::WebContents* contents =
+       browser->tab_strip_model()->GetWebContentsAt(index);
+   CHECK(contents);
++  if (chrome::ManagedTabContext* context =
++          chrome::ManagedTabContext::FromWebContents(contents);
++      context && !context->storage_partition_config().is_default()) {
++    return nullptr;
++  }
+   std::unique_ptr<content::WebContents> contents_dupe = contents->Clone();
+   content::WebContents* raw_contents_dupe = contents_dupe.get();
+ 
+@@ -1398,6 +1404,13 @@ void DuplicateSplit(Browser* browser, split_tabs::SplitTabId split) {
+   split_tabs::SplitTabData* split_data = model->GetSplitData(split);
+   gfx::Range split_indices_range = split_data->GetIndexRange();
+ 
++  for (size_t split_index = split_indices_range.GetMin();
++       split_index < split_indices_range.GetMax(); split_index++) {
++    if (!CanDuplicateTabAt(browser, split_index)) {
++      return;
++    }
++  }
++
+   std::vector<int> duplicated_tab_indices;
+   for (size_t split_index = split_indices_range.GetMin();
+        split_index < split_indices_range.GetMax(); split_index++) {
+@@ -1429,7 +1442,12 @@ bool CanDuplicateTabAt(const Browser* browser, int index) {
+     return false;
+   }
+   WebContents* contents = browser->tab_strip_model()->GetWebContentsAt(index);
+-  return contents;
++  if (!contents) {
++    return false;
++  }
++  chrome::ManagedTabContext* context =
++      chrome::ManagedTabContext::FromWebContents(contents);
++  return !context || context->storage_partition_config().is_default();
+ }
+ 
+ void MoveTabsToExistingWindow(Browser* source,

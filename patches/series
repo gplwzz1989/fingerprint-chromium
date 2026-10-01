@@ -69,6 +69,7 @@ upstream-fixes/managed-tab-saas-conflict-type-fix.patch
 upstream-fixes/managed-tab-all-new-tab-entry.patch
 upstream-fixes/managed-tab-single-parent-null-source.patch
 upstream-fixes/hide-chromium-profile-ui.patch
+upstream-fixes/managed-tab-duplicate-isolation.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
