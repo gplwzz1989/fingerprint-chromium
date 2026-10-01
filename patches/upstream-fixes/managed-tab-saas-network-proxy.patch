@@ -1,0 +1,408 @@
+diff --git a/content/public/browser/content_browser_client.h b/content/public/browser/content_browser_client.h
+--- a/content/public/browser/content_browser_client.h
++++ b/content/public/browser/content_browser_client.h
+@@ -2303,9 +2303,16 @@
+   virtual void ConfigureNetworkContextParams(
+       BrowserContext* context,
+       bool in_memory,
+       const base::FilePath& relative_partition_path,
+       network::mojom::NetworkContextParams* network_context_params,
+       cert_verifier::mojom::CertVerifierCreationParams*
+           cert_verifier_creation_params);
++
++  // Allows an embedder to apply settings that belong to a specific storage
++  // partition after the regular BrowserContext network settings are applied.
++  virtual void ConfigureStoragePartitionNetworkContextParams(
++      BrowserContext* context,
++      const StoragePartitionConfig& config,
++      network::mojom::NetworkContextParams* network_context_params);
+
+   // Returns the parent paths that contain all the network service's
+diff --git a/content/public/browser/content_browser_client.cc b/content/public/browser/content_browser_client.cc
+--- a/content/public/browser/content_browser_client.cc
++++ b/content/public/browser/content_browser_client.cc
+@@ -1223,6 +1223,11 @@ ContentBrowserClient::ConfigureNetworkContextParams(
+   network_context_params->user_agent = GetUserAgentBasedOnPolicy(context);
+   network_context_params->accept_language = "en-us,en";
+ }
++
++void ContentBrowserClient::ConfigureStoragePartitionNetworkContextParams(
++    BrowserContext* context,
++    const StoragePartitionConfig& config,
++    network::mojom::NetworkContextParams* network_context_params) {}
+
+ std::vector<base::FilePath>
+ ContentBrowserClient::GetNetworkContextsParentDirectory() {
+diff --git a/content/browser/storage_partition_impl.cc b/content/browser/storage_partition_impl.cc
+--- a/content/browser/storage_partition_impl.cc
++++ b/content/browser/storage_partition_impl.cc
+@@ -3585,3 +3585,5 @@ void StoragePartitionImpl::InitNetworkContext() {
+       browser_context_, is_in_memory(), relative_partition_path_,
+       context_params.get(), cert_verifier_creation_params.get());
++  GetContentClient()->browser()->ConfigureStoragePartitionNetworkContextParams(
++      browser_context_, config_, context_params.get());
+   // Should be initialized with existing per-profile CORS access lists.
+diff --git a/chrome/browser/chrome_content_browser_client.h b/chrome/browser/chrome_content_browser_client.h
+--- a/chrome/browser/chrome_content_browser_client.h
++++ b/chrome/browser/chrome_content_browser_client.h
+@@ -769,4 +769,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
+       network::mojom::NetworkContextParams* network_context_params,
+       cert_verifier::mojom::CertVerifierCreationParams*
+           cert_verifier_creation_params) override;
++  void ConfigureStoragePartitionNetworkContextParams(
++      content::BrowserContext* context,
++      const content::StoragePartitionConfig& config,
++      network::mojom::NetworkContextParams* network_context_params) override;
+   std::vector<base::FilePath> GetNetworkContextsParentDirectory() override;
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -84,2 +84,3 @@
+ #include "chrome/browser/lifetime/browser_shutdown.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/loader/keep_alive_request_tracker.h"
+@@ -6614,5 +6615,13 @@ void ChromeContentBrowserClient::ConfigureNetworkContextParams(
+   }
+ }
++
++void ChromeContentBrowserClient::ConfigureStoragePartitionNetworkContextParams(
++    content::BrowserContext*,
++    const content::StoragePartitionConfig& config,
++    network::mojom::NetworkContextParams* network_context_params) {
++  ManagedTabContext::ConfigureNetworkContextParams(config,
++                                                   network_context_params);
++}
+
+ std::vector<base::FilePath>
+ ChromeContentBrowserClient::GetNetworkContextsParentDirectory() {
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -14,4 +14,5 @@
+ #include "content/public/browser/web_contents_observer.h"
+ #include "content/public/browser/web_contents_user_data.h"
+ #include "net/cookies/canonical_cookie.h"
++#include "services/network/public/mojom/network_context.mojom-forward.h"
+ #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+@@ -42,8 +43,19 @@ class ManagedTabContext final
+   static std::vector<ManagedTabContext*> GetAll();
+   static base::Value::List GetAllState();
+   static ManagedTabContext* FindById(const std::string& id);
++  static bool IsValidNetworkProxy(const std::string& proxy_rules);
++  static void ConfigureNetworkContextParams(
++      const content::StoragePartitionConfig& config,
++      network::mojom::NetworkContextParams* network_context_params);
+   static ManagedTabContext* CreateNewTab(Browser* browser, const GURL& url);
+   static ManagedTabContext* CreateNewTab(Browser* browser,
+                                          const GURL& url,
+                                          const std::string& managed_tab_id);
++  static ManagedTabContext* CreateNewTab(Browser* browser,
++                                         const GURL& url,
++                                         const std::string& managed_tab_id,
++                                         const std::string& proxy_rules);
+
++  const std::string& network_proxy_rules() const {
++    return network_proxy_rules_;
++  }
+@@ -104,3 +116,5 @@ class ManagedTabContext final
+   friend class content::WebContentsUserData<ManagedTabContext>;
+
+   explicit ManagedTabContext(content::WebContents* web_contents);
++
++  static std::string GetNetworkProxyRulesForId(const std::string& id);
+@@ -119,4 +133,5 @@ class ManagedTabContext final
+
+   const content::StoragePartitionConfig storage_partition_config_;
+   const std::string id_;
++  const std::string network_proxy_rules_;
+   GURL current_url_;
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -12,3 +12,4 @@
+ #include "base/barrier_closure.h"
+ #include "base/command_line.h"
++#include "base/containers/flat_map.h"
+ #include "base/feature_list.h"
+@@ -18,3 +19,4 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/json/json_writer.h"
++#include "base/no_destructor.h"
+ #include "base/strings/utf_string_conversions.h"
+@@ -69,4 +71,6 @@
+ #include "services/network/public/mojom/cookie_manager.mojom.h"
+ #include "third_party/blink/public/common/web_preferences/web_preferences.h"
+ #include "net/cookies/cookie_partition_key.h"
++#include "net/proxy_resolution/proxy_config.h"
++#include "services/network/public/mojom/network_context.mojom.h"
+ #include "ui/base/page_transition_types.h"
+@@ -100,3 +104,23 @@ constexpr char16_t kLocalStorageSnapshotScript[] =
+     u"  return snapshot;"
+     u"})()";
++
++constexpr char kManagedTabPartitionDomain[] = "managedtab";
++
++base::flat_map<std::string, std::string>& ManagedTabProxyRules() {
++  static base::NoDestructor<base::flat_map<std::string, std::string>> rules;
++  return *rules;
++}
++
++bool ParseManagedTabProxyRules(const std::string& proxy_rules,
++                               net::ProxyConfig::ProxyRules* parsed_rules) {
++  if (proxy_rules.empty() || proxy_rules.size() > 2048 ||
++      proxy_rules.find_first_of(";,=") != std::string::npos) {
++    return proxy_rules.empty();
++  }
++
++  parsed_rules->ParseFromString(proxy_rules);
++  return parsed_rules->type == net::ProxyConfig::ProxyRules::Type::PROXY_LIST &&
++         parsed_rules->single_proxies.size() == 1;
++}
++
+ void FinishStorageSnapshot(ManagedTabContext::StorageSnapshotCallback callback,
+@@ -301,2 +322,43 @@ ManagedTabContext* ManagedTabContext::FindById(const std::string& id) {
+   return nullptr;
+ }
++
++// static
++bool ManagedTabContext::IsValidNetworkProxy(const std::string& proxy_rules) {
++  net::ProxyConfig::ProxyRules parsed_rules;
++  return ParseManagedTabProxyRules(proxy_rules, &parsed_rules);
++}
++
++// static
++std::string ManagedTabContext::GetNetworkProxyRulesForId(
++    const std::string& id) {
++  auto it = ManagedTabProxyRules().find(id);
++  return it == ManagedTabProxyRules().end() ? std::string() : it->second;
++}
++
++// static
++void ManagedTabContext::ConfigureNetworkContextParams(
++    const content::StoragePartitionConfig& config,
++    network::mojom::NetworkContextParams* network_context_params) {
++  if (config.partition_domain() != kManagedTabPartitionDomain ||
++      config.partition_name().empty()) {
++    return;
++  }
++
++  const std::string proxy_rules =
++      GetNetworkProxyRulesForId(config.partition_name());
++  if (proxy_rules.empty()) {
++    return;
++  }
++
++  net::ProxyConfig::ProxyRules parsed_rules;
++  if (!ParseManagedTabProxyRules(proxy_rules, &parsed_rules)) {
++    return;
++  }
++
++  auto custom_proxy_config = network::mojom::CustomProxyConfig::New();
++  custom_proxy_config->rules = std::move(parsed_rules);
++  custom_proxy_config->should_override_existing_config = true;
++  custom_proxy_config->allow_non_idempotent_methods = true;
++  network_context_params->initial_custom_proxy_config =
++      std::move(custom_proxy_config);
++}
+@@ -304,5 +367,14 @@ ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
+                                                     const GURL& url,
+                                                     const std::string& managed_tab_id) {
++  return CreateNewTab(browser, url, managed_tab_id, std::string());
++}
++
++// static
++ManagedTabContext* ManagedTabContext::CreateNewTab(
++    Browser* browser,
++    const GURL& url,
++    const std::string& managed_tab_id,
++    const std::string& proxy_rules) {
+   if (!browser || !IsValidId(managed_tab_id)) {
+     return nullptr;
+   }
+@@ -312,3 +380,12 @@ ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
+   if (FindById(managed_tab_id)) {
+     return nullptr;
+   }
++  if (!IsValidNetworkProxy(proxy_rules)) {
++    return nullptr;
++  }
++
++  if (proxy_rules.empty()) {
++    ManagedTabProxyRules().erase(managed_tab_id);
++  } else {
++    ManagedTabProxyRules()[managed_tab_id] = proxy_rules;
++  }
+@@ -325,7 +403,13 @@ ManagedTabContext* ManagedTabContext::CreateNewTab(Browser* browser,
+ 
+   if (!params.navigated_or_inserted_contents) {
++    ManagedTabProxyRules().erase(managed_tab_id);
+     return nullptr;
+   }
+
+-  return FromWebContents(params.navigated_or_inserted_contents);
++  ManagedTabContext* context =
++      FromWebContents(params.navigated_or_inserted_contents);
++  if (!context) {
++    ManagedTabProxyRules().erase(managed_tab_id);
++  }
++  return context;
+ }
+@@ -343,3 +428,4 @@ base::Value::Dict ManagedTabContext::GetState() const {
+   state.Set("storage_partition_persistent",
+             !storage_partition_config_.in_memory());
++  state.Set("proxy_rules", network_proxy_rules_);
+   state.Set("hardware_concurrency", fingerprint_hardware_concurrency_);
+@@ -363,6 +449,9 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+       id_(storage_partition_config_.is_default()
+               ? GenerateId()
+               : storage_partition_config_.partition_name()),
++      network_proxy_rules_(GetNetworkProxyRulesForId(id_)),
+       current_url_(web_contents->GetURL()) {}
+
+-ManagedTabContext::~ManagedTabContext() = default;
++ManagedTabContext::~ManagedTabContext() {
++  ManagedTabProxyRules().erase(id_);
++}
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -765,3 +765,12 @@ void ManagementUIHandler::HandleCreateManagedTab(
+     }
+     account_id = args[2].GetString();
+   }
++  std::string proxy_rules;
++  if (args.size() > 3) {
++    if (!args[3].is_string() ||
++        !ManagedTabContext::IsValidNetworkProxy(args[3].GetString())) {
++      RejectJavascriptCallback(args[0], base::Value("账号代理配置无效"));
++      return;
++    }
++    proxy_rules = args[3].GetString();
++  }
+@@ -776,5 +785,9 @@ void ManagementUIHandler::HandleCreateManagedTab(
+   Browser* browser = chrome::FindBrowserWithTab(web_ui()->GetWebContents());
+   ManagedTabContext* context =
+       account_id.empty()
+-          ? ManagedTabContext::CreateNewTab(browser, url)
+-          : ManagedTabContext::CreateNewTab(browser, url, account_id);
++          ? ManagedTabContext::CreateNewTab(
++                browser, url, ManagedTabContext::GenerateId(), proxy_rules)
++          : ManagedTabContext::CreateNewTab(browser,
++                                            url,
++                                            account_id,
++                                            proxy_rules);
+@@ -943,4 +954,5 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+     fingerprint.Set("hardware_concurrency",
+                     state.FindInt("hardware_concurrency").value_or(0));
+     result.Set("fingerprint", std::move(fingerprint));
++    result.Set("proxy_rules", state.FindString("proxy_rules").value_or(""));
+     result.Set("storage_url", context->current_url().spec());
+@@ -1000,3 +1012,12 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
+       return;
+     }
+   }
++
++  if (const std::string* proxy_rules = snapshot.FindString("proxy_rules")) {
++    if (!ManagedTabContext::IsValidNetworkProxy(*proxy_rules) ||
++        *proxy_rules != context->network_proxy_rules()) {
++      RejectJavascriptCallback(args[0],
++                               base::Value("账号代理配置与目标 Tab 不一致"));
++      return;
++    }
++  }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -1,17 +1,18 @@
+ // Copyright 2026 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+
+ import {sendWithPromise} from 'chrome://resources/js/cr.js';
+
+ export interface ManagedTabState {
+   id: string;
+   account_id: string;
+   url: string;
+   title: string;
+   load_progress: number;
+   storage_partition: string;
+   storage_partition_persistent: boolean;
+   hardware_concurrency: number;
+   user_agent: string;
++  proxy_rules: string;
+ }
+@@ -36,3 +37,4 @@ export interface ManagedTabCookie {
+ export interface ManagedTabStorageSnapshot {
+   account_id?: string;
++  proxy_rules?: string;
+   cookies: ManagedTabCookie[];
+@@ -50,4 +51,5 @@ export interface FingerprintManagerBrowserProxy {
+   getManagedTabs(): Promise<ManagedTabState[]>;
+   createManagedTab(
+-      url?: string, accountId?: string): Promise<ManagedTabState>;
++      url?: string, accountId?: string,
++      proxyRules?: string): Promise<ManagedTabState>;
+ }
+@@ -72,12 +73,15 @@ export class FingerprintManagerBrowserProxyImpl
+     return sendWithPromise('getManagedTabs');
+   }
+
+-  createManagedTab(url?: string, accountId?: string) {
+-    if (url === undefined && accountId === undefined) {
++  createManagedTab(
++      url?: string, accountId?: string, proxyRules?: string) {
++    if (url === undefined && accountId === undefined &&
++        proxyRules === undefined) {
+       return sendWithPromise('createManagedTab');
+     }
+-    if (accountId === undefined) {
++    if (accountId === undefined && proxyRules === undefined) {
+       return sendWithPromise('createManagedTab', url || '');
+     }
+-    return sendWithPromise('createManagedTab', url || '', accountId);
++    return sendWithPromise(
++        'createManagedTab', url || '', accountId || '', proxyRules || '');
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -93,7 +93,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     const accountInput = this.shadowRoot.querySelector<HTMLInputElement>(
+         '#managedTabAccountId');
++    const proxyInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#managedTabProxy');
+     const url = urlInput?.value.trim();
+     const accountId = accountInput?.value.trim();
++    const proxyRules = proxyInput?.value.trim();
+     this.runManagedTabAction_(this.browserProxy_.createManagedTab(
+-        url || undefined, accountId || undefined));
++        url || undefined, accountId || undefined, proxyRules || undefined));
+     if (urlInput) {
+@@ -102,3 +105,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     if (accountInput) {
+       accountInput.value = '';
+     }
++    if (proxyInput) {
++      proxyInput.value = '';
++    }
+@@ -125,3 +128,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
+                       ${tab.user_agent ? html`
+                         <span class="tab-chip">自定义 UA</span>
+                       ` : ''}
++                      ${tab.proxy_rules ? html`
++                        <span class="tab-chip">独立代理</span>
++                      ` : ''}
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -80,5 +80,9 @@ export function getHtml(this: FingerprintManagerUiElement) {
+           <input id="managedTabAccountId" type="text"
+               placeholder="账号标识（可选，用于恢复 SaaS 账号环境）"
+               autocomplete="off"
+               @keydown="${this.onCreateManagedTabKeydown_}">
++          <input id="managedTabProxy" type="text"
++              placeholder="代理（可选，例如 socks5://127.0.0.1:1080）"
++              autocomplete="off"
++              @keydown="${this.onCreateManagedTabKeydown_}">
+           <button class="primary-button" type="button"
