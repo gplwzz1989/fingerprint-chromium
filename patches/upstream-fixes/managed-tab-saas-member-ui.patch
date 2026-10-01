@@ -2,7 +2,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_br
 index 0000000..0000000 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
-@@ -61,8 +61,16 @@ export interface SaasWorkspace {
+@@ -61,9 +61,17 @@ export interface SaasWorkspace {
    name: string;
    role: string;
  }
@@ -20,7 +20,7 @@ index 0000000..0000000 100644
    workspace_id: string;
    email: string;
    role: string;
-@@ -217,8 +225,32 @@ export class FingerprintManagerSaasClient {
+@@ -217,5 +225,29 @@ export class FingerprintManagerSaasClient {
            body: JSON.stringify({email, role}),
          });
    }
@@ -84,7 +84,7 @@ index 0000000..0000000 100644
    protected accessor saasSessions_: SaasDeviceSession[] = [];
    protected accessor saasWorkspaceId_: string = '';
    protected accessor saasInviteToken_: string = '';
-@@ -332,8 +335,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -332,9 +335,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
          throw new Error('当前用户没有可访问的工作区');
        }
        this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
@@ -122,7 +122,7 @@ index 0000000..0000000 100644
  
    private async loadSaasAccounts_() {
      if (!this.saasClient_ || !this.saasWorkspaceId_) {
-@@ -394,16 +402,28 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -394,11 +402,23 @@ export class FingerprintManagerUiElement extends CrLitElement {
      try {
        this.saasAccounts_ =
            await this.saasClient_.getAccounts(this.saasWorkspaceId_);
@@ -290,7 +290,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 index dae7cff6..ef94ad80 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
-@@ -615,10 +615,75 @@ button:disabled {
+@@ -615,11 +615,76 @@ button:disabled {
    overflow: hidden;
    text-overflow: ellipsis;
    white-space: nowrap;
