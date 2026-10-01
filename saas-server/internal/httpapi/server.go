@@ -42,6 +42,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions", s.handleCreateSession)
 	mux.HandleFunc("POST /api/v1/sessions/refresh", s.handleRefreshSession)
 	mux.HandleFunc("POST /api/v1/sessions/revoke", s.handleRevokeSession)
+	mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
+	mux.HandleFunc("DELETE /api/v1/sessions/{session_id}", s.handleRevokeSessionByID)
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
@@ -274,6 +276,94 @@ func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.writeAudit(r.Context(), userID, "logout", "", deviceID); err != nil {
 		s.logger.Error("写入退出审计失败", "error", err.Error())
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type deviceSessionResponse struct {
+	SessionID  string `json:"session_id"`
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+	Current    bool   `json:"current"`
+}
+
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	userID, currentSessionID, _, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT id::text, device_id, device_name, created_at, expires_at
+		FROM sessions
+		WHERE user_id = $1::uuid AND revoked_at IS NULL AND expires_at > now()
+		ORDER BY created_at DESC`, userID)
+	if err != nil {
+		s.logger.Error("查询设备会话失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取设备会话")
+		return
+	}
+	defer rows.Close()
+
+	sessions := make([]deviceSessionResponse, 0)
+	for rows.Next() {
+		var session deviceSessionResponse
+		var createdAt, expiresAt time.Time
+		if err := rows.Scan(&session.SessionID, &session.DeviceID,
+			&session.DeviceName, &createdAt, &expiresAt); err != nil {
+			s.logger.Error("读取设备会话失败", "error", err.Error())
+			writeError(w, http.StatusInternalServerError, "internal_error", "无法读取设备会话")
+			return
+		}
+		session.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		session.ExpiresAt = expiresAt.UTC().Format(time.RFC3339)
+		session.Current = session.SessionID == currentSessionID
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Error("遍历设备会话失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取设备会话")
+		return
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (s *Server) handleRevokeSessionByID(w http.ResponseWriter, r *http.Request) {
+	userID, currentSessionID, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	sessionID := strings.TrimSpace(r.PathValue("session_id"))
+	if !looksLikeUUID(sessionID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "设备会话标识无效")
+		return
+	}
+	result, err := s.db.ExecContext(r.Context(), `
+		UPDATE sessions SET revoked_at = now()
+		WHERE id = $1::uuid AND user_id = $2::uuid AND revoked_at IS NULL`,
+		sessionID, userID)
+	if err != nil {
+		s.logger.Error("撤销指定设备会话失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "撤销设备会话失败，请稍后重试")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Error("读取撤销会话结果失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "撤销设备会话失败，请稍后重试")
+		return
+	}
+	if affected != 1 {
+		writeError(w, http.StatusNotFound, "not_found", "设备会话不存在或已经失效")
+		return
+	}
+	action := "session_revoked"
+	if sessionID == currentSessionID {
+		action = "logout"
+	}
+	if err := s.writeAudit(r.Context(), userID, action, "", deviceID); err != nil {
+		s.logger.Error("写入设备会话撤销审计失败", "error", err.Error())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

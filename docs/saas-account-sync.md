@@ -67,6 +67,8 @@ local_storage
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/v1/sessions` | 用户登录并建立本地代理会话 |
+| `GET` | `/api/v1/sessions` | 获取当前用户的有效设备会话 |
+| `DELETE` | `/api/v1/sessions/{session_id}` | 撤销指定设备会话 |
 | `GET` | `/api/v1/workspaces` | 获取用户可访问的工作区 |
 | `GET` | `/api/v1/workspaces/{workspace_id}/accounts` | 分页获取账号清单 |
 | `POST` | `/api/v1/workspaces/{workspace_id}/accounts` | 创建账号及其稳定标识 |
@@ -102,7 +104,7 @@ local_storage
 当前已具备：
 
 - 本地代理侧的原生 Tab、独立 StoragePartition、账号级代理、指纹种子、Cookie/LocalStorage 读写和快照导入导出；
-- 服务端用户会话、工作区成员角色、账号目录、客户端加密快照、版本冲突、设备租约和审计记录；
+- 服务端用户会话、设备会话列表与撤销、工作区成员角色、账号目录、客户端加密快照、版本冲突、设备租约和审计记录；
 - 浏览器 WebUI 的 SaaS 登录、工作区账号列表、加密同步和恢复；
 - 受控的 `fingerprint-saas bootstrap-user` 首个用户初始化流程。
 

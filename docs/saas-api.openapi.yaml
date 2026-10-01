@@ -35,6 +35,21 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+    get:
+      tags: [会话]
+      summary: 获取当前用户的有效设备会话
+      responses:
+        '200':
+          description: 有效设备会话列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/v1/sessions/refresh:
     post:
       tags: [会话]
@@ -72,6 +87,25 @@ paths:
       responses:
         '204':
           description: 会话已撤销
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/sessions/{session_id}:
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [会话]
+      summary: 撤销指定设备会话
+      responses:
+        '204':
+          description: 设备会话已撤销
+        '404':
+          $ref: '#/components/responses/NotFound'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -313,6 +347,25 @@ components:
           minimum: 1
         user:
           $ref: '#/components/schemas/User'
+    DeviceSession:
+      type: object
+      required: [session_id, device_id, device_name, created_at, expires_at, current]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        device_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        current:
+          type: boolean
     User:
       type: object
       required: [user_id, email]
@@ -459,7 +512,7 @@ components:
           type: string
         action:
           type: string
-          enum: [login, token_refreshed, logout, account_created, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
+          enum: [login, token_refreshed, logout, session_revoked, account_created, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
         device_id:
           type: string
         created_at:

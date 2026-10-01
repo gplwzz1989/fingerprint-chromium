@@ -21,6 +21,17 @@ func TestAccountIDValidation(t *testing.T) {
 	}
 }
 
+func TestSessionIDValidation(t *testing.T) {
+	if !looksLikeUUID("123e4567-e89b-12d3-a456-426614174000") {
+		t.Fatal("looksLikeUUID() rejected a valid UUID")
+	}
+	for _, value := range []string{"", "123", "123e4567-e89b-12d3-a456-42661417400z", "123e4567/e89b/12d3/a456/426614174000"} {
+		if looksLikeUUID(value) {
+			t.Fatalf("looksLikeUUID(%q) accepted invalid input", value)
+		}
+	}
+}
+
 func TestPageTokenRoundTrip(t *testing.T) {
 	encoded := encodePageToken(150)
 	offset, err := decodePageToken(encoded)
