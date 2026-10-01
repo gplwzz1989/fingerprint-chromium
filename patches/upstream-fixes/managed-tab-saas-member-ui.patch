@@ -1,0 +1,391 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -61,8 +61,16 @@ export interface SaasWorkspace {
+   name: string;
+   role: string;
+ }
+ 
++export interface SaasWorkspaceMember {
++  user_id: string;
++  email: string;
++  display_name: string;
++  role: string;
++  created_at: string;
++}
++
+ export interface SaasWorkspaceInvite {
+   invite_id: string;
+   workspace_id: string;
+   email: string;
+   role: string;
+@@ -217,8 +225,32 @@ export class FingerprintManagerSaasClient {
+           body: JSON.stringify({email, role}),
+         });
+   }
+ 
++  async getWorkspaceMembers(
++      workspaceId: string): Promise<SaasWorkspaceMember[]> {
++    return this.request_<SaasWorkspaceMember[]>(
++        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members`);
++  }
++
++  async updateWorkspaceMember(
++      workspaceId: string, userId: string,
++      role: string): Promise<SaasWorkspaceMember> {
++    return this.request_<SaasWorkspaceMember>(
++        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/` +
++            encodeURIComponent(userId), {
++          method: 'PATCH',
++          body: JSON.stringify({role}),
++        });
++  }
++
++  async removeWorkspaceMember(
++      workspaceId: string, userId: string): Promise<void> {
++    await this.request_<unknown>(
++        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/` +
++            encodeURIComponent(userId), {method: 'DELETE'});
++  }
++
+   async getAccounts(workspaceId: string): Promise<SaasAccount[]> {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -10,8 +10,9 @@ import type {
+   ManagedTabStorageSnapshot,
+   SaasAccount,
+   SaasDeviceSession,
+   SaasWorkspace,
++  SaasWorkspaceMember,
+ } from './fingerprint_manager_browser_proxy.js';
+ import {FingerprintManagerBrowserProxyImpl} from
+     './fingerprint_manager_browser_proxy.js';
+ import {
+@@ -41,8 +42,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasConnected_: {type: Boolean},
+       saasError_: {type: String},
+       saasUserEmail_: {type: String},
+       saasWorkspaces_: {type: Array},
++      saasMembers_: {type: Array},
+       saasAccounts_: {type: Array},
+       saasSessions_: {type: Array},
+       saasWorkspaceId_: {type: String},
+       saasInviteToken_: {type: String},
+@@ -61,8 +63,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasConnected_: boolean = false;
+   protected accessor saasError_: string = '';
+   protected accessor saasUserEmail_: string = '';
+   protected accessor saasWorkspaces_: SaasWorkspace[] = [];
++  protected accessor saasMembers_: SaasWorkspaceMember[] = [];
+   protected accessor saasAccounts_: SaasAccount[] = [];
+   protected accessor saasSessions_: SaasDeviceSession[] = [];
+   protected accessor saasWorkspaceId_: string = '';
+   protected accessor saasInviteToken_: string = '';
+@@ -332,8 +335,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+         throw new Error('当前用户没有可访问的工作区');
+       }
+       this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
+       await this.loadSaasAccounts_();
++      await this.loadSaasMembers_();
+       await this.loadSaasSessions_();
+       this.saasConnected_ = true;
+     } catch (error) {
+       this.saasClient_ = null;
+       this.saasConnected_ = false;
+@@ -362,8 +366,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasClient_ = null;
+     this.saasConnected_ = false;
+     this.saasUserEmail_ = '';
+     this.saasWorkspaces_ = [];
++    this.saasMembers_ = [];
+     this.saasAccounts_ = [];
+     this.saasSessions_ = [];
+     this.saasWorkspaceId_ = '';
+     this.saasInviteToken_ = '';
+@@ -376,12 +381,15 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
+     this.saasInviteToken_ = '';
+     await this.loadSaasAccounts_();
++    await this.loadSaasMembers_();
+   }
+ 
+   protected async onSaasRefresh_() {
+-    await Promise.all([this.loadSaasAccounts_(), this.loadSaasSessions_()]);
++    await Promise.all([
++      this.loadSaasAccounts_(), this.loadSaasMembers_(), this.loadSaasSessions_(),
++    ]);
+   }
+ 
+   private async loadSaasAccounts_() {
+     if (!this.saasClient_ || !this.saasWorkspaceId_) {
+@@ -394,16 +402,28 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     try {
+       this.saasAccounts_ =
+           await this.saasClient_.getAccounts(this.saasWorkspaceId_);
+     } catch (error) {
+       this.saasError_ = getSaasErrorMessage(error);
+     } finally {
+       this.saasBusy_ = false;
+     }
+   }
+ 
++  private async loadSaasMembers_() {
++    if (!this.saasClient_ || !this.saasWorkspaceId_) {
++      return;
++    }
++    try {
++      this.saasMembers_ = await this.saasClient_.getWorkspaceMembers(
++          this.saasWorkspaceId_);
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    }
++  }
++
+   private async loadSaasSessions_() {
+@@ -515,16 +535,92 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       this.saasError_ = '当前页面不支持复制，请手动复制邀请令牌';
+       return;
+     }
+     navigator.clipboard.writeText(this.saasInviteToken_).then(
+         () => this.saasError_ = '邀请令牌已复制，请仅通过受控渠道发送',
+         () => this.saasError_ = '复制邀请令牌失败，请手动复制');
+   }
+ 
++  protected canManageWorkspaceMember_(member: SaasWorkspaceMember): boolean {
++    const workspace = this.saasWorkspaces_.find(
++        item => item.workspace_id === this.saasWorkspaceId_);
++    if (!workspace || member.role === 'owner' ||
++        member.user_id === this.saasClient_?.user.user_id) {
++      return false;
++    }
++    return workspace.role === 'owner' ||
++        (workspace.role === 'admin' && member.role !== 'admin');
++  }
++
++  protected getSaasMemberRoleLabel_(role: string): string {
++    switch (role) {
++      case 'owner':
++        return '所有者';
++      case 'admin':
++        return '管理员';
++      case 'editor':
++        return '编辑者';
++      case 'viewer':
++        return '查看者';
++      default:
++        return '未知角色';
++    }
++  }
++
++  protected async onSaasUpdateWorkspaceMember_(
++      source: Event, member: SaasWorkspaceMember) {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_ ||
++        !this.canManageWorkspaceMember_(member)) {
++      return;
++    }
++    const role = (source.currentTarget as HTMLSelectElement).value;
++    if (!['admin', 'editor', 'viewer'].includes(role)) {
++      this.saasError_ = '成员角色无效';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const updated = await this.saasClient_.updateWorkspaceMember(
++          this.saasWorkspaceId_, member.user_id, role);
++      this.saasMembers_ = this.saasMembers_.map(item =>
++          item.user_id === updated.user_id ? updated : item);
++      this.saasError_ =
++          `成员 ${updated.email} 的角色已更新为 ${this.getSaasMemberRoleLabel_(updated.role)}`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected async onSaasRemoveWorkspaceMember_(member: SaasWorkspaceMember) {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_ ||
++        !this.canManageWorkspaceMember_(member)) {
++      return;
++    }
++    if (!window.confirm(`确定移除工作区成员 ${member.email} 吗？`)) {
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await this.saasClient_.removeWorkspaceMember(
++          this.saasWorkspaceId_, member.user_id);
++      this.saasMembers_ = this.saasMembers_.filter(
++          item => item.user_id !== member.user_id);
++      this.saasError_ = `成员 ${member.email} 已移除`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
+   protected onSaasToggleInviteMode_() {
+     this.saasInviteMode_ = !this.saasInviteMode_;
+     this.saasError_ = '';
+   }
+ 
+   protected async onSaasAcceptInvite_() {
+     if (this.saasBusy_) {
+       return;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 213280da..c8a67979 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -177,2 +177,42 @@ export function getHtml(this: FingerprintManagerUiElement) {
+           ` : ''}
++          <div class="saas-member-section">
++            <div class="saas-subheading">
++              <span>工作区成员</span>
++              <small>${this.saasMembers_.length} 位成员</small>
++            </div>
++            <div class="saas-member-list">
++              ${this.saasMembers_.length ? this.saasMembers_.map(member => html`
++                <div class="saas-member-row">
++                  <div class="saas-session-mark">${this.getSaasMemberRoleLabel_(member.role).slice(0, 1)}</div>
++                  <div class="saas-member-copy">
++                    <strong>${member.display_name || '未设置显示名称'}</strong>
++                    <span>${member.email} · ${this.getSaasMemberRoleLabel_(member.role)}</span>
++                  </div>
++                  ${this.canManageWorkspaceMember_(member) ? html`
++                    <select class="saas-member-role-select"
++                        .value="${member.role}"
++                        ?disabled="${this.saasBusy_}"
++                        @change="${(event: Event) =>
++                            this.onSaasUpdateWorkspaceMember_(event, member)}"
++                        aria-label="成员角色">
++                      ${this.saasWorkspaces_.find(
++                          item => item.workspace_id === this.saasWorkspaceId_)?.role ===
++                              'owner' ? html`<option value="admin">管理员</option>` : ''}
++                      <option value="editor">编辑者</option>
++                      <option value="viewer">查看者</option>
++                    </select>
++                    <button class="tool-button text-button-danger" type="button"
++                        ?disabled="${this.saasBusy_}"
++                        @click="${() => this.onSaasRemoveWorkspaceMember_(member)}">
++                      移除
++                    </button>
++                  ` : html`
++                    <span class="saas-member-role">${this.getSaasMemberRoleLabel_(member.role)}</span>
++                  `}
++                </div>
++              `) : html`
++                <div class="saas-empty">当前工作区没有其他成员。</div>
++              `}
++            </div>
++          </div>
+           <div class="saas-session-section">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index dae7cff6..ef94ad80 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -615,10 +615,75 @@ button:disabled {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+ }
+ 
++.saas-member-section {
++  border-top: 1px solid var(--fp-line);
++  margin-top: 18px;
++  padding-top: 15px;
++}
++
++.saas-member-list {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++  margin-top: 10px;
++}
++
++.saas-member-row {
++  align-items: center;
++  background: rgba(5, 10, 16, .28);
++  border: 1px solid var(--fp-line);
++  display: flex;
++  gap: 10px;
++  min-height: 43px;
++  padding: 0 10px;
++}
++
++.saas-member-copy {
++  min-width: 0;
++}
++
++.saas-member-copy strong,
++.saas-member-copy span {
++  display: block;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.saas-member-copy strong {
++  color: var(--fp-text);
++  font-size: 10px;
++  font-weight: 500;
++}
++
++.saas-member-copy span {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-top: 3px;
++}
++
++.saas-member-role-select {
++  background: rgba(5, 10, 16, .72);
++  border: 1px solid var(--fp-line-strong);
++  color: var(--fp-text);
++  font-family: monospace;
++  font-size: 10px;
++  margin-left: auto;
++  padding: 7px 9px;
++}
++
++.saas-member-role {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-left: auto;
++}
++
+ .saas-session-section {
+   border-top: 1px solid var(--fp-line);
+   margin-top: 18px;
+   padding-top: 15px;
+ }
+ 
+@@ -1130,12 +1195,20 @@ button:disabled {
+   .saas-session-row {
+     align-items: stretch;
+     flex-direction: column;
+     padding: 11px;
+   }
+ 
++  .saas-member-row {
++    align-items: stretch;
++    flex-direction: column;
++    padding: 11px;
++  }
++
+   .saas-session-row .tool-button,
+-  .saas-session-current {
++  .saas-session-current,
++  .saas-member-role-select,
++  .saas-member-role {
+     margin-left: 0;
+   }
+ 
+   .create-bar {
