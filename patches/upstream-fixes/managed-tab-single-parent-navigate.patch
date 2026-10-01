@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_navigator.cc
 --- a/chrome/browser/ui/browser_navigator.cc
 +++ b/chrome/browser/ui/browser_navigator.cc
-@@ -142,6 +142,22 @@ bool IncognitoModeForced(const Profile* profile) {
+@@ -142,6 +142,29 @@ bool IncognitoModeForced(const Profile* profile) {
  // Returns true on success. Otherwise, if changing params leads the browser
  // into an erroneous state, returns false.
  bool AdjustNavigateParamsForURL(NavigateParams* params) {
