@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
 --- a/chrome/browser/managed_tab/managed_tab_context.h
 +++ b/chrome/browser/managed_tab/managed_tab_context.h
-@@ -59,6 +59,7 @@ class ManagedTabContext final
+@@ -59,5 +59,6 @@ class ManagedTabContext final
    static std::string GenerateId();
    static bool IsValidId(const std::string& id);
 +  static bool IsValidNavigationUrl(const GURL& url);
@@ -11,7 +11,7 @@ diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/m
 diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
 --- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
 +++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
-@@ -292,6 +292,11 @@ bool ManagedTabContext::IsValidId(const std::string& id) {
+@@ -292,4 +292,10 @@ bool ManagedTabContext::IsValidId(const std::string& id) {
    return true;
  }
 +
@@ -32,7 +32,7 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
    if (FindById(managed_tab_id)) {
      return nullptr;
    }
-@@ -574,7 +582,7 @@ bool ManagedTabContext::NavigateTo(const GURL& url) {
+@@ -574,3 +582,3 @@ bool ManagedTabContext::NavigateTo(const GURL& url) {
 -  if (!web_contents() || !url.is_valid()) {
 +  if (!web_contents() || !IsValidNavigationUrl(url)) {
      return false;
