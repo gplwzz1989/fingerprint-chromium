@@ -1,0 +1,12 @@
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -410,4 +410,8 @@ bool ManagedTabContext::PrepareSessionRestore(
+     return false;
+   }
++  if (FindById(managed_tab_id->second)) {
++    // 恢复的 Tab 不得复用现存 Tab 的账号环境，避免共享同一个持久化分区。
++    return false;
++  }
+ 
+   const auto proxy_rules = extra_data.find(kSessionProxyRulesKey);

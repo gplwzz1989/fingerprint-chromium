@@ -183,4 +183,5 @@ extra/fingerprint/016-webgl-readPixels.patch
 extra/fingerprint/018-timezone.patch
 upstream-fixes/managed-tab-fingerprint-process.patch
 upstream-fixes/managed-tab-session-restore.patch
+upstream-fixes/managed-tab-session-restore-duplicate-guard.patch
 upstream-fixes/build-compatibility.patch
