@@ -1,0 +1,280 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -71,6 +71,14 @@ export interface SaasWorkspaceInvite {
+   invite_token: string;
+ }
+ 
++export interface SaasInviteAcceptance {
++  user_id: string;
++  email: string;
++  display_name: string;
++  workspace_id: string;
++  role: string;
++}
++
+ export interface SaasAccount {
+   account_id: string;
+   workspace_id: string;
+@@ -163,6 +171,24 @@ export class FingerprintManagerSaasClient {
+         session.refresh_token, session.user);
+   }
+ 
++  static async acceptInvite(
++      baseUrl: string, inviteToken: string, password: string,
++      displayName: string): Promise<SaasInviteAcceptance> {
++    const normalizedBaseUrl = normalizeSaasBaseUrl(baseUrl);
++    const response = await fetch(
++        `${normalizedBaseUrl}/api/v1/invitations/accept`, {
++          method: 'POST',
++          headers: {'Content-Type': 'application/json'},
++          credentials: 'omit',
++          body: JSON.stringify({
++            invite_token: inviteToken,
++            password,
++            display_name: displayName,
++          }),
++        });
++    return parseSaasResponse<SaasInviteAcceptance>(response);
++  }
++
+   async revokeSession(): Promise<void> {
+     await this.request_<unknown>('/api/v1/sessions/revoke', {method: 'POST'});
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -46,6 +46,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasSessions_: {type: Array},
+       saasWorkspaceId_: {type: String},
+       saasInviteToken_: {type: String},
++      saasInviteMode_: {type: Boolean},
+     };
+   }
+ 
+@@ -65,6 +66,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasSessions_: SaasDeviceSession[] = [];
+   protected accessor saasWorkspaceId_: string = '';
+   protected accessor saasInviteToken_: string = '';
++  protected accessor saasInviteMode_: boolean = false;
+ 
+   private browserProxy_: FingerprintManagerBrowserProxy =
+       FingerprintManagerBrowserProxyImpl.getInstance();
+@@ -365,6 +367,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasSessions_ = [];
+     this.saasWorkspaceId_ = '';
+     this.saasInviteToken_ = '';
++    this.saasInviteMode_ = false;
+     this.saasError_ = logoutError;
+     this.saasBusy_ = false;
+@@ -517,6 +520,52 @@ export class FingerprintManagerUiElement extends CrLitElement {
+         () => this.saasError_ = '复制邀请令牌失败，请手动复制');
+   }
+ 
++  protected onSaasToggleInviteMode_() {
++    this.saasInviteMode_ = !this.saasInviteMode_;
++    this.saasError_ = '';
++  }
++
++  protected async onSaasAcceptInvite_() {
++    if (this.saasBusy_) {
++      return;
++    }
++    const baseUrlInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasBaseUrl');
++    const tokenInput = this.shadowRoot.querySelector<HTMLInputElement>(
++        '#saasInviteTokenInput');
++    const passwordInput = this.shadowRoot.querySelector<HTMLInputElement>(
++        '#saasInvitePassword');
++    const displayNameInput = this.shadowRoot.querySelector<HTMLInputElement>(
++        '#saasInviteDisplayName');
++    const baseUrl = baseUrlInput?.value.trim() || '';
++    const inviteToken = tokenInput?.value.trim() || '';
++    const password = passwordInput?.value || '';
++    const displayName = displayNameInput?.value.trim() || '';
++    if (!baseUrl || !inviteToken || password.length < 12) {
++      this.saasError_ = '请输入 SaaS 地址、邀请令牌和至少 12 位密码';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const accepted = await FingerprintManagerSaasClient.acceptInvite(
++          baseUrl, inviteToken, password, displayName);
++      this.saasInviteMode_ = false;
++      this.saasError_ = `邀请已接受：${accepted.email}，请返回登录使用 SaaS`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++      if (passwordInput) {
++        passwordInput.value = '';
++      }
++      if (tokenInput) {
++        tokenInput.value = '';
++      }
++    }
++  }
++
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+       this.saasError_ = '请先登录 SaaS 并选择工作区';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -194,33 +194,75 @@ export function getHtml(this: FingerprintManagerUiElement) {
+             </div>
+           </div>
+         ` : html`
+-          <div class="saas-login-grid">
+-            <input id="saasBaseUrl" type="url"
+-                placeholder="SaaS API 地址（必须使用 HTTPS）"
+-                autocomplete="url">
+-            <input id="saasEmail" type="email"
+-                placeholder="登录邮箱"
+-                autocomplete="username">
+-            <input id="saasPassword" type="password"
+-                placeholder="登录密码（仅保留在内存）"
+-                autocomplete="current-password"
+-                @keydown="${(event: KeyboardEvent) => {
+-                  if (event.key === 'Enter') this.onSaasLogin_();
+-                }}">
+-            <input id="saasDeviceName" type="text"
+-                placeholder="设备名称（可选）"
+-                autocomplete="off"
+-                maxlength="128"
+-                @keydown="${(event: KeyboardEvent) => {
+-                  if (event.key === 'Enter') this.onSaasLogin_();
+-                }}">
+-            <button class="primary-button" type="button"
+-                ?disabled="${this.saasBusy_}"
+-                @click="${this.onSaasLogin_}">
+-              ${this.saasBusy_ ? '连接中…' : '连接 SaaS'}
+-            </button>
+-          </div>
+-          <p class="saas-login-note">登录密码只用于本地派生快照加密密钥，不会写入快照或发送给同步接口。</p>
++          ${this.saasInviteMode_ ? html`
++            <div class="saas-invite-accept-grid">
++              <input id="saasBaseUrl" type="url"
++                  placeholder="SaaS API 地址（必须使用 HTTPS）"
++                  autocomplete="url">
++              <input id="saasInviteTokenInput" type="text"
++                  placeholder="一次性邀请令牌"
++                  autocomplete="off">
++              <input id="saasInvitePassword" type="password"
++                  placeholder="设置密码（至少 12 位，仅保留在内存）"
++                  autocomplete="new-password"
++                  @keydown="${(event: KeyboardEvent) => {
++                    if (event.key === 'Enter') this.onSaasAcceptInvite_();
++                  }}">
++              <input id="saasInviteDisplayName" type="text"
++                  placeholder="显示名称（可选）"
++                  maxlength="128"
++                  autocomplete="off"
++                  @keydown="${(event: KeyboardEvent) => {
++                    if (event.key === 'Enter') this.onSaasAcceptInvite_();
++                  }}">
++              <button class="primary-button" type="button"
++                  ?disabled="${this.saasBusy_}"
++                  @click="${this.onSaasAcceptInvite_}">
++                ${this.saasBusy_ ? '提交中…' : '接受邀请'}
++              </button>
++              <button class="text-button" type="button"
++                  ?disabled="${this.saasBusy_}"
++                  @click="${this.onSaasToggleInviteMode_}">
++                返回登录
++              </button>
++            </div>
++            <p class="saas-login-note">邀请令牌只用于加入指定工作区，设置的密码随后用于登录和本地快照加密。</p>
++          ` : html`
++            <div class="saas-login-grid">
++              <input id="saasBaseUrl" type="url"
++                  placeholder="SaaS API 地址（必须使用 HTTPS）"
++                  autocomplete="url">
++              <input id="saasEmail" type="email"
++                  placeholder="登录邮箱"
++                  autocomplete="username">
++              <input id="saasPassword" type="password"
++                  placeholder="登录密码（仅保留在内存）"
++                  autocomplete="current-password"
++                  @keydown="${(event: KeyboardEvent) => {
++                    if (event.key === 'Enter') this.onSaasLogin_();
++                  }}">
++              <input id="saasDeviceName" type="text"
++                  placeholder="设备名称（可选）"
++                  autocomplete="off"
++                  maxlength="128"
++                  @keydown="${(event: KeyboardEvent) => {
++                    if (event.key === 'Enter') this.onSaasLogin_();
++                  }}">
++              <button class="primary-button" type="button"
++                  ?disabled="${this.saasBusy_}"
++                  @click="${this.onSaasLogin_}">
++                ${this.saasBusy_ ? '连接中…' : '连接 SaaS'}
++              </button>
++            </div>
++            <div class="saas-login-actions">
++              <button class="text-button" type="button"
++                  ?disabled="${this.saasBusy_}"
++                  @click="${this.onSaasToggleInviteMode_}">
++                我有邀请令牌
++              </button>
++            </div>
++            <p class="saas-login-note">登录密码只用于本地派生快照加密密钥，不会写入快照或发送给同步接口。</p>
++          `}
+         `}
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -466,7 +466,8 @@ button:disabled {
+ }
+ 
+ .saas-workspace-select,
+-.saas-login-grid input {
++.saas-login-grid input,
++.saas-invite-accept-grid input {
+   background: rgba(5, 10, 16, .72);
+   border: 1px solid var(--fp-line-strong);
+@@ -483,7 +484,8 @@ button:disabled {
+ }
+ 
+ .saas-workspace-select:focus,
+-.saas-login-grid input:focus {
++.saas-login-grid input:focus,
++.saas-invite-accept-grid input:focus {
+   border-color: var(--fp-cyan);
+   outline: none;
+@@ -712,6 +714,22 @@ button:disabled {
+   width: 100%;
+ }
+ 
++.saas-login-actions {
++  display: flex;
++  justify-content: flex-end;
++  margin-top: 8px;
++}
++
++.saas-invite-accept-grid {
++  display: grid;
++  gap: 9px;
++  grid-template-columns: 1.3fr 1fr 1fr 1fr auto auto;
++}
++
++.saas-invite-accept-grid input {
++  width: 100%;
++}
++
+ .saas-login-note,
+ .saas-empty {
+@@ -1077,6 +1095,7 @@ button:disabled {
+   }
+ 
+   .saas-login-grid,
++  .saas-invite-accept-grid,
+   .saas-toolbar,
+   .saas-invite-form {
+     align-items: stretch;
