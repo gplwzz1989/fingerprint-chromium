@@ -13,7 +13,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 +      snapshot = await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
 +      account = this.saasAccounts_.find(
            item => item.account_id === tab.account_id);
-@@ -1052,4 +1053,4 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -1052,3 +1053,3 @@ export class FingerprintManagerUiElement extends CrLitElement {
      } catch (error) {
 -      if (error instanceof SaasSnapshotConflictError) {
 +      if (error instanceof SaasSnapshotConflictError && account && snapshot) {
