@@ -63,14 +63,14 @@ index 0000000..0000000 100644
      this.saasError_ = logoutError;
      this.saasBusy_ = false;
    }
-@@ -369,6 +372,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -369,5 +372,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
    protected async onSaasWorkspaceChange_(event: Event) {
      const select = event.currentTarget as HTMLSelectElement;
      this.saasWorkspaceId_ = select.value;
 +    this.saasInviteToken_ = '';
      await this.loadSaasAccounts_();
    }
-@@ -461,6 +465,59 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -461,6 +465,58 @@ export class FingerprintManagerUiElement extends CrLitElement {
      }
    }
  
