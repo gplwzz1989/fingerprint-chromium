@@ -1,0 +1,38 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -320,7 +320,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasError_ = '';
+     try {
+       const client = await FingerprintManagerSaasClient.login(
+-          baseUrl, email, password, crypto.randomUUID(), deviceName);
++          baseUrl, email, password, getSaasDeviceId(), deviceName);
+       this.saasClient_ = client;
+       this.saasUserEmail_ = client.user.email;
+       this.saasWorkspaces_ = await client.getWorkspaces();
+@@ -528,6 +528,24 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ }
+ 
++const kSaasDeviceIdStorageKey = 'fingerprint-manager.saas-device-id';
++
++function getSaasDeviceId(): string {
++  const uuidPattern =
++      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++  try {
++    const savedDeviceId = window.localStorage.getItem(kSaasDeviceIdStorageKey);
++    if (savedDeviceId && uuidPattern.test(savedDeviceId)) {
++      return savedDeviceId;
++    }
++    const deviceId = crypto.randomUUID();
++    window.localStorage.setItem(kSaasDeviceIdStorageKey, deviceId);
++    return deviceId;
++  } catch {
++    return crypto.randomUUID();
++  }
++}
++
+ declare global {
+   interface HTMLElementTagNameMap {
+     'fingerprint-manager-ui': FingerprintManagerUiElement;

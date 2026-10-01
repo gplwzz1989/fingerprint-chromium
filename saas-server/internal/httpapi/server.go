@@ -137,6 +137,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	expiresAt := time.Now().Add(s.cfg.RefreshTokenTTL)
 	_, err = s.db.ExecContext(r.Context(), `
+		WITH revoked AS (
+			UPDATE sessions SET revoked_at = now()
+			WHERE user_id = $2::uuid AND device_id = $3 AND revoked_at IS NULL
+		)
 		INSERT INTO sessions (id, user_id, device_id, device_name,
 		                     refresh_token_hash, expires_at)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,

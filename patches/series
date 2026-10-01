@@ -54,6 +54,7 @@ upstream-fixes/managed-tab-saas-schema.patch
 upstream-fixes/managed-tab-saas-client.patch
 upstream-fixes/managed-tab-saas-key-boundary.patch
 upstream-fixes/managed-tab-saas-device-name.patch
+upstream-fixes/managed-tab-stable-device-id.patch
 upstream-fixes/managed-tab-saas-session-ui.patch
 upstream-fixes/managed-tab-saas-csp.patch
 upstream-fixes/hide-chromium-profile-ui.patch
