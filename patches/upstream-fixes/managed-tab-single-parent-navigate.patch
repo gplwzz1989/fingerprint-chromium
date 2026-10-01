@@ -11,12 +11,19 @@ diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_
 +  if (managed_browser && managed_browser->is_type_normal() &&
 +      managed_browser->CanSupportWindowFeature(
 +          Browser::WindowFeature::kFeatureTabStrip) &&
-+      (params->disposition == WindowOpenDisposition::NEW_WINDOW ||
++      (params->disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
++       params->disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB ||
++       params->disposition == WindowOpenDisposition::NEW_WINDOW ||
 +       params->disposition == WindowOpenDisposition::NEW_POPUP)) {
-+    // Keep programmatic window requests inside the single managed parent
-+    // window and give the new Tab an independent storage partition.
-+    params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    if (params->disposition == WindowOpenDisposition::NEW_WINDOW ||
++        params->disposition == WindowOpenDisposition::NEW_POPUP) {
++      // Keep programmatic window requests inside the single managed parent
++      // window.
++      params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    }
 +    if (params->managed_tab_id.empty() && !params->contents_to_insert) {
++      // Every new native Tab receives an independent storage partition,
++      // including startup and session-created tabs.
 +      params->managed_tab_id = ManagedTabContext::GenerateId();
 +    }
 +  }
