@@ -1,0 +1,240 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 9409b2c3..495da644 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -143,6 +143,13 @@ interface SaasSnapshotEnvelope {
+   tag: string;
+ }
+ 
++export class SaasSnapshotConflictError extends Error {
++  constructor(public readonly currentRevision: number) {
++    super('云端账号快照版本已变化，请刷新后选择保留云端或覆盖');
++    this.name = 'SaasSnapshotConflictError';
++  }
++}
++
+ interface SaasAccountSnapshot {
+   account_id: string;
+   revision: number;
+@@ -366,12 +373,13 @@ export class FingerprintManagerSaasClient {
+ 
+   async putAccountSnapshot(
+       accountId: string, revision: number,
+-      snapshot: ManagedTabStorageSnapshot): Promise<SaasAccountSnapshot> {
++      snapshot: ManagedTabStorageSnapshot,
++      forceOverwrite: boolean = false): Promise<SaasAccountSnapshot> {
+     const envelope = await this.encryptSnapshot_(accountId, snapshot);
+     return this.request_<SaasAccountSnapshot>(
+         `/api/v1/accounts/${encodeURIComponent(accountId)}/snapshot`, {
+           method: 'PUT',
+-          headers: {'If-Match': String(revision)},
++          headers: {'If-Match': forceOverwrite ? '*' : String(revision)},
+           body: JSON.stringify({
+             schema_version: kSaasSnapshotSchemaVersion,
+             device_id: this.deviceId_,
+@@ -568,6 +576,11 @@ async function parseSaasResponse<T>(response: Response): Promise<T> {
+     // Use a stable user-facing message for an empty or malformed response.
+   }
+   if (!response.ok) {
++    if (body?.code === 'snapshot_revision_conflict' &&
++        Number.isInteger(body?.current_revision) &&
++        body.current_revision >= 0) {
++      throw new SaasSnapshotConflictError(body.current_revision);
++    }
+     throw new SaasApiError(
+         response.status, typeof body?.message === 'string' ? body.message :
+                                                               'SaaS 服务请求失败');
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 38c36d45..64d34174 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -21,6 +21,7 @@ import {FingerprintManagerBrowserProxyImpl} from
+ import {
+   FingerprintManagerSaasClient,
+   getSaasErrorMessage,
++  SaasSnapshotConflictError,
+ } from './fingerprint_manager_browser_proxy.js';
+ import {getCss} from './fingerprint_manager_ui.css.js';
+ import {getHtml} from './fingerprint_manager_ui.html.js';
+@@ -45,6 +46,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasConnected_: {type: Boolean},
+       saasSnapshotUnlocked_: {type: Boolean},
+       saasSessionRestoring_: {type: Boolean},
++      saasSnapshotConflict_: {type: Object},
+       saasError_: {type: String},
+       saasUserEmail_: {type: String},
+       saasWorkspaces_: {type: Array},
+@@ -70,6 +72,12 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasConnected_: boolean = false;
+   protected accessor saasSnapshotUnlocked_: boolean = false;
+   protected accessor saasSessionRestoring_: boolean = false;
++  protected accessor saasSnapshotConflict_: {
++    accountId: string;
++    tabId: string;
++    snapshot: ManagedTabStorageSnapshot;
++    currentRevision: number;
++  }|null = null;
+   protected accessor saasError_: string = '';
+   protected accessor saasUserEmail_: string = '';
+   protected accessor saasWorkspaces_: SaasWorkspace[] = [];
+@@ -413,6 +421,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       }
+       await this.initializeSaasClient_(client);
+       this.saasSnapshotUnlocked_ = true;
++      this.saasSnapshotConflict_ = null;
+     } catch (error) {
+       this.saasClient_ = null;
+       this.saasConnected_ = false;
+@@ -446,6 +455,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasClient_ = null;
+     this.saasConnected_ = false;
+     this.saasSnapshotUnlocked_ = false;
++    this.saasSnapshotConflict_ = null;
+     this.saasUserEmail_ = '';
+     this.saasWorkspaces_ = [];
+     this.saasMembers_ = [];
+@@ -489,6 +499,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
+     this.saasInviteToken_ = '';
++    this.saasSnapshotConflict_ = null;
+     this.saasAccountMembers_ = null;
+     this.saasAccountMembersAccountId_ = '';
+     await this.loadSaasAccounts_();
+@@ -1038,6 +1049,60 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       }
+       await this.loadSaasAccounts_();
+       this.saasError_ = `账号 ${account.account_id} 已同步到云端，版本 ${savedRevision}`;
++    } catch (error) {
++      if (error instanceof SaasSnapshotConflictError) {
++        this.saasSnapshotConflict_ = {
++          accountId: account.account_id,
++          tabId: tab.id,
++          snapshot,
++          currentRevision: error.currentRevision,
++        };
++        await this.loadSaasAccounts_();
++        this.saasError_ =
++            `账号 ${account.account_id} 的云端版本已变化，本地数据尚未覆盖云端`;
++      } else {
++        this.saasError_ = getSaasErrorMessage(error);
++      }
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected onSaasCancelSnapshotConflict_() {
++    this.saasSnapshotConflict_ = null;
++    this.saasError_ = '已保留云端版本，本地数据未上传';
++  }
++
++  protected async onSaasOverwriteSnapshotConflict_() {
++    const conflict = this.saasSnapshotConflict_;
++    const client = this.saasClient_;
++    if (!conflict || !client || this.saasBusy_) {
++      return;
++    }
++
++    const account = this.saasAccounts_.find(
++        item => item.account_id === conflict.accountId);
++    if (!account) {
++      this.saasSnapshotConflict_ = null;
++      this.saasError_ = '账号权限或账号目录已变化，请刷新后重试';
++      return;
++    }
++    if (!this.managedTabs_.some(item => item.id === conflict.tabId)) {
++      this.saasSnapshotConflict_ = null;
++      this.saasError_ = '原生 Tab 已不存在，本地快照未覆盖云端';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const lease = await client.acquireLease(account.account_id);
++      try {
++        await client.putAccountSnapshot(
++            account.account_id, conflict.currentRevision, conflict.snapshot,
++            true);
++      } finally {
++        await client.releaseLease(account.account_id, lease.lease_id);
++      }
++      this.saasSnapshotConflict_ = null;
++      await this.loadSaasAccounts_();
++      this.saasError_ =
++          `账号 ${account.account_id} 已明确覆盖云端版本`;
+     } catch (error) {
+       this.saasError_ = getSaasErrorMessage(error);
+     } finally {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 5768cb2e..3f9df38c 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -170,6 +170,26 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               <div class="saas-empty">当前工作区还没有账号目录。可在下方本地 Tab 上点击“同步云端”创建。</div>
+             `}
+           </div>
++          ${this.saasSnapshotConflict_ ? html`
++            <div class="saas-conflict-panel">
++              <div>
++                <strong>账号 ${this.saasSnapshotConflict_.accountId} 存在云端版本冲突</strong>
++                <span>云端版本已更新，本地快照尚未覆盖云端。请选择保留云端或明确覆盖。</span>
++              </div>
++              <div class="saas-conflict-actions">
++                <button class="text-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasCancelSnapshotConflict_}">
++                  保留云端
++                </button>
++                <button class="tool-button text-button-danger" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasOverwriteSnapshotConflict_}">
++                  明确覆盖云端
++                </button>
++              </div>
++            </div>
++          ` : ''}
+           ${this.saasAccountMembers_ && this.saasAccountMembersAccountId_ ? html`
+             <div class="saas-account-access-panel">
+               <div class="saas-subheading">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index a224aff8..b74398c1 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -526,6 +526,35 @@ button:disabled {
+   margin-top: 14px;
+ }
+ 
++.saas-conflict-panel {
++  align-items: center;
++  background: rgba(151, 93, 20, .14);
++  border: 1px solid rgba(255, 177, 76, .45);
++  display: flex;
++  gap: 14px;
++  justify-content: space-between;
++  margin-top: 12px;
++  padding: 10px 12px;
++}
++
++.saas-conflict-panel > div:first-child {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++}
++
++.saas-conflict-panel span {
++  color: var(--fp-faint);
++  font-size: 11px;
++}
++
++.saas-conflict-actions {
++  align-items: center;
++  display: flex;
++  flex-shrink: 0;
++  gap: 7px;
++}
++
+ .saas-account-row {
+   align-items: center;
+   background: rgba(5, 10, 16, .4);

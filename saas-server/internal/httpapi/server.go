@@ -1503,7 +1503,8 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "登录设备无效")
 		return
 	}
-	expectedRevision, err := parseIfMatch(r.Header.Get("If-Match"))
+	expectedRevision, forceOverwrite, err := parseIfMatch(
+		r.Header.Get("If-Match"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "缺少有效的 If-Match 版本")
 		return
@@ -1568,7 +1569,7 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "lease_conflict", "该账号正在被其他设备编辑")
 		return
 	}
-	if currentRevision != expectedRevision {
+	if currentRevision != expectedRevision && !forceOverwrite {
 		_ = tx.Rollback()
 		writeJSON(w, http.StatusConflict, snapshotConflictResponse{
 			Code:            "snapshot_revision_conflict",
@@ -1603,7 +1604,11 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "无法提交账号环境快照")
 		return
 	}
-	if err := s.writeAudit(r.Context(), userID, "snapshot_written", accountID, deviceID); err != nil {
+	auditAction := "snapshot_written"
+	if forceOverwrite {
+		auditAction = "snapshot_overwritten"
+	}
+	if err := s.writeAudit(r.Context(), userID, auditAction, accountID, deviceID); err != nil {
 		s.logger.Error("写入快照审计失败", "error", err.Error())
 	}
 	writeJSON(w, http.StatusOK, accountSnapshotResponse{
@@ -1992,16 +1997,19 @@ func decodeJSONLimit(w http.ResponseWriter, r *http.Request, target any, limit i
 	return true
 }
 
-func parseIfMatch(value string) (int64, error) {
+func parseIfMatch(value string) (int64, bool, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return 0, fmt.Errorf("缺少 If-Match")
+		return 0, false, fmt.Errorf("缺少 If-Match")
+	}
+	if value == "*" {
+		return 0, true, nil
 	}
 	revision, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || revision < 0 {
-		return 0, fmt.Errorf("If-Match 无效")
+		return 0, false, fmt.Errorf("If-Match 无效")
 	}
-	return revision, nil
+	return revision, false, nil
 }
 
 func validateEnvelope(envelope encryptedSnapshotEnvelope) bool {

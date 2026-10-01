@@ -67,10 +67,17 @@ func TestSnapshotEnvelopeValidation(t *testing.T) {
 }
 
 func TestParseIfMatch(t *testing.T) {
-	if revision, err := parseIfMatch("12"); err != nil || revision != 12 {
-		t.Fatalf("parseIfMatch() = (%d, %v), want (12, nil)", revision, err)
+	if revision, force, err := parseIfMatch("12"); err != nil ||
+		force || revision != 12 {
+		t.Fatalf("parseIfMatch() = (%d, %t, %v), want (12, false, nil)",
+			revision, force, err)
 	}
-	if _, err := parseIfMatch(""); err == nil {
+	if revision, force, err := parseIfMatch("*"); err != nil ||
+		!force || revision != 0 {
+		t.Fatalf("parseIfMatch(*) = (%d, %t, %v), want (0, true, nil)",
+			revision, force, err)
+	}
+	if _, _, err := parseIfMatch(""); err == nil {
 		t.Fatal("parseIfMatch() accepted an empty header")
 	}
 }
