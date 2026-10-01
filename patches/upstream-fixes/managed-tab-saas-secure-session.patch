@@ -1,0 +1,749 @@
+diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
+index d273849c..5f4e145c 100644
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -114,6 +114,10 @@ inline constexpr char kImportantSitesDialogHistory[] = "important_sites_dialog";
+ // This is the profile creation time.
+ inline constexpr char kProfileCreationTime[] = "profile.creation_time";
+ 
++// Stores the SaaS refresh token encrypted by the browser credential store,
++// together with non-secret session metadata.
++inline constexpr char kFingerprintManagerSaasSession[] =
++    "fingerprint_manager.saas_session";
+ 
+ #if BUILDFLAG(IS_WIN)
+ // This is a timestamp of the last time this profile was reset by a third party
+diff --git a/chrome/browser/ui/webui/management/management_ui.cc b/chrome/browser/ui/webui/management/management_ui.cc
+index 3842704e..b932e16f 100644
+--- a/chrome/browser/ui/webui/management/management_ui.cc
++++ b/chrome/browser/ui/webui/management/management_ui.cc
+@@ -13,6 +13,7 @@
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/webui/management/management_ui_constants.h"
+ #include "chrome/browser/ui/webui/management/management_ui_handler.h"
++#include "chrome/common/pref_names.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -315,4 +316,5 @@ ManagementUI::~ManagementUI() = default;
+ void ManagementUI::RegisterProfilePrefs(PrefRegistrySimple* registry) {
+   registry->RegisterBooleanPref(
+       policy::policy_prefs::kHasDismissedManagementPagePromotionBanner, false);
++  registry->RegisterDictionaryPref(prefs::kFingerprintManagerSaasSession);
+ }
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+index 9d7c96c1..4513afaa 100644
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -123,6 +123,9 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
+   void HandleCloseManagedTab(const base::Value::List& args);
+   void HandleGetManagedTabStorageSnapshot(const base::Value::List& args);
+   void HandleWriteManagedTabStorageSnapshot(const base::Value::List& args);
++  void HandleGetSaasSession(const base::Value::List& args);
++  void HandleSetSaasSession(const base::Value::List& args);
++  void HandleClearSaasSession(const base::Value::List& args);
+   void OnManagedTabStorageSnapshot(
+       base::Value callback_id,
+       std::string tab_id,
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+index e03399db..a3e47a64 100644
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -14,6 +14,7 @@
+ #include <vector>
+ 
++#include "base/base64.h"
+ #include "base/check_is_test.h"
+ #include "base/containers/contains.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+@@ -55,6 +56,7 @@
+ #include "components/enterprise/browser/identifiers/profile_id_service.h"
+ #include "components/enterprise/browser/reporting/common_pref_names.h"
+ #include "components/enterprise/buildflags/buildflags.h"
++#include "components/os_crypt/sync/os_crypt.h"
+ #include "components/policy/core/common/cloud/enterprise_metrics.h"
+ #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
+ #include "components/policy/core/common/management/management_service.h"
+@@ -114,6 +116,29 @@ enum class ReportingType {
+ namespace {
+ 
+ constexpr int kManagedTabSnapshotSchemaVersion = 1;
++constexpr char kSaasSessionBaseUrlKey[] = "base_url";
++constexpr char kSaasSessionEmailKey[] = "email";
++constexpr char kSaasSessionDeviceIdKey[] = "device_id";
++constexpr char kSaasSessionRefreshTokenKey[] = "refresh_token";
++constexpr size_t kSaasSessionMaxFieldLength = 4096;
++
++bool IsAllowedSaasBaseUrl(const std::string& value) {
++  const GURL url(value);
++  if (!url.is_valid() || url.has_username() || url.has_password() ||
++      url.host().empty()) {
++    return false;
++  }
++  if (url.SchemeIs("https")) {
++    return true;
++  }
++  return url.SchemeIs("http") &&
++         (url.host() == "localhost" || url.host() == "127.0.0.1" ||
++          url.host() == "[::1]");
++}
++
++bool IsValidSaasSessionField(const std::string* value) {
++  return value && !value->empty() &&
++         value->size() <= kSaasSessionMaxFieldLength;
++}
+ 
+ #if !BUILDFLAG(IS_CHROMEOS)
+ 
+@@ -260,6 +285,18 @@ void ManagementUIHandler::RegisterMessages() {
+       base::BindRepeating(
+           &ManagementUIHandler::HandleWriteManagedTabStorageSnapshot,
+           base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getSaasSession",
++      base::BindRepeating(&ManagementUIHandler::HandleGetSaasSession,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setSaasSession",
++      base::BindRepeating(&ManagementUIHandler::HandleSetSaasSession,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "clearSaasSession",
++      base::BindRepeating(&ManagementUIHandler::HandleClearSaasSession,
++                          base::Unretained(this)));
+ 
+   web_ui()->RegisterMessageCallback(
+       "getContextualManagedData",
+@@ -1104,6 +1141,95 @@ void ManagementUIHandler::OnManagedTabStorageSnapshotWritten(
+   ResolveJavascriptCallback(callback_id, base::Value(true));
+ }
+ 
++void ManagementUIHandler::HandleGetSaasSession(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.empty()) {
++    return;
++  }
++
++  Profile* profile = Profile::FromWebUI(web_ui());
++  const base::Value::Dict& saved =
++      profile->GetPrefs()->GetDict(prefs::kFingerprintManagerSaasSession);
++  const std::string* base_url = saved.FindString(kSaasSessionBaseUrlKey);
++  const std::string* email = saved.FindString(kSaasSessionEmailKey);
++  const std::string* device_id = saved.FindString(kSaasSessionDeviceIdKey);
++  const std::string* encoded_token =
++      saved.FindString(kSaasSessionRefreshTokenKey);
++
++  std::string encrypted_token;
++  std::string refresh_token;
++  if (!IsAllowedSaasBaseUrl(base_url ? *base_url : std::string()) ||
++      !IsValidSaasSessionField(email) ||
++      !IsValidSaasSessionField(device_id) ||
++      !IsValidSaasSessionField(encoded_token) ||
++      !base::Base64Decode(*encoded_token, &encrypted_token) ||
++      !OSCrypt::DecryptString(encrypted_token, &refresh_token) ||
++      !IsValidSaasSessionField(&refresh_token)) {
++    profile->GetPrefs()->ClearPref(prefs::kFingerprintManagerSaasSession);
++    ResolveJavascriptCallback(args[0], base::Value());
++    return;
++  }
++
++  base::Value::Dict result;
++  result.Set(kSaasSessionBaseUrlKey, *base_url);
++  result.Set(kSaasSessionEmailKey, *email);
++  result.Set(kSaasSessionDeviceIdKey, *device_id);
++  result.Set(kSaasSessionRefreshTokenKey, std::move(refresh_token));
++  ResolveJavascriptCallback(args[0], std::move(result));
++}
++
++void ManagementUIHandler::HandleSetSaasSession(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("SaaS 会话参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& input = args[1].GetDict();
++  const std::string* base_url = input.FindString(kSaasSessionBaseUrlKey);
++  const std::string* email = input.FindString(kSaasSessionEmailKey);
++  const std::string* device_id = input.FindString(kSaasSessionDeviceIdKey);
++  const std::string* refresh_token =
++      input.FindString(kSaasSessionRefreshTokenKey);
++  if (!IsAllowedSaasBaseUrl(base_url ? *base_url : std::string()) ||
++      !IsValidSaasSessionField(email) ||
++      !IsValidSaasSessionField(device_id) ||
++      !IsValidSaasSessionField(refresh_token)) {
++    RejectJavascriptCallback(args[0], base::Value("SaaS 会话信息无效"));
++    return;
++  }
++
++  std::string encrypted_token;
++  if (!OSCrypt::EncryptString(*refresh_token, &encrypted_token)) {
++    RejectJavascriptCallback(args[0], base::Value("无法安全保存 SaaS 会话"));
++    return;
++  }
++
++  base::Value::Dict saved;
++  saved.Set(kSaasSessionBaseUrlKey, *base_url);
++  saved.Set(kSaasSessionEmailKey, *email);
++  saved.Set(kSaasSessionDeviceIdKey, *device_id);
++  saved.Set(kSaasSessionRefreshTokenKey, base::Base64Encode(encrypted_token));
++  Profile::FromWebUI(web_ui())->GetPrefs()->SetDict(
++      prefs::kFingerprintManagerSaasSession, std::move(saved));
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++void ManagementUIHandler::HandleClearSaasSession(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.empty()) {
++    return;
++  }
++  Profile::FromWebUI(web_ui())->GetPrefs()->ClearPref(
++      prefs::kFingerprintManagerSaasSession);
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
+ void ManagementUIHandler::HandleGetExtensions(const base::Value::List& args) {
+   AllowJavascript();
+   // List of all enabled extensions
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index c35874af..8d9557af 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -119,6 +119,12 @@ export interface SaasDeviceSession {
+   current: boolean;
+ }
+ 
++export interface SaasSessionState {
++  base_url: string;
++  email: string;
++  device_id: string;
++  refresh_token: string;
++}
+ 
+ interface SaasSession {
+   access_token: string;
+@@ -163,17 +169,21 @@ class SaasApiError extends Error {
+ const kSaasSnapshotSchemaVersion = 1;
+ const kSaasKdfIterations = 600000;
+ const kSaasSnapshotAadPrefix = 'fingerprint-manager:v1:';
++type SaasRefreshTokenStore = (refreshToken: string) => Promise<void>;
+ 
+ export class FingerprintManagerSaasClient {
+   private constructor(
+       private readonly baseUrl_: string, private readonly deviceId_: string,
+-      private readonly passwordKey_: CryptoKey, private accessToken_: string,
+-      private refreshToken_: string, readonly user: SaasUser) {}
++      private passwordKey_: CryptoKey|null, private accessToken_: string,
++      private refreshToken_: string, readonly user: SaasUser,
++      private readonly onRefreshToken_: SaasRefreshTokenStore|null) {}
+ 
+   static async login(
+       baseUrl: string, email: string, password: string,
+       deviceId: string,
+-      deviceName: string): Promise<FingerprintManagerSaasClient> {
++      deviceName: string,
++      onRefreshToken: SaasRefreshTokenStore|null = null):
++      Promise<FingerprintManagerSaasClient> {
+     const normalizedBaseUrl = normalizeSaasBaseUrl(baseUrl);
+     const response = await fetch(`${normalizedBaseUrl}/api/v1/sessions`, {
+       method: 'POST',
+@@ -190,7 +200,25 @@ export class FingerprintManagerSaasClient {
+     const passwordKey = await importSnapshotPasswordKey(password);
+     return new FingerprintManagerSaasClient(
+         normalizedBaseUrl, deviceId, passwordKey, session.access_token,
+-        session.refresh_token, session.user);
++        session.refresh_token, session.user, onRefreshToken);
++  }
++
++  static async restore(
++      baseUrl: string, deviceId: string,
++      refreshToken: string,
++      onRefreshToken: SaasRefreshTokenStore|null = null):
++      Promise<FingerprintManagerSaasClient> {
++    const normalizedBaseUrl = normalizeSaasBaseUrl(baseUrl);
++    const response = await fetch(`${normalizedBaseUrl}/api/v1/sessions/refresh`, {
++      method: 'POST',
++      headers: {'Content-Type': 'application/json'},
++      credentials: 'omit',
++      body: JSON.stringify({refresh_token: refreshToken, device_id: deviceId}),
++    });
++    const session = await parseSaasResponse<SaasSession>(response);
++    return new FingerprintManagerSaasClient(
++        normalizedBaseUrl, deviceId, null, session.access_token,
++        session.refresh_token, session.user, onRefreshToken);
+   }
+ 
+   static async acceptInvite(
+@@ -366,6 +394,25 @@ export class FingerprintManagerSaasClient {
+             encodeURIComponent(leaseId), {method: 'DELETE'});
+   }
+ 
++  async unlockSnapshot(password: string): Promise<void> {
++    if (!password) {
++      throw new Error('请输入登录密码以解锁账号快照');
++    }
++    this.passwordKey_ = await importSnapshotPasswordKey(password);
++  }
++
++  getRefreshToken(): string {
++    return this.refreshToken_;
++  }
++
+   private async refresh_(): Promise<void> {
+     const response = await fetch(`${this.baseUrl_}/api/v1/sessions/refresh`, {
+       method: 'POST',
+@@ -379,6 +426,9 @@ export class FingerprintManagerSaasClient {
+     const session = await parseSaasResponse<SaasSession>(response);
+     this.accessToken_ = session.access_token;
+     this.refreshToken_ = session.refresh_token;
++    if (this.onRefreshToken_) {
++      await this.onRefreshToken_(this.refreshToken_);
++    }
+   }
+ 
+   private async request_<T>(path: string, init: RequestInit = {},
+@@ -418,7 +468,7 @@ export class FingerprintManagerSaasClient {
+       snapshot: ManagedTabStorageSnapshot): Promise<SaasSnapshotEnvelope> {
+     const salt = crypto.getRandomValues(new Uint8Array(16));
+     const nonce = crypto.getRandomValues(new Uint8Array(12));
+-    const key = await deriveSnapshotKey(this.passwordKey_, salt);
++    const key = await deriveSnapshotKey(this.requirePasswordKey_(), salt);
+     const plaintext = new TextEncoder().encode(JSON.stringify({
+       ...snapshot,
+       account_id: accountId,
+@@ -459,7 +509,7 @@ export class FingerprintManagerSaasClient {
+     const encrypted = new Uint8Array(ciphertext.length + tag.length);
+     encrypted.set(ciphertext);
+     encrypted.set(tag, ciphertext.length);
+-    const key = await deriveSnapshotKey(this.passwordKey_, salt);
++    const key = await deriveSnapshotKey(this.requirePasswordKey_(), salt);
+     let plaintext: ArrayBuffer;
+     try {
+       plaintext = await crypto.subtle.decrypt(
+@@ -487,6 +537,12 @@ export class FingerprintManagerSaasClient {
+     return snapshot;
+   }
+ 
++  private requirePasswordKey_(): CryptoKey {
++    if (!this.passwordKey_) {
++      throw new Error('请重新输入登录密码以读写加密账号快照');
++    }
++    return this.passwordKey_;
++  }
+ }
+ 
+ export function getSaasErrorMessage(error: unknown): string {
+@@ -581,6 +637,9 @@ export interface FingerprintManagerBrowserProxy {
+       id: string): Promise<ManagedTabStorageSnapshot>;
+   writeManagedTabStorageSnapshot(
+       id: string, snapshot: ManagedTabStorageSnapshot): Promise<boolean>;
++  getSaasSession(): Promise<SaasSessionState|null>;
++  setSaasSession(session: SaasSessionState): Promise<boolean>;
++  clearSaasSession(): Promise<boolean>;
+ }
+ 
+ export class FingerprintManagerBrowserProxyImpl
+@@ -634,6 +693,17 @@ export class FingerprintManagerBrowserProxyImpl
+     return sendWithPromise('writeManagedTabStorageSnapshot', id, snapshot);
+   }
+ 
++  getSaasSession() {
++    return sendWithPromise('getSaasSession');
++  }
++
++  setSaasSession(session: SaasSessionState) {
++    return sendWithPromise('setSaasSession', session);
++  }
++
++  clearSaasSession() {
++    return sendWithPromise('clearSaasSession');
++  }
+ 
+   static getInstance(): FingerprintManagerBrowserProxy {
+     return instance || (instance = new FingerprintManagerBrowserProxyImpl());
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 455f9b28..38c36d45 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -12,6 +12,7 @@ import type {
+   SaasAccountMember,
+   SaasAccountMemberList,
+   SaasDeviceSession,
++  SaasSessionState,
+   SaasWorkspace,
+   SaasWorkspaceMember,
+ } from './fingerprint_manager_browser_proxy.js';
+@@ -42,6 +43,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       storageLoadingId_: {type: String},
+       saasBusy_: {type: Boolean},
+       saasConnected_: {type: Boolean},
++      saasSnapshotUnlocked_: {type: Boolean},
++      saasSessionRestoring_: {type: Boolean},
+       saasError_: {type: String},
+       saasUserEmail_: {type: String},
+       saasWorkspaces_: {type: Array},
+@@ -65,6 +68,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor storageLoadingId_: string = '';
+   protected accessor saasBusy_: boolean = false;
+   protected accessor saasConnected_: boolean = false;
++  protected accessor saasSnapshotUnlocked_: boolean = false;
++  protected accessor saasSessionRestoring_: boolean = false;
+   protected accessor saasError_: string = '';
+   protected accessor saasUserEmail_: string = '';
+   protected accessor saasWorkspaces_: SaasWorkspace[] = [];
+@@ -88,6 +93,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   override connectedCallback() {
+     super.connectedCallback();
+     this.getManagedTabs_();
++    this.restoreSaasSession_();
+   }
+ 
+   protected onRefresh_() {
+@@ -308,6 +314,59 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     input.click();
+   }
+ 
++  private async persistSaasSession_(
++      session: SaasSessionState, refreshToken: string): Promise<void> {
++    await this.browserProxy_.setSaasSession({
++      ...session,
++      refresh_token: refreshToken,
++    });
++  }
++
++  private async initializeSaasClient_(
++      client: FingerprintManagerSaasClient): Promise<void> {
++    this.saasClient_ = client;
++    this.saasUserEmail_ = client.user.email;
++    this.saasWorkspaces_ = await client.getWorkspaces();
++    if (!this.saasWorkspaces_.length) {
++      throw new Error('当前用户没有可访问的工作区');
++    }
++    this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
++    this.saasAccountMembers_ = null;
++    this.saasAccountMembersAccountId_ = '';
++    await this.loadSaasAccounts_();
++    await this.loadSaasMembers_();
++    await this.loadSaasSessions_();
++    this.saasConnected_ = true;
++  }
++
++  private async restoreSaasSession_() {
++    if (this.saasSessionRestoring_) {
++      return;
++    }
++    this.saasSessionRestoring_ = true;
++    try {
++      const saved = await this.browserProxy_.getSaasSession();
++      if (!saved) {
++        return;
++      }
++      this.saasBusy_ = true;
++      const client = await FingerprintManagerSaasClient.restore(
++          saved.base_url, saved.device_id, saved.refresh_token,
++          (refreshToken: string) =>
++              this.persistSaasSession_(saved, refreshToken));
++      await this.initializeSaasClient_(client);
++      this.saasSnapshotUnlocked_ = false;
++      this.saasError_ = '已恢复 SaaS 会话，请重新输入密码解锁加密账号快照';
++    } catch (error) {
++      this.saasClient_ = null;
++      this.saasConnected_ = false;
++      this.saasError_ = `SaaS 会话恢复失败：${getSaasErrorMessage(error)}`;
++    } finally {
++      this.saasBusy_ = false;
++      this.saasSessionRestoring_ = false;
++    }
++  }
++
+   protected async onSaasLogin_() {
+     if (this.saasBusy_) {
+       return;
+@@ -320,6 +379,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+         this.shadowRoot.querySelector<HTMLInputElement>('#saasPassword');
+     const deviceNameInput =
+         this.shadowRoot.querySelector<HTMLInputElement>('#saasDeviceName');
++    const rememberSessionInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasRememberSession');
+     const baseUrl = baseUrlInput?.value.trim() || '';
+     const email = emailInput?.value.trim() || '';
+     const password = passwordInput?.value || '';
+@@ -332,21 +393,26 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasBusy_ = true;
+     this.saasError_ = '';
+     try {
++      const deviceId = getSaasDeviceId();
++      const session: SaasSessionState = {
++        base_url: baseUrl,
++        email,
++        device_id: deviceId,
++        refresh_token: '',
++      };
++      const rememberSession = rememberSessionInput?.checked ?? false;
+       const client = await FingerprintManagerSaasClient.login(
+-          baseUrl, email, password, getSaasDeviceId(), deviceName);
+-      this.saasClient_ = client;
+-      this.saasUserEmail_ = client.user.email;
+-      this.saasWorkspaces_ = await client.getWorkspaces();
+-      if (!this.saasWorkspaces_.length) {
+-        throw new Error('当前用户没有可访问的工作区');
++          baseUrl, email, password, deviceId, deviceName,
++          rememberSession ?
++              (refreshToken: string) =>
++                  this.persistSaasSession_(session, refreshToken) : null);
++      if (rememberSession) {
++        await this.persistSaasSession_(session, client.getRefreshToken());
++      } else {
++        await this.browserProxy_.clearSaasSession();
+       }
+-      this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
+-      this.saasAccountMembers_ = null;
+-      this.saasAccountMembersAccountId_ = '';
+-      await this.loadSaasAccounts_();
+-      await this.loadSaasMembers_();
+-      await this.loadSaasSessions_();
+-      this.saasConnected_ = true;
++      await this.initializeSaasClient_(client);
++      this.saasSnapshotUnlocked_ = true;
+     } catch (error) {
+       this.saasClient_ = null;
+       this.saasConnected_ = false;
+@@ -371,8 +437,15 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     } catch (error) {
+       logoutError = `本地已退出，但云端会话撤销失败：${getSaasErrorMessage(error)}`;
+     }
++    try {
++      await this.browserProxy_.clearSaasSession();
++    } catch (error) {
++      logoutError = logoutError ||
++          `本地已退出，但安全会话清理失败：${getSaasErrorMessage(error)}`;
++    }
+     this.saasClient_ = null;
+     this.saasConnected_ = false;
++    this.saasSnapshotUnlocked_ = false;
+     this.saasUserEmail_ = '';
+     this.saasWorkspaces_ = [];
+     this.saasMembers_ = [];
+@@ -387,6 +460,31 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasBusy_ = false;
+   }
+ 
++  protected async onSaasUnlockSnapshot_() {
++    const client = this.saasClient_;
++    const passwordInput = this.shadowRoot.querySelector<HTMLInputElement>(
++        '#saasUnlockPassword');
++    const password = passwordInput?.value || '';
++    if (!client || !password || this.saasBusy_) {
++      this.saasError_ = '请输入登录密码以解锁账号快照';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await client.unlockSnapshot(password);
++      this.saasSnapshotUnlocked_ = true;
++      this.saasError_ = '账号快照已解锁';
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++      if (passwordInput) {
++        passwordInput.value = '';
++      }
++    }
++  }
++
+   protected async onSaasWorkspaceChange_(event: Event) {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
+@@ -802,8 +900,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   private async syncManagedTabToSaas_(tab: ManagedTabState): Promise<number> {
+-    if (!this.saasClient_ || !this.saasWorkspaceId_) {
+-      throw new Error('请先登录 SaaS 并选择工作区');
++    if (!this.saasClient_ || !this.saasWorkspaceId_ ||
++        !this.saasSnapshotUnlocked_) {
++      throw new Error('请先登录 SaaS 并解锁账号快照');
+     }
+     const snapshot =
+         await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
+@@ -824,8 +923,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   protected async onSaasSyncAllManagedTabs_() {
+-    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+-      this.saasError_ = '请先登录 SaaS 并选择工作区';
++    if (!this.saasClient_ || !this.saasWorkspaceId_ ||
++        !this.saasSnapshotUnlocked_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并解锁账号快照';
+       return;
+     }
+     if (!this.managedTabs_.length) {
+@@ -855,8 +955,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   private async restoreSaasAccount_(account: SaasAccount) {
+-    if (!this.saasClient_) {
+-      throw new Error('请先登录 SaaS');
++    if (!this.saasClient_ || !this.saasSnapshotUnlocked_) {
++      throw new Error('请先登录 SaaS 并解锁账号快照');
+     }
+     const snapshot =
+         await this.saasClient_.getAccountSnapshot(account.account_id);
+@@ -880,8 +980,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   protected async onSaasRestoreAll_() {
+-    if (!this.saasClient_ || this.saasBusy_) {
+-      this.saasError_ = '请先登录 SaaS';
++    if (!this.saasClient_ || !this.saasSnapshotUnlocked_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并解锁账号快照';
+       return;
+     }
+     if (!this.saasAccounts_.length) {
+@@ -911,8 +1011,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+-    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+-      this.saasError_ = '请先登录 SaaS 并选择工作区';
++    if (!this.saasClient_ || !this.saasWorkspaceId_ ||
++        !this.saasSnapshotUnlocked_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并解锁账号快照';
+       return;
+     }
+     this.saasBusy_ = true;
+@@ -945,8 +1046,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   protected async onSaasRestore_(account: SaasAccount) {
+-    if (!this.saasClient_ || this.saasBusy_) {
+-      this.saasError_ = '请先登录 SaaS';
++    if (!this.saasClient_ || !this.saasSnapshotUnlocked_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并解锁账号快照';
+       return;
+     }
+     this.saasBusy_ = true;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 5b17f199..5768cb2e 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -83,6 +83,25 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                 <small>加密快照 · 客户端密钥</small>
+               </div>
+             </div>
++            ${this.saasSnapshotUnlocked_ ? html`
++              <span class="saas-session-current">快照已解锁</span>
++            ` : html`
++              <div class="saas-unlock-inline">
++                <input id="saasUnlockPassword" type="password"
++                    placeholder="输入密码解锁快照"
++                    autocomplete="current-password"
++                    @keydown="${(event: KeyboardEvent) => {
++                      if (event.key === 'Enter') {
++                        this.onSaasUnlockSnapshot_();
++                      }
++                    }}">
++                <button class="tool-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasUnlockSnapshot_}">
++                  解锁快照
++                </button>
++              </div>
++            `}
+             <select class="saas-workspace-select"
+                 .value="${this.saasWorkspaceId_}"
+                 ?disabled="${this.saasBusy_}"
+@@ -98,12 +117,14 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               ${this.saasBusy_ ? '同步中…' : '刷新云端'}
+             </button>
+             <button class="tool-button tool-button-cloud" type="button"
+-                ?disabled="${this.saasBusy_ || !this.managedTabs_.length}"
++                ?disabled="${this.saasBusy_ || !this.saasSnapshotUnlocked_ ||
++                    !this.managedTabs_.length}"
+                 @click="${this.onSaasSyncAllManagedTabs_}">
+               同步全部本地
+             </button>
+             <button class="tool-button tool-button-cloud" type="button"
+-                ?disabled="${this.saasBusy_ || !this.saasAccounts_.length}"
++                ?disabled="${this.saasBusy_ || !this.saasSnapshotUnlocked_ ||
++                    !this.saasAccounts_.length}"
+                 @click="${this.onSaasRestoreAll_}">
+               恢复全部云端
+             </button>
+@@ -140,7 +161,7 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                   </button>
+                 ` : ''}
+                 <button class="tool-button" type="button"
+-                    ?disabled="${this.saasBusy_}"
++                    ?disabled="${this.saasBusy_ || !this.saasSnapshotUnlocked_}"
+                     @click="${() => this.onSaasRestore_(account)}">
+                   恢复到本地
+                 </button>
+@@ -378,6 +399,10 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                   @keydown="${(event: KeyboardEvent) => {
+                     if (event.key === 'Enter') this.onSaasLogin_();
+                   }}">
++              <label class="saas-remember-session">
++                <input id="saasRememberSession" type="checkbox" checked>
++                在此设备保存登录会话（仅保存加密刷新令牌）
++              </label>
+               <button class="primary-button" type="button"
+                   ?disabled="${this.saasBusy_}"
+                   @click="${this.onSaasLogin_}">
+@@ -391,7 +416,7 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                 我有邀请令牌
+               </button>
+             </div>
+-            <p class="saas-login-note">登录密码只用于本地派生快照加密密钥，不会写入快照或发送给同步接口。</p>
++            <p class="saas-login-note">登录密码只用于本地派生快照加密密钥；保存会话时仅保存经系统加密的刷新令牌。</p>
+           `}
+         `}
+         <div class="saas-message" ?hidden="${!this.saasError_}">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 9d507517..a224aff8 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -465,6 +465,35 @@ button:disabled {
+   margin-top: 3px;
+ }
+ 
++.saas-unlock-inline {
++  align-items: center;
++  display: flex;
++  gap: 6px;
++}
++
++.saas-unlock-inline input {
++  background: rgba(5, 10, 16, .72);
++  border: 1px solid var(--fp-line-strong);
++  box-sizing: border-box;
++  color: var(--fp-text);
++  font: inherit;
++  max-width: 180px;
++  padding: 8px 9px;
++}
++
++.saas-unlock-inline input:focus {
++  border-color: var(--fp-cyan);
++  outline: none;
++}
++
++.saas-remember-session {
++  align-items: center;
++  color: var(--fp-faint);
++  display: flex;
++  font-size: 11px;
++  gap: 7px;
++}
++
+ .saas-workspace-select,
+ .saas-login-grid input,
+ .saas-invite-accept-grid input {
