@@ -1,0 +1,128 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -46,4 +46,6 @@ class ManagedTabContext final
+   struct StorageSnapshot {
++    GURL storage_url;
+     net::CookieList cookies;
+     base::Value local_storage;
++    bool consistent = true;
+   };
+@@ -164,2 +166,3 @@ class ManagedTabContext final
+   void ApplyFingerprintHardwareConcurrencyOverride();
+   void OnCookiesForStorageSnapshot(StorageSnapshotCallback callback,
++                                   const GURL& storage_url,
+                                    const net::CookieList& cookies);
+ 
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -141,9 +141,13 @@ bool ParseManagedTabProxyRules(const std::string& proxy_rules,
+ 
+ void FinishStorageSnapshot(ManagedTabContext::StorageSnapshotCallback callback,
++                           GURL storage_url,
++                           bool consistent,
+                            net::CookieList cookies,
+                            base::Value local_storage) {
+   ManagedTabContext::StorageSnapshot snapshot;
++  snapshot.storage_url = std::move(storage_url);
+   snapshot.cookies = std::move(cookies);
+   snapshot.local_storage = std::move(local_storage);
++  snapshot.consistent = consistent;
+   std::move(callback).Run(std::move(snapshot));
+ }
+@@ -772,31 +776,42 @@ void ManagedTabContext::GetStorageSnapshot(
+   content::WebContents* contents = web_contents();
+   if (!contents) {
+-    FinishStorageSnapshot(std::move(callback), {}, base::Value());
++    FinishStorageSnapshot(std::move(callback), current_url_, false, {},
++                          base::Value());
+     return;
+   }
+ 
++  const GURL storage_url = current_url_;
+   content::StoragePartition* storage_partition =
+       contents->GetBrowserContext()->GetStoragePartition(
+           storage_partition_config_);
+   storage_partition->GetCookieManagerForBrowserProcess()->GetAllCookies(
+       base::BindOnce(&ManagedTabContext::OnCookiesForStorageSnapshot,
+-                     weak_factory_.GetWeakPtr(), std::move(callback)));
++                     weak_factory_.GetWeakPtr(), std::move(callback),
++                     storage_url));
+ }
+ 
+ void ManagedTabContext::OnCookiesForStorageSnapshot(
+     StorageSnapshotCallback callback,
++    const GURL& storage_url,
+     const net::CookieList& cookies) {
+   content::RenderFrameHost* frame_host =
+       web_contents()->GetPrimaryMainFrame();
+   if (!frame_host || !frame_host->IsRenderFrameLive()) {
+-    FinishStorageSnapshot(std::move(callback), net::CookieList(cookies),
+-                          base::Value());
++    FinishStorageSnapshot(std::move(callback), storage_url, false,
++                          net::CookieList(cookies), base::Value());
++    return;
++  }
++
++  if (current_url_ != storage_url ||
++      frame_host->GetLastCommittedURL() != storage_url) {
++    FinishStorageSnapshot(std::move(callback), storage_url, false,
++                          net::CookieList(cookies), base::Value());
+     return;
+   }
+ 
+   frame_host->ExecuteJavaScriptInIsolatedWorld(
+       std::u16string(kLocalStorageSnapshotScript),
+-      base::BindOnce(&FinishStorageSnapshot, std::move(callback),
+-                     net::CookieList(cookies)),
++      base::BindOnce(&FinishStorageSnapshot, std::move(callback), storage_url,
++                     true, net::CookieList(cookies)),
+       ISOLATED_WORLD_ID_CHROME_INTERNAL);
+ }
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -954,3 +954,11 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+     std::string tab_id,
+     ManagedTabContext::StorageSnapshot snapshot) {
++  ManagedTabContext* context = ManagedTabContext::FindById(tab_id);
++  if (!context || !snapshot.consistent ||
++      context->current_url() != snapshot.storage_url) {
++    RejectJavascriptCallback(
++        callback_id, base::Value("页面在读取存储期间发生变化，请重试"));
++    return;
++  }
++
+   base::Value::List cookies;
+@@ -1003,18 +1011,16 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+   result.Set("cookies", std::move(cookies));
+   result.Set("local_storage", std::move(snapshot.local_storage));
+-  if (ManagedTabContext* context = ManagedTabContext::FindById(tab_id)) {
+-    base::Value::Dict state = context->GetState();
+-    result.Set("account_id", context->id());
+-    base::Value::Dict fingerprint;
+-    const std::string* user_agent = state.FindString("user_agent");
+-    fingerprint.Set("user_agent", user_agent ? *user_agent : "");
+-    fingerprint.Set("hardware_concurrency",
+-                    state.FindInt("hardware_concurrency").value_or(0));
+-    result.Set("fingerprint", std::move(fingerprint));
+-    result.Set("proxy_rules", state.FindString("proxy_rules").value_or(""));
+-    result.Set("fingerprint_seed",
+-               state.FindString("fingerprint_seed").value_or(""));
+-    result.Set("storage_url", context->current_url().spec());
+-  }
++  base::Value::Dict state = context->GetState();
++  result.Set("account_id", context->id());
++  base::Value::Dict fingerprint;
++  const std::string* user_agent = state.FindString("user_agent");
++  fingerprint.Set("user_agent", user_agent ? *user_agent : "");
++  fingerprint.Set("hardware_concurrency",
++                  state.FindInt("hardware_concurrency").value_or(0));
++  result.Set("fingerprint", std::move(fingerprint));
++  result.Set("proxy_rules", state.FindString("proxy_rules").value_or(""));
++  result.Set("fingerprint_seed",
++             state.FindString("fingerprint_seed").value_or(""));
++  result.Set("storage_url", snapshot.storage_url.spec());
+   ResolveJavascriptCallback(callback_id, result);
+ }
