@@ -1,0 +1,9 @@
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -2141,3 +2141,4 @@ content::WebContents* Browser::AddNewContents(
+   if (source && disposition != WindowOpenDisposition::CURRENT_TAB &&
+-      disposition != WindowOpenDisposition::SAVE_TO_DISK) {
++      disposition != WindowOpenDisposition::SAVE_TO_DISK &&
++      disposition != WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
+     NavigateParams params(

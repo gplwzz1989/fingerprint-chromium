@@ -31,6 +31,7 @@ upstream-fixes/restore-signin-pref-registration.patch
 upstream-fixes/managed-tab-context.patch
 upstream-fixes/managed-tab-storage-partition.patch
 upstream-fixes/managed-tab-single-page-navigation.patch
+upstream-fixes/managed-tab-single-page-pip-preservation.patch
 upstream-fixes/managed-tab-storage-snapshot.patch
 upstream-fixes/managed-tab-control-entry.patch
 upstream-fixes/managed-tab-fingerprint-ua.patch
