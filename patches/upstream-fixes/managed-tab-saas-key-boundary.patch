@@ -1,0 +1,59 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -128,7 +128,7 @@ const kSaasSnapshotAadPrefix = 'fingerprint-manager:v1:';
+ export class FingerprintManagerSaasClient {
+   private constructor(
+       private readonly baseUrl_: string, private readonly deviceId_: string,
+-      private readonly password_: string, private accessToken_: string,
++      private readonly passwordKey_: CryptoKey, private accessToken_: string,
+       private refreshToken_: string, readonly user: SaasUser) {}
+ 
+   static async login(
+@@ -142,8 +142,9 @@ export class FingerprintManagerSaasClient {
+       body: JSON.stringify({email, password, device_id: deviceId}),
+     });
+     const session = await parseSaasResponse<SaasSession>(response);
++    const passwordKey = await importSnapshotPasswordKey(password);
+     return new FingerprintManagerSaasClient(
+-        normalizedBaseUrl, deviceId, password, session.access_token,
++        normalizedBaseUrl, deviceId, passwordKey, session.access_token,
+         session.refresh_token, session.user);
+   }
+ 
+@@ -288,7 +289,7 @@ export class FingerprintManagerSaasClient {
+       snapshot: ManagedTabStorageSnapshot): Promise<SaasSnapshotEnvelope> {
+     const salt = crypto.getRandomValues(new Uint8Array(16));
+     const nonce = crypto.getRandomValues(new Uint8Array(12));
+-    const key = await deriveSnapshotKey(this.password_, salt);
++    const key = await deriveSnapshotKey(this.passwordKey_, salt);
+     const plaintext = new TextEncoder().encode(JSON.stringify({
+       ...snapshot,
+       account_id: accountId,
+@@ -329,7 +330,7 @@ export class FingerprintManagerSaasClient {
+     const encrypted = new Uint8Array(ciphertext.length + tag.length);
+     encrypted.set(ciphertext);
+     encrypted.set(tag, ciphertext.length);
+-    const key = await deriveSnapshotKey(this.password_, salt);
++    const key = await deriveSnapshotKey(this.passwordKey_, salt);
+     let plaintext: ArrayBuffer;
+     try {
+       plaintext = await crypto.subtle.decrypt(
+@@ -396,10 +397,13 @@ async function parseSaasResponse<T>(response: Response): Promise<T> {
+   return body as T;
+ }
+ 
+-async function deriveSnapshotKey(password: string, salt: Uint8Array):
+-    Promise<CryptoKey> {
+-  const baseKey = await crypto.subtle.importKey(
++async function importSnapshotPasswordKey(password: string): Promise<CryptoKey> {
++  return crypto.subtle.importKey(
+       'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
++}
++
++async function deriveSnapshotKey(baseKey: CryptoKey, salt: Uint8Array):
++    Promise<CryptoKey> {
+   return crypto.subtle.deriveKey(
+       {
+         name: 'PBKDF2',
