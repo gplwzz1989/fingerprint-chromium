@@ -1,0 +1,36 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -528,3 +528,5 @@
+       await this.loadSaasAccounts_();
+       await this.loadSaasMembers_();
+-      this.saasError_ = `工作区 ${workspace.name} 已创建`;
++      if (!this.saasError_) {
++        this.saasError_ = `工作区 ${workspace.name} 已创建`;
++      }
+@@ -577,3 +577,6 @@
+       await this.syncManagedTabToSaas_(tab);
+       await this.loadSaasAccounts_();
+-      this.saasError_ = `账号 ${account.account_id} 已创建并同步到本地 Tab`;
++      const refreshError = this.saasError_;
++      this.saasError_ = refreshError ?
++          `账号 ${account.account_id} 已创建并同步到本地 Tab，但列表刷新失败：${refreshError}` :
++          `账号 ${account.account_id} 已创建并同步到本地 Tab`;
+@@ -591,13 +591,15 @@
+-  private async loadSaasAccounts_() {
++  private async loadSaasAccounts_(): Promise<boolean> {
+     if (!this.saasClient_ || !this.saasWorkspaceId_) {
+-      return;
++      return false;
+     }
+     this.saasBusy_ = true;
+     this.saasError_ = '';
+     try {
+       this.saasAccounts_ =
+           await this.saasClient_.getAccounts(this.saasWorkspaceId_);
++      return true;
+     } catch (error) {
+       this.saasError_ = getSaasErrorMessage(error);
++      return false;
+     } finally {
+       this.saasBusy_ = false;
