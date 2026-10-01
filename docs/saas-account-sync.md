@@ -63,7 +63,7 @@ sync_options
 
 `schema_version` 用于结构升级，`revision` 用于并发控制，不能由客户端自行递增后覆盖云端版本。
 
-同步能力本身是 SaaS 账号管理器的必选能力，但账号环境中的数据类别可以分别选择：Cookie、LocalStorage、SessionStorage、指纹、代理和页面地址。未勾选的类别不会上传或覆盖本地现状；恢复时也不会用云端的空数据清空本地对应类别。快照中的 `sync_options` 记录本次选择，缺少该字段的旧快照按原有的全量 Cookie、LocalStorage、指纹、代理和页面地址行为兼容处理，SessionStorage 则按未同步处理。
+同步能力本身是 SaaS 账号管理器的必选能力，但账号环境中的数据类别可以分别选择：Cookie、LocalStorage、SessionStorage、指纹、代理和页面地址。未勾选的类别不会上传或覆盖本地现状；恢复时也不会用云端的空数据清空本地对应类别。LocalStorage 或 SessionStorage 需要同时保留页面地址作为来源，界面会自动保持这一依赖；Cookie、指纹和代理仍可独立关闭。快照中的 `sync_options` 记录本次选择，缺少该字段的旧快照按原有的全量 Cookie、LocalStorage、指纹、代理和页面地址行为兼容处理，SessionStorage 则按未同步处理。
 
 ## 3. 接口契约与实现
 

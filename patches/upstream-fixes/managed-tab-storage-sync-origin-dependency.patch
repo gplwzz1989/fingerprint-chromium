@@ -1,0 +1,64 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -963,6 +963,15 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     const input = source.currentTarget as HTMLInputElement;
+-    this.saasSyncOptions_ = {
++    const nextOptions = {
+       ...this.saasSyncOptions_,
+       [option]: input.checked,
+     };
++    if ((option === 'local_storage' || option === 'session_storage') &&
++        input.checked) {
++      nextOptions.page = true;
++    }
++    if (option === 'page' && !input.checked) {
++      nextOptions.local_storage = false;
++      nextOptions.session_storage = false;
++    }
++    this.saasSyncOptions_ = nextOptions;
+   }
+@@ -1031,3 +1031,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       ManagedTabStorageSnapshot {
+     const options = {...this.saasSyncOptions_};
++    if (options.local_storage || options.session_storage) {
++      // 网页存储必须带有来源页面，避免恢复到 about:blank 的存储空间。
++      options.page = true;
++    }
+     const filtered: ManagedTabStorageSnapshot = {
+@@ -1071,8 +1080,12 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   private async prepareSaasManagedTab_(
+       account: SaasAccount,
+       snapshot: ManagedTabStorageSnapshot): Promise<ManagedTabState> {
+     let tab = this.managedTabs_.find(
+         item => item.account_id === account.account_id);
+     const options = this.getSnapshotSyncOptions_(snapshot);
++    if ((options.local_storage || options.session_storage) &&
++        !snapshot.storage_url) {
++      throw new Error('云端快照缺少网页存储来源，无法恢复');
++    }
+     const proxyRules = options.proxy ? snapshot.proxy_rules || '' :
+                                        tab?.proxy_rules || '';
+@@ -1123,7 +1136,11 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   private getSnapshotSyncOptions_(
+       snapshot: ManagedTabStorageSnapshot): ManagedTabSyncOptions {
+-    return {
++    const options = {
+       ...this.saasSyncOptions_,
+       ...(snapshot.sync_options || {}),
+     };
++    if (options.local_storage || options.session_storage) {
++      options.page = true;
++    }
++    return options;
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -183,4 +183,6 @@ export function getHtml(this: FingerprintManagerUiElement) {
+             <label class="saas-remember-session">
+               <input type="checkbox" ?checked="${this.saasSyncOptions_.page}"
++                  ?disabled="${this.saasSyncOptions_.local_storage ||
++                      this.saasSyncOptions_.session_storage}"
+                   @change="${(event: Event) =>
+                       this.onSaasSyncOptionChange_(event, 'page')}">
