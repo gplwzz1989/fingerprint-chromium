@@ -72,6 +72,7 @@ local_storage
 | `GET` | `/api/v1/workspaces` | 获取用户可访问的工作区 |
 | `GET` | `/api/v1/workspaces/{workspace_id}/accounts` | 分页获取账号清单 |
 | `POST` | `/api/v1/workspaces/{workspace_id}/accounts` | 创建账号及其稳定标识 |
+| `PATCH` | `/api/v1/accounts/{account_id}` | 更新账号名称和标签 |
 | `GET` | `/api/v1/accounts/{account_id}/snapshot` | 获取指定版本或最新快照 |
 | `PUT` | `/api/v1/accounts/{account_id}/snapshot` | 使用 `If-Match` 提交新快照 |
 | `POST` | `/api/v1/accounts/{account_id}/leases` | 获取设备编辑租约 |

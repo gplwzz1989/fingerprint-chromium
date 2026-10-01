@@ -47,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
+	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}", s.handleUpdateAccount)
 	mux.HandleFunc("GET /api/v1/accounts/{account_id}/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("PUT /api/v1/accounts/{account_id}/snapshot", s.handlePutSnapshot)
 	mux.HandleFunc("POST /api/v1/accounts/{account_id}/leases", s.handleAcquireLease)
@@ -419,6 +420,11 @@ type createAccountRequest struct {
 	Labels    []string `json:"labels"`
 }
 
+type updateAccountRequest struct {
+	Name   *string   `json:"name"`
+	Labels *[]string `json:"labels"`
+}
+
 type accountResponse struct {
 	AccountID   string   `json:"account_id"`
 	WorkspaceID string   `json:"workspace_id"`
@@ -574,6 +580,102 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("写入账号审计失败", "error", err.Error())
 	}
 	writeJSON(w, http.StatusCreated, account)
+}
+
+func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.PathValue("account_id")
+	if !validAccountID(accountID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "账号标识无效")
+		return
+	}
+	_, role, ok := s.accountAccess(r.Context(), userID, accountID)
+	if !ok || !canEdit(role) {
+		writeError(w, http.StatusForbidden, "forbidden", "没有修改该账号的权限")
+		return
+	}
+
+	var request updateAccountRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if request.Name == nil && request.Labels == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "至少需要修改一个账号字段")
+		return
+	}
+
+	nameProvided := request.Name != nil
+	name := ""
+	if nameProvided {
+		name = strings.TrimSpace(*request.Name)
+		if name == "" || len(name) > 256 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "账号名称无效")
+			return
+		}
+	}
+
+	labelsProvided := request.Labels != nil
+	labelsJSON := ""
+	if labelsProvided {
+		if len(*request.Labels) > 50 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "账号标签无效")
+			return
+		}
+		for _, label := range *request.Labels {
+			if label == "" || len(label) > 64 {
+				writeError(w, http.StatusBadRequest, "invalid_request", "账号标签无效")
+				return
+			}
+		}
+		encoded, err := json.Marshal(*request.Labels)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "账号标签无效")
+			return
+		}
+		labelsJSON = string(encoded)
+	}
+
+	var account accountResponse
+	var labels string
+	var createdAt, updatedAt time.Time
+	var labelsArgument any
+	if labelsProvided {
+		labelsArgument = labelsJSON
+	}
+	err := s.db.QueryRowContext(r.Context(), `
+		UPDATE accounts
+		SET name = CASE WHEN $2::boolean THEN $3 ELSE name END,
+		    labels = CASE WHEN $4::boolean THEN $5::jsonb ELSE labels END,
+		    updated_at = now()
+		WHERE account_id = $1
+		RETURNING account_id, workspace_id::text, name, labels::text, revision,
+		          created_at, updated_at`,
+		accountID, nameProvided, name, labelsProvided, labelsArgument).Scan(
+		&account.AccountID, &account.WorkspaceID, &account.Name, &labels,
+		&account.Revision, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "账号不存在")
+			return
+		}
+		s.logger.Error("更新账号目录失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法更新账号目录")
+		return
+	}
+	if err := json.Unmarshal([]byte(labels), &account.Labels); err != nil {
+		s.logger.Error("解析更新后的账号标签失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "账号更新结果无效")
+		return
+	}
+	account.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	account.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	if err := s.writeAudit(r.Context(), userID, "account_updated", account.AccountID, deviceID); err != nil {
+		s.logger.Error("写入账号更新审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusOK, account)
 }
 
 type encryptedSnapshotEnvelope struct {

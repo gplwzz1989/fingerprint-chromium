@@ -45,6 +45,7 @@
 - `GET /api/v1/workspaces`
 - `GET /api/v1/workspaces/{workspace_id}/accounts`
 - `POST /api/v1/workspaces/{workspace_id}/accounts`
+- `PATCH /api/v1/accounts/{account_id}`
 - `GET /api/v1/accounts/{account_id}/snapshot`
 - `PUT /api/v1/accounts/{account_id}/snapshot`
 - `POST /api/v1/accounts/{account_id}/leases`

@@ -1,0 +1,150 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -200,6 +200,15 @@ export class FingerprintManagerSaasClient {
+         });
+   }
+ 
++  async updateAccount(
++      accountId: string, name: string, labels: string[]): Promise<SaasAccount> {
++    return this.request_<SaasAccount>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}`, {
++          method: 'PATCH',
++          body: JSON.stringify({name, labels}),
++        });
++  }
++
+   async getAccountSnapshot(accountId: string): Promise<ManagedTabStorageSnapshot> {
+     const response = await this.request_<SaasAccountSnapshot>(
+         `/api/v1/accounts/${encodeURIComponent(accountId)}/snapshot`);
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -424,6 +424,43 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+   }
+ 
++  protected async onSaasUpdateAccount_(source: Event, account: SaasAccount) {
++    if (!this.saasClient_ || this.saasBusy_) {
++      return;
++    }
++    const row = (source.currentTarget as HTMLElement).closest(
++        '.saas-account-row');
++    const nameInput =
++        row?.querySelector<HTMLInputElement>('.saas-account-name-input');
++    const labelsInput =
++        row?.querySelector<HTMLInputElement>('.saas-account-labels-input');
++    const name = nameInput?.value.trim() || '';
++    const labels = (labelsInput?.value || '').split(',').map(label =>
++        label.trim()).filter(label => label.length > 0);
++    if (!name) {
++      this.saasError_ = '账号名称不能为空';
++      return;
++    }
++    if (labels.length > 50 || labels.some(label => label.length > 64)) {
++      this.saasError_ = '账号标签数量或长度超出限制';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const updated = await this.saasClient_.updateAccount(
++          account.account_id, name, labels);
++      this.saasAccounts_ = this.saasAccounts_.map(item =>
++          item.account_id === updated.account_id ? updated : item);
++      this.saasError_ = `账号 ${updated.account_id} 已更新`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+       this.saasError_ = '请先登录 SaaS 并选择工作区';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -108,9 +108,20 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               <div class="saas-account-row">
+                 <div class="saas-account-mark">${account.account_id.slice(0, 2).toUpperCase()}</div>
+                 <div class="saas-account-copy">
+-                  <strong>${account.name}</strong>
++                  <input class="saas-account-name-input" type="text"
++                      .value="${account.name}" maxlength="256"
++                      aria-label="账号名称">
+                   <span>${account.account_id} · 云端版本 ${account.revision}</span>
++                  <input class="saas-account-labels-input" type="text"
++                      .value="${account.labels.join(', ')}"
++                      placeholder="标签，用逗号分隔" aria-label="账号标签">
+                 </div>
++                <button class="tool-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${(event: Event) =>
++                        this.onSaasUpdateAccount_(event, account)}">
++                  保存
++                </button>
+                 <button class="tool-button" type="button"
+                     ?disabled="${this.saasBusy_}"
+                     @click="${() => this.onSaasRestore_(account)}">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -512,21 +512,28 @@ button:disabled {
+ }
+ 
+ .saas-account-copy {
++  flex: 1;
+   min-width: 0;
+ }
+ 
+-.saas-account-copy strong,
++.saas-account-name-input,
++.saas-account-labels-input,
+ .saas-account-copy span {
++  background: transparent;
++  border: 0;
++  box-sizing: border-box;
+   display: block;
+   overflow: hidden;
+@@ -534,7 +541,7 @@ button:disabled {
+ }
+ 
+-.saas-account-copy strong {
++.saas-account-name-input {
+   color: var(--fp-text);
+   font-size: 11px;
+   font-weight: 500;
++  padding: 0;
++  width: 100%;
+ }
+ 
+ .saas-account-copy span {
+@@ -540,6 +547,21 @@ button:disabled {
+   margin-top: 4px;
+ }
+ 
++.saas-account-labels-input {
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 9px;
++  margin-top: 4px;
++  padding: 0;
++  width: 100%;
++}
++
++.saas-account-name-input:focus,
++.saas-account-labels-input:focus {
++  border-bottom: 1px solid var(--fp-cyan);
++  outline: none;
++}
++
+ .saas-account-row .tool-button {
+   margin-left: auto;
+   white-space: nowrap;
