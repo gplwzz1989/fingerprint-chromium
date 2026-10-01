@@ -17,7 +17,7 @@ index 0000000..0000000 100644
  export interface SaasAccount {
    account_id: string;
    workspace_id: string;
-@@ -163,6 +171,24 @@ export class FingerprintManagerSaasClient {
+@@ -163,5 +171,23 @@ export class FingerprintManagerSaasClient {
          session.refresh_token, session.user);
    }
  
@@ -61,7 +61,7 @@ index 0000000..0000000 100644
  
    private browserProxy_: FingerprintManagerBrowserProxy =
        FingerprintManagerBrowserProxyImpl.getInstance();
-@@ -365,6 +367,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -365,5 +367,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
      this.saasSessions_ = [];
      this.saasWorkspaceId_ = '';
      this.saasInviteToken_ = '';
@@ -125,7 +125,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 index 0000000..0000000 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
-@@ -194,33 +194,75 @@ export function getHtml(this: FingerprintManagerUiElement) {
+@@ -194,31 +194,73 @@ export function getHtml(this: FingerprintManagerUiElement) {
              </div>
            </div>
          ` : html`
@@ -230,7 +230,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
 index 0000000..0000000 100644
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
-@@ -466,7 +466,8 @@ button:disabled {
+@@ -466,6 +466,7 @@ button:disabled {
  }
  
  .saas-workspace-select,
@@ -239,7 +239,7 @@ index 0000000..0000000 100644
 +.saas-invite-accept-grid input {
    background: rgba(5, 10, 16, .72);
    border: 1px solid var(--fp-line-strong);
-@@ -483,7 +484,8 @@ button:disabled {
+@@ -483,6 +484,7 @@ button:disabled {
  }
  
  .saas-workspace-select:focus,
@@ -248,7 +248,7 @@ index 0000000..0000000 100644
 +.saas-invite-accept-grid input:focus {
    border-color: var(--fp-cyan);
    outline: none;
-@@ -712,6 +714,22 @@ button:disabled {
+@@ -712,5 +714,21 @@ button:disabled {
    width: 100%;
  }
  
