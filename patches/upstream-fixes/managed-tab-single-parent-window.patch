@@ -97,3 +97,33 @@ diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/brow
 +  // Managed browser mode does not allow a Tab group to leave its parent
 +  // window.
  }
+
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -60,6 +60,7 @@
+ #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_command_controller.h"
++#include "chrome/browser/ui/browser_finder.h"
+ #include "chrome/browser/ui/browser_dialogs.h"
+@@ -1068,6 +1069,11 @@ void NewWindow(BrowserWindowInterface* browser) {
++  // Managed browser mode keeps window creation inside the existing parent
++  // window and represents the request as a native Tab.
++  if (Browser* managed_browser = browser->GetBrowserForMigrationOnly()) {
++    NewTab(managed_browser);
++    return;
++  }
++
+   Profile* const profile = browser->GetProfile();
+@@ -1108,6 +1114,13 @@ void NewWindow(BrowserWindowInterface* browser) {
+ void NewIncognitoWindow(Profile* profile) {
++  Browser* browser = chrome::FindTabbedBrowser(profile, false);
++  if (browser) {
++    // Managed browser mode does not create a second window for incognito
++    // requests. The product exposes account isolation through managed Tabs.
++    NewTab(browser);
++    return;
++  }
+   NewEmptyWindow(profile->GetPrimaryOTRProfile(/*create_if_needed=*/true));
+ }
