@@ -1,0 +1,18 @@
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -51,3 +51,4 @@
+ #include "chrome/common/chrome_isolated_world_ids.h"
+ #include "chrome/common/chrome_switches.h"
++#include "chrome/common/webui_url_constants.h"
+ #include "components/reading_list/core/reading_list_model.h"
+@@ -357,4 +358,9 @@ std::vector<ManagedTabContext*> ManagedTabContext::GetAll() {
+     for (int index = 0; index < tab_strip_model->count(); ++index) {
+       content::WebContents* contents =
+           tab_strip_model->GetWebContentsAt(index);
++      if (contents && contents->GetURL().SchemeIs(content::kChromeUIScheme) &&
++          contents->GetURL().host() == kChromeUIFingerprintManagerHost) {
++        // 管理器页面本身不是账号环境，不应出现在账号 Tab 列表和批量同步中。
++        continue;
++      }
+       ManagedTabContext* tab_context =
