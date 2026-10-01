@@ -44,6 +44,9 @@
 - `POST /api/v1/sessions/revoke`
 - `GET /api/v1/workspaces`
 - `POST /api/v1/workspaces/{workspace_id}/invitations`
+- `GET /api/v1/workspaces/{workspace_id}/members`
+- `PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}`
+- `DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}`
 - `POST /api/v1/invitations/accept`
 - `GET /api/v1/workspaces/{workspace_id}/accounts`
 - `POST /api/v1/workspaces/{workspace_id}/accounts`
@@ -58,6 +61,8 @@
 快照接口只接受客户端加密信封，并使用 `If-Match` 做乐观并发控制。
 
 工作区所有者可以邀请管理员、编辑者或查看者；管理员可以邀请编辑者或查看者。创建邀请后，接口只返回一次原始邀请令牌，部署方应通过受控渠道交给受邀用户。令牌服务端只保存摘要，有效期为 7 天且只能接受一次。新用户通过 `/api/v1/invitations/accept` 设置密码；已有用户需要再次验证自己的密码后才能加入工作区。
+
+工作区成员可以读取成员列表。所有者可以调整或移除非所有者成员；管理员只能调整或移除编辑者和查看者。成员不能修改或移除自己，所有者成员不可被移除。
 
 ## 安全边界
 

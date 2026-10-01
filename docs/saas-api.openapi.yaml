@@ -173,6 +173,68 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/workspaces/{workspace_id}/members:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [工作区]
+      summary: 获取工作区成员列表
+      responses:
+        '200':
+          description: 工作区成员列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceMember'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/workspaces/{workspace_id}/members/{user_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [工作区]
+      summary: 调整工作区成员角色
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkspaceMemberRequest'
+      responses:
+        '200':
+          description: 成员角色已调整
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceMember'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [工作区]
+      summary: 移除工作区成员
+      responses:
+        '204':
+          description: 成员已移除
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/workspaces/{workspace_id}/accounts:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -460,6 +522,31 @@ components:
         role:
           type: string
           enum: [owner, admin, editor, viewer]
+    WorkspaceMember:
+      type: object
+      required: [user_id, email, display_name, role, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, editor, viewer]
+        created_at:
+          type: string
+          format: date-time
+    UpdateWorkspaceMemberRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [admin, editor, viewer]
     CreateWorkspaceInviteRequest:
       type: object
       required: [email, role]

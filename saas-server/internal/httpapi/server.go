@@ -48,6 +48,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/invitations/accept", s.handleAcceptWorkspaceInvite)
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/invitations", s.handleCreateWorkspaceInvite)
+	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/members", s.handleListWorkspaceMembers)
+	mux.HandleFunc("PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}", s.handleUpdateWorkspaceMember)
+	mux.HandleFunc("DELETE /api/v1/workspaces/{workspace_id}/members/{user_id}", s.handleRemoveWorkspaceMember)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}", s.handleUpdateAccount)
@@ -673,6 +676,220 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, workspaces)
+}
+
+type workspaceMemberResponse struct {
+	UserID      string `json:"user_id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type updateWorkspaceMemberRequest struct {
+	Role string `json:"role"`
+}
+
+func (s *Server) handleListWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
+	userID, _, _, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.PathValue("workspace_id")
+	if !looksLikeUUID(workspaceID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "工作区标识无效")
+		return
+	}
+	if _, ok := s.workspaceRole(r.Context(), userID, workspaceID); !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "没有访问该工作区的权限")
+		return
+	}
+
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT u.id::text, u.email, u.display_name, wm.role, wm.created_at
+		FROM workspace_members wm
+		JOIN users u ON u.id = wm.user_id
+		WHERE wm.workspace_id = $1::uuid
+		ORDER BY lower(u.email), u.id`, workspaceID)
+	if err != nil {
+		s.logger.Error("查询工作区成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取工作区成员")
+		return
+	}
+	defer rows.Close()
+	members := make([]workspaceMemberResponse, 0)
+	for rows.Next() {
+		var member workspaceMemberResponse
+		var createdAt time.Time
+		if err := rows.Scan(&member.UserID, &member.Email, &member.DisplayName,
+			&member.Role, &createdAt); err != nil {
+			s.logger.Error("读取工作区成员失败", "error", err.Error())
+			writeError(w, http.StatusInternalServerError, "internal_error", "无法读取工作区成员")
+			return
+		}
+		member.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Error("遍历工作区成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法读取工作区成员")
+		return
+	}
+	writeJSON(w, http.StatusOK, members)
+}
+
+func (s *Server) handleUpdateWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.PathValue("workspace_id")
+	targetUserID := r.PathValue("user_id")
+	if !looksLikeUUID(workspaceID) || !looksLikeUUID(targetUserID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "成员标识无效")
+		return
+	}
+	actorRole, ok := s.workspaceRole(r.Context(), userID, workspaceID)
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "没有访问该工作区的权限")
+		return
+	}
+	if userID == targetUserID {
+		writeError(w, http.StatusConflict, "conflict", "不能修改当前用户自己的角色")
+		return
+	}
+
+	var request updateWorkspaceMemberRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
+	if !validWorkspaceInviteRole(request.Role) || !canInviteMember(actorRole, request.Role) {
+		writeError(w, http.StatusForbidden, "forbidden", "当前用户无权授予该成员角色")
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始调整工作区成员事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "调整成员角色失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+
+	var currentRole string
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT role FROM workspace_members
+		WHERE workspace_id = $1::uuid AND user_id = $2::uuid
+		FOR UPDATE`, workspaceID, targetUserID).Scan(&currentRole); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "工作区成员不存在")
+			return
+		}
+		s.logger.Error("查询待调整成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "调整成员角色失败，请稍后重试")
+		return
+	}
+	if !canManageMember(actorRole, currentRole) {
+		writeError(w, http.StatusForbidden, "forbidden", "当前用户无权调整该成员")
+		return
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE workspace_members SET role = $1
+		WHERE workspace_id = $2::uuid AND user_id = $3::uuid`,
+		request.Role, workspaceID, targetUserID); err != nil {
+		s.logger.Error("更新工作区成员角色失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "调整成员角色失败，请稍后重试")
+		return
+	}
+	var member workspaceMemberResponse
+	var createdAt time.Time
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT u.id::text, u.email, u.display_name, wm.role, wm.created_at
+		FROM workspace_members wm
+		JOIN users u ON u.id = wm.user_id
+		WHERE wm.workspace_id = $1::uuid AND wm.user_id = $2::uuid`,
+		workspaceID, targetUserID).Scan(&member.UserID, &member.Email,
+		&member.DisplayName, &member.Role, &createdAt); err != nil {
+		s.logger.Error("读取更新后的工作区成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "调整成员角色失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交工作区成员角色调整失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "调整成员角色失败，请稍后重试")
+		return
+	}
+	member.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	if err := s.writeAudit(r.Context(), userID, "member_role_updated", "", deviceID); err != nil {
+		s.logger.Error("写入成员角色审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusOK, member)
+}
+
+func (s *Server) handleRemoveWorkspaceMember(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.PathValue("workspace_id")
+	targetUserID := r.PathValue("user_id")
+	if !looksLikeUUID(workspaceID) || !looksLikeUUID(targetUserID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "成员标识无效")
+		return
+	}
+	actorRole, ok := s.workspaceRole(r.Context(), userID, workspaceID)
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "没有访问该工作区的权限")
+		return
+	}
+	if userID == targetUserID {
+		writeError(w, http.StatusConflict, "conflict", "不能移除当前用户自己")
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始移除工作区成员事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+	var currentRole string
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT role FROM workspace_members
+		WHERE workspace_id = $1::uuid AND user_id = $2::uuid
+		FOR UPDATE`, workspaceID, targetUserID).Scan(&currentRole); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "工作区成员不存在")
+			return
+		}
+		s.logger.Error("查询待移除成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
+		return
+	}
+	if !canManageMember(actorRole, currentRole) {
+		writeError(w, http.StatusForbidden, "forbidden", "当前用户无权移除该成员")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		DELETE FROM workspace_members
+		WHERE workspace_id = $1::uuid AND user_id = $2::uuid`,
+		workspaceID, targetUserID); err != nil {
+		s.logger.Error("删除工作区成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交工作区成员移除失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "移除成员失败，请稍后重试")
+		return
+	}
+	if err := s.writeAudit(r.Context(), userID, "member_removed", "", deviceID); err != nil {
+		s.logger.Error("写入成员移除审计失败", "error", err.Error())
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type createAccountRequest struct {
@@ -1412,6 +1629,13 @@ func canInviteMember(inviterRole, invitedRole string) bool {
 		return true
 	}
 	return inviterRole == "admin" && invitedRole != "admin"
+}
+
+func canManageMember(actorRole, memberRole string) bool {
+	if memberRole == "owner" {
+		return false
+	}
+	return canInviteMember(actorRole, memberRole)
 }
 
 func snapshotLeaseState(deviceID, leaseDeviceID string, expiresAt, now time.Time) string {

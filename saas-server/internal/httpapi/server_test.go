@@ -132,3 +132,25 @@ func TestWorkspaceInviteRolePolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceMemberManagementPolicy(t *testing.T) {
+	tests := []struct {
+		actor  string
+		member string
+		want   bool
+	}{
+		{actor: "owner", member: "admin", want: true},
+		{actor: "owner", member: "editor", want: true},
+		{actor: "admin", member: "editor", want: true},
+		{actor: "admin", member: "viewer", want: true},
+		{actor: "admin", member: "admin", want: false},
+		{actor: "editor", member: "viewer", want: false},
+		{actor: "owner", member: "owner", want: false},
+	}
+	for _, test := range tests {
+		if got := canManageMember(test.actor, test.member); got != test.want {
+			t.Errorf("canManageMember(%q, %q) = %t, want %t",
+				test.actor, test.member, got, test.want)
+		}
+	}
+}
