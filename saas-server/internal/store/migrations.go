@@ -97,6 +97,8 @@ var migrations = []string{
     )`,
 	`CREATE INDEX IF NOT EXISTS account_members_user_idx
      ON account_members (user_id, account_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS users_lower_email_idx
+     ON users (lower(email))`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
