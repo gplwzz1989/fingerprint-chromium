@@ -43,6 +43,7 @@
 - `POST /api/v1/sessions/refresh`
 - `POST /api/v1/sessions/revoke`
 - `GET /api/v1/workspaces`
+- `POST /api/v1/workspaces`
 - `POST /api/v1/workspaces/{workspace_id}/invitations`
 - `GET /api/v1/workspaces/{workspace_id}/members`
 - `PATCH /api/v1/workspaces/{workspace_id}/members/{user_id}`

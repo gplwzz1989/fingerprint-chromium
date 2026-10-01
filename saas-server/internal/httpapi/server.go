@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
 	mux.HandleFunc("DELETE /api/v1/sessions/{session_id}", s.handleRevokeSessionByID)
 	mux.HandleFunc("POST /api/v1/invitations/accept", s.handleAcceptWorkspaceInvite)
+	mux.HandleFunc("POST /api/v1/workspaces", s.handleCreateWorkspace)
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/invitations", s.handleCreateWorkspaceInvite)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/members", s.handleListWorkspaceMembers)
@@ -386,6 +387,69 @@ type workspaceResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Role        string `json:"role"`
+}
+
+type createWorkspaceRequest struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+
+	var request createWorkspaceRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if !validWorkspaceName(request.Name) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "工作区名称无效")
+		return
+	}
+
+	workspaceID, err := newUUID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建工作区失败，请稍后重试")
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始创建工作区事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建工作区失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO workspaces (id, name) VALUES ($1::uuid, $2)`,
+		workspaceID, request.Name); err != nil {
+		s.logger.Error("保存工作区失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建工作区失败，请稍后重试")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO workspace_members (workspace_id, user_id, role)
+		VALUES ($1::uuid, $2::uuid, 'owner')`, workspaceID, userID); err != nil {
+		s.logger.Error("保存工作区所有者失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建工作区失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交工作区创建事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建工作区失败，请稍后重试")
+		return
+	}
+
+	if err := s.writeAudit(r.Context(), userID, "workspace_created", "", deviceID); err != nil {
+		s.logger.Error("写入工作区创建审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusCreated, workspaceResponse{
+		WorkspaceID: workspaceID,
+		Name:        request.Name,
+		Role:        "owner",
+	})
 }
 
 type createWorkspaceInviteRequest struct {
@@ -2082,6 +2146,18 @@ func validEmail(value string) bool {
 
 func validDeviceID(value string) bool {
 	return len(value) >= 1 && len(value) <= 128
+}
+
+func validWorkspaceName(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character < ' ' || character == '\u007f' {
+			return false
+		}
+	}
+	return true
 }
 
 func validAccountID(value string) bool {

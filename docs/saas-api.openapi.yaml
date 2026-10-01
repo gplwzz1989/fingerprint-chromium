@@ -111,6 +111,26 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/workspaces:
+    post:
+      tags: [工作区]
+      summary: 创建工作区并成为所有者
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: 工作区创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
     get:
       tags: [工作区]
       summary: 获取当前用户可访问的工作区
@@ -496,6 +516,8 @@ components:
         maxLength: 128
         pattern: '^[A-Za-z0-9_-]+$'
   responses:
+    InvalidRequest:
+      description: 请求参数无效
     Unauthorized:
       description: 身份认证失败
     Forbidden:
@@ -505,6 +527,15 @@ components:
     Conflict:
       description: 资源版本或租约冲突
   schemas:
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
     CreateSessionRequest:
       type: object
       required: [email, password, device_id]

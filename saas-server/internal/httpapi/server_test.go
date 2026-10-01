@@ -26,6 +26,19 @@ func TestAccountIDValidation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceNameValidation(t *testing.T) {
+	for _, value := range []string{"主工作区", "team-01", "工作区 2"} {
+		if !validWorkspaceName(value) {
+			t.Errorf("validWorkspaceName(%q) = false", value)
+		}
+	}
+	for _, value := range []string{"", "\n工作区", strings.Repeat("a", 129)} {
+		if validWorkspaceName(value) {
+			t.Errorf("validWorkspaceName(%q) = true", value)
+		}
+	}
+}
+
 func TestSessionIDValidation(t *testing.T) {
 	if !looksLikeUUID("123e4567-e89b-12d3-a456-426614174000") {
 		t.Fatal("looksLikeUUID() rejected a valid UUID")
