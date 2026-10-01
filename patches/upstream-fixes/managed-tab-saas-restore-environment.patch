@@ -1,0 +1,95 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -933,6 +933,40 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+   }
+ 
++  private async prepareSaasManagedTab_(
++      account: SaasAccount,
++      snapshot: ManagedTabStorageSnapshot): Promise<ManagedTabState> {
++    let tab = this.managedTabs_.find(
++        item => item.account_id === account.account_id);
++    const proxyRules = snapshot.proxy_rules || '';
++    const fingerprintSeed = snapshot.fingerprint_seed || '';
++    if (tab &&
++        ((snapshot.proxy_rules !== undefined &&
++          tab.proxy_rules !== proxyRules) ||
++         (snapshot.fingerprint_seed !== undefined &&
++          tab.fingerprint_seed !== fingerprintSeed))) {
++      const oldTabId = tab.id;
++      if (!await this.browserProxy_.closeManagedTab(oldTabId)) {
++        throw new Error('无法关闭旧的账号 Tab，云端环境尚未恢复');
++      }
++      const remainingTabs = await this.browserProxy_.getManagedTabs();
++      if (remainingTabs.some(item => item.id === oldTabId)) {
++        throw new Error('旧的账号 Tab 未能关闭，云端环境尚未恢复');
++      }
++      this.managedTabs_ = remainingTabs;
++      tab = undefined;
++    }
++    if (!tab) {
++      tab = await this.browserProxy_.createManagedTab(
++          snapshot.storage_url || undefined, account.account_id,
++          snapshot.proxy_rules || undefined,
++          snapshot.fingerprint_seed || undefined);
++    }
++    if (snapshot.fingerprint) {
++      await this.browserProxy_.configureManagedTabFingerprint(
++          tab.id, snapshot.fingerprint.user_agent,
++          snapshot.fingerprint.hardware_concurrency);
++    }
++    if (snapshot.storage_url) {
++      await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
++    }
++    return tab;
++  }
++
+   protected async onSaasSyncAllManagedTabs_() {
+@@ -971,22 +1005,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+     const snapshot =
+         await this.saasClient_.getAccountSnapshot(account.account_id);
+-    let tab = this.managedTabs_.find(
+-        item => item.account_id === account.account_id);
+-    if (!tab) {
+-      tab = await this.browserProxy_.createManagedTab(
+-          snapshot.storage_url || undefined, account.account_id,
+-          snapshot.proxy_rules || undefined,
+-          snapshot.fingerprint_seed || undefined);
+-    }
+-    if (snapshot.fingerprint) {
+-      await this.browserProxy_.configureManagedTabFingerprint(
+-          tab.id, snapshot.fingerprint.user_agent,
+-          snapshot.fingerprint.hardware_concurrency);
+-    }
+-    if (snapshot.storage_url) {
+-      await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
+-    }
++    const tab = await this.prepareSaasManagedTab_(account, snapshot);
+     await this.writeSnapshotWithRetry_(tab.id, snapshot);
+   }
+ 
+@@ -1126,22 +1145,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     try {
+       const snapshot =
+           await this.saasClient_.getAccountSnapshot(account.account_id);
+-      let tab = this.managedTabs_.find(
+-          item => item.account_id === account.account_id);
+-      if (!tab) {
+-        tab = await this.browserProxy_.createManagedTab(
+-            snapshot.storage_url || undefined, account.account_id,
+-            snapshot.proxy_rules || undefined,
+-            snapshot.fingerprint_seed || undefined);
+-      }
+-      if (snapshot.fingerprint) {
+-        await this.browserProxy_.configureManagedTabFingerprint(
+-            tab.id, snapshot.fingerprint.user_agent,
+-            snapshot.fingerprint.hardware_concurrency);
+-      }
+-      if (snapshot.storage_url) {
+-        await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
+-      }
++      const tab = await this.prepareSaasManagedTab_(account, snapshot);
+       await this.writeSnapshotWithRetry_(tab.id, snapshot);
+       await this.getManagedTabs_();
