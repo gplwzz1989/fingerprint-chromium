@@ -1,0 +1,220 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -7,3 +7,4 @@
+ 
++#include <map>
+ #include <string>
+ #include <vector>
+@@ -64,6 +64,8 @@ class ManagedTabContext final
+   static ManagedTabContext* FindById(const std::string& id);
+   static bool IsValidNetworkProxy(const std::string& proxy_rules);
+   static bool IsValidFingerprintSeed(const std::string& fingerprint_seed);
++  static bool PrepareSessionRestore(
++      const std::map<std::string, std::string>& extra_data);
+   static void ConfigureNetworkContextParams(
+       const content::StoragePartitionConfig& config,
+       network::mojom::NetworkContextParams* network_context_params);
+@@ -84,5 +84,11 @@ class ManagedTabContext final
+       const std::string& managed_tab_id,
+       const std::string& proxy_rules,
+       const std::string& fingerprint_seed);
++
++  static constexpr char kSessionManagedTabIdKey[] = "managed_tab_id";
++  static constexpr char kSessionProxyRulesKey[] = "proxy_rules";
++  static constexpr char kSessionFingerprintSeedKey[] = "fingerprint_seed";
++  static constexpr char kSessionHardwareConcurrencyKey[] =
++      "hardware_concurrency";
++
+   const std::string& id() const { return id_; }
+   const std::string& network_proxy_rules() const {
+@@ -141,6 +150,7 @@ class ManagedTabContext final
+ 
+   static std::string GetNetworkProxyRulesForId(const std::string& id);
+   static std::string GetFingerprintSeedForId(const std::string& id);
++  static int GetSessionHardwareConcurrencyForId(const std::string& id);
+ 
+   // content::WebContentsObserver:
+   void DidFinishNavigation(
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -113,6 +113,11 @@ base::flat_map<std::string, std::string>& ManagedTabFingerprintSeeds() {
+   return *seeds;
+ }
+ 
++base::flat_map<std::string, int>& ManagedTabRestoreHardwareConcurrency() {
++  static base::NoDestructor<base::flat_map<std::string, int>> values;
++  return *values;
++}
++
+ bool ParseManagedTabProxyRules(const std::string& proxy_rules,
+                                net::ProxyConfig::ProxyRules* parsed_rules) {
+@@ -350,6 +355,49 @@ bool ManagedTabContext::IsValidNetworkProxy(const std::string& proxy_rules) {
+   return ParseManagedTabProxyRules(proxy_rules, &parsed_rules);
+ }
+ 
++// static
++bool ManagedTabContext::PrepareSessionRestore(
++    const std::map<std::string, std::string>& extra_data) {
++  auto managed_tab_id = extra_data.find(kSessionManagedTabIdKey);
++  if (managed_tab_id == extra_data.end() ||
++      !IsValidId(managed_tab_id->second)) {
++    return false;
++  }
++
++  const auto proxy_rules = extra_data.find(kSessionProxyRulesKey);
++  const std::string proxy_rules_value =
++      proxy_rules == extra_data.end() ? std::string() : proxy_rules->second;
++  if (!IsValidNetworkProxy(proxy_rules_value)) {
++    return false;
++  }
++
++  const auto fingerprint_seed =
++      extra_data.find(kSessionFingerprintSeedKey);
++  const std::string fingerprint_seed_value =
++      fingerprint_seed == extra_data.end() ? std::string()
++                                            : fingerprint_seed->second;
++  if (!fingerprint_seed_value.empty() &&
++      !IsValidFingerprintSeed(fingerprint_seed_value)) {
++    return false;
++  }
++
++  int hardware_concurrency = 0;
++  const auto hardware_value = extra_data.find(kSessionHardwareConcurrencyKey);
++  if (hardware_value != extra_data.end() &&
++      (!base::StringToInt(hardware_value->second, &hardware_concurrency) ||
++       hardware_concurrency < 0 || hardware_concurrency > 64)) {
++    return false;
++  }
++
++  if (proxy_rules_value.empty()) {
++    ManagedTabProxyRules().erase(managed_tab_id->second);
++  } else {
++    ManagedTabProxyRules()[managed_tab_id->second] = proxy_rules_value;
++  }
++  ManagedTabFingerprintSeeds()[managed_tab_id->second] =
++      fingerprint_seed_value.empty()
++          ? GetFingerprintSeedForId(managed_tab_id->second)
++          : fingerprint_seed_value;
++  ManagedTabRestoreHardwareConcurrency()[managed_tab_id->second] =
++      hardware_concurrency;
++  return true;
++}
++
+ // static
+ std::string ManagedTabContext::GetNetworkProxyRulesForId(
+     const std::string& id) {
+@@ -416,6 +464,19 @@ std::string ManagedTabContext::GetFingerprintSeedForId(
+              : std::string();
+ }
+ 
++// static
++int ManagedTabContext::GetSessionHardwareConcurrencyForId(
++    const std::string& id) {
++  auto it = ManagedTabRestoreHardwareConcurrency().find(id);
++  if (it == ManagedTabRestoreHardwareConcurrency().end()) {
++    return 0;
++  }
++
++  const int hardware_concurrency = it->second;
++  ManagedTabRestoreHardwareConcurrency().erase(it);
++  return hardware_concurrency;
++}
++
+ // static
+ void ManagedTabContext::ConfigureNetworkContextParams(
+     const content::StoragePartitionConfig& config,
+@@ -536,7 +597,11 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+               ? GetFingerprintSeedForId(id_)
+               : std::string()),
+-      current_url_(web_contents->GetURL()) {}
++      current_url_(web_contents->GetURL()),
++      fingerprint_user_agent_override_(web_contents->GetUserAgentOverride()),
++      fingerprint_hardware_concurrency_(
++          GetSessionHardwareConcurrencyForId(id_)) {
++  ApplyFingerprintHardwareConcurrencyOverride();
++}
+ 
+ ManagedTabContext::~ManagedTabContext() {
+   ManagedTabProxyRules().erase(id_);
+diff --git a/chrome/browser/ui/browser_live_tab_context.cc b/chrome/browser/ui/browser_live_tab_context.cc
+--- a/chrome/browser/ui/browser_live_tab_context.cc
++++ b/chrome/browser/ui/browser_live_tab_context.cc
+@@ -23,6 +23,7 @@
+ #include "chrome/browser/sessions/tab_restore_service_factory.h"
+ #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/ui/browser_commands.h"
+@@ -160,7 +161,28 @@ sessions::LiveTab* BrowserLiveTabContext::GetActiveLiveTab() const {
+ std::map<std::string, std::string> BrowserLiveTabContext::GetExtraDataForTab(
+     int index) const {
+-  return std::map<std::string, std::string>();
++  std::map<std::string, std::string> data;
++  if (index < 0 || index >= tab_strip_model_->count()) {
++    return data;
++  }
++
++  ManagedTabContext* managed_tab_context =
++      ManagedTabContext::FromWebContents(
++          tab_strip_model_->GetWebContentsAt(index));
++  if (!managed_tab_context) {
++    return data;
++  }
++
++  data[ManagedTabContext::kSessionManagedTabIdKey] =
++      managed_tab_context->id();
++  data[ManagedTabContext::kSessionProxyRulesKey] =
++      managed_tab_context->network_proxy_rules();
++  data[ManagedTabContext::kSessionFingerprintSeedKey] =
++      managed_tab_context->fingerprint_seed();
++  data[ManagedTabContext::kSessionHardwareConcurrencyKey] =
++      base::NumberToString(
++          managed_tab_context->fingerprint_hardware_concurrency());
++  return data;
+ }
+ 
+ std::map<std::string, std::string>
+diff --git a/chrome/browser/ui/browser_tabrestore.cc b/chrome/browser/ui/browser_tabrestore.cc
+--- a/chrome/browser/ui/browser_tabrestore.cc
++++ b/chrome/browser/ui/browser_tabrestore.cc
+@@ -10,6 +11,7 @@
+ 
+ #include "build/build_config.h"
+ #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -31,6 +32,8 @@
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/render_widget_host_view.h"
+ #include "content/public/browser/restore_type.h"
+ #include "content/public/browser/session_storage_namespace.h"
++#include "content/public/browser/site_instance.h"
++#include "content/public/browser/storage_partition_config.h"
+ #include "content/public/browser/web_contents.h"
+@@ -67,7 +70,21 @@ std::unique_ptr<WebContents> CreateRestoredTab(
+   content::SessionStorageNamespaceMap session_storage_namespace_map =
+       content::CreateMapWithDefaultSessionStorageNamespace(
+           browser->profile(), session_storage_namespace);
+-  WebContents::CreateParams create_params(
+-      browser->profile(),
+-      tab_util::GetSiteInstanceForNewTab(browser->profile(), restore_url));
++  const bool is_managed_tab =
++      ManagedTabContext::PrepareSessionRestore(extra_data);
++  scoped_refptr<content::SiteInstance> site_instance;
++  if (is_managed_tab) {
++    const std::string& managed_tab_id =
++        extra_data.at(ManagedTabContext::kSessionManagedTabIdKey);
++    const content::StoragePartitionConfig partition_config =
++        content::StoragePartitionConfig::Create(
++            browser->profile(), "managedtab", managed_tab_id,
++            /*in_memory=*/false);
++    site_instance = content::SiteInstance::CreateForFixedStoragePartition(
++        browser->profile(), restore_url, partition_config);
++  } else {
++    site_instance =
++        tab_util::GetSiteInstanceForNewTab(browser->profile(), restore_url);
++  }
++  WebContents::CreateParams create_params(browser->profile(), site_instance);
+   create_params.initially_hidden = initially_hidden;
