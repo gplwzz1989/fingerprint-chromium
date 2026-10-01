@@ -82,6 +82,7 @@ upstream-fixes/managed-tab-storage-consistency.patch
 upstream-fixes/managed-tab-storage-sync-options.patch
 upstream-fixes/managed-tab-storage-sync-origin-dependency.patch
 upstream-fixes/managed-tab-hide-manager-from-account-list.patch
+upstream-fixes/managed-tab-navigation-history-isolation.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch

@@ -1,0 +1,55 @@
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -498,5 +498,32 @@
+ // appropriate tab to navigate.  If that tab is the |current_tab|, reverts the
+ // location bar contents, since all browser-UI-triggered navigations should
+ // revert any omnibox edits in the |current_tab|.
++WebContents* CreateManagedNavigationTab(Browser* browser,
++                                        WebContents* current_tab,
++                                        bool foreground) {
++  ManagedTabContext* context =
++      ManagedTabContext::FromWebContents(current_tab);
++  if (!context || context->storage_partition_config().is_default()) {
++    return nullptr;
++  }
++
++  TabStripModel* tab_strip_model = browser->tab_strip_model();
++  const int index = tab_strip_model->GetIndexOfWebContents(current_tab);
++  if (index == TabStripModel::kNoTab) {
++    return nullptr;
++  }
++
++  const auto group = tab_strip_model->GetTabGroupForTab(index);
++  WebContents* new_tab = AddAndReturnTabAt(
++      browser, current_tab->GetURL(), index + 1, foreground, group,
++      tab_strip_model->IsTabPinned(index));
++  if (!new_tab) {
++    return nullptr;
++  }
++
++  // 受管理 Tab 不能直接 Clone，否则会共享原账号的 StoragePartition。
++  new_tab->GetController().CopyStateFrom(&current_tab->GetController(), true);
++  return new_tab;
++}
+ 
+ WebContents* GetTabAndRevertIfNecessaryHelper(Browser* browser,
+@@ -507,3 +534,9 @@ WebContents* GetTabAndRevertIfNecessaryHelper(
+     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+     case WindowOpenDisposition::NEW_BACKGROUND_TAB: {
++      if (WebContents* new_tab = CreateManagedNavigationTab(
++              browser, current_tab,
++              disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB)) {
++        return new_tab;
++      }
++
+       std::unique_ptr<WebContents> new_tab = current_tab->Clone();
+@@ -524,3 +557,8 @@ WebContents* GetTabAndRevertIfNecessaryHelper(
+     }
+     case WindowOpenDisposition::NEW_WINDOW: {
++      if (WebContents* new_tab =
++              CreateManagedNavigationTab(browser, current_tab, true)) {
++        return new_tab;
++      }
++
+       std::unique_ptr<WebContents> new_tab = current_tab->Clone();
