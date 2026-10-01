@@ -1,0 +1,86 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -156,4 +156,6 @@ class ManagedTabContext final
+   static std::string GetFingerprintSeedForId(const std::string& id);
+   static int GetSessionHardwareConcurrencyForId(const std::string& id);
+   static std::string GetSessionUserAgentForId(const std::string& id);
++
++  bool IsStorageWriteTargetCurrent(const GURL& storage_url) const;
+ 
+   // content::WebContentsObserver:
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -191,10 +191,13 @@ struct StorageWriteCompletion {
+   explicit StorageWriteCompletion(
+-      ManagedTabContext::StorageWriteCallback callback)
+-      : callback(std::move(callback)) {}
++      ManagedTabContext::StorageWriteCallback callback,
++      base::RepeatingCallback<bool()> target_check)
++      : callback(std::move(callback)),
++        target_check(std::move(target_check)) {}
+ 
+   ManagedTabContext::StorageWriteCallback callback;
++  base::RepeatingCallback<bool()> target_check;
+   bool cookies_succeeded = true;
+   bool cookies_finished = false;
+   bool local_storage_succeeded = false;
+   bool local_storage_finished = false;
+ };
+@@ -212,4 +212,5 @@ void MaybeFinishStorageWrite(
+   const bool success = completion->cookies_succeeded &&
+-                       completion->local_storage_succeeded;
++                       completion->local_storage_succeeded &&
++                       completion->target_check.Run();
+   std::move(completion->callback)
+       .Run(success, success ? std::string() : "存储数据写入失败");
+@@ -865,6 +865,18 @@ void ManagedTabContext::OnCookiesForStorageSnapshot(
+       base::BindOnce(&FinishStorageSnapshotFromScript, std::move(callback),
+                      storage_url, true, net::CookieList(cookies)),
+       ISOLATED_WORLD_ID_CHROME_INTERNAL);
+ }
+ 
++bool ManagedTabContext::IsStorageWriteTargetCurrent(
++    const GURL& storage_url) const {
++  if (!web_contents() || current_url_ != storage_url) {
++    return false;
++  }
++
++  content::RenderFrameHost* frame_host =
++      web_contents()->GetPrimaryMainFrame();
++  return frame_host && frame_host->IsRenderFrameLive() &&
++         frame_host->GetLastCommittedURL() == storage_url;
++}
++
+ void ManagedTabContext::WriteStorageSnapshot(
+@@ -1036,9 +1036,27 @@ void ManagedTabContext::WriteStorageSnapshot(
+   content::RenderFrameHost* frame_host = web_contents()->GetPrimaryMainFrame();
+   if (!frame_host || !frame_host->IsRenderFrameLive()) {
+     std::move(callback).Run(false, "当前页面尚未准备好写入存储");
+     return;
+   }
+
+-  auto completion = std::make_shared<StorageWriteCompletion>(
+-      std::move(callback));
++  const bool sync_page_storage =
++      *sync_local_storage || *sync_session_storage;
++  const GURL storage_url = current_url_;
++  if (sync_page_storage && !IsStorageWriteTargetCurrent(storage_url)) {
++    std::move(callback).Run(false, "当前页面已发生变化，请重试");
++    return;
++  }
++
++  base::RepeatingCallback<bool()> target_check =
++      sync_page_storage
++          ? base::BindRepeating(
++                [](base::WeakPtr<ManagedTabContext> context,
++                   GURL storage_url) {
++                  return context &&
++                         context->IsStorageWriteTargetCurrent(storage_url);
++                },
++                weak_factory_.GetWeakPtr(), storage_url)
++          : base::BindRepeating([] { return true; });
++  auto completion = std::make_shared<StorageWriteCompletion>(
++      std::move(callback), std::move(target_check));
+   content::StoragePartition* storage_partition =
