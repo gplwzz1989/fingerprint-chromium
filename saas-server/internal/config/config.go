@@ -19,9 +19,9 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	databaseURL := strings.TrimSpace(os.Getenv("SAAS_DATABASE_URL"))
-	if databaseURL == "" {
-		return Config{}, errors.New("SAAS_DATABASE_URL 未配置")
+	databaseURL, err := LoadDatabaseURL()
+	if err != nil {
+		return Config{}, err
 	}
 
 	jwtSecret := []byte(os.Getenv("SAAS_JWT_SECRET"))
@@ -46,6 +46,14 @@ func Load() (Config, error) {
 		RefreshTokenTTL: refreshTokenTTL,
 		AllowedOrigins:  parseOrigins(os.Getenv("SAAS_ALLOWED_ORIGINS")),
 	}, nil
+}
+
+func LoadDatabaseURL() (string, error) {
+	databaseURL := strings.TrimSpace(os.Getenv("SAAS_DATABASE_URL"))
+	if databaseURL == "" {
+		return "", errors.New("SAAS_DATABASE_URL 未配置")
+	}
+	return databaseURL, nil
 }
 
 func durationFromEnv(name string, fallback time.Duration) (time.Duration, error) {

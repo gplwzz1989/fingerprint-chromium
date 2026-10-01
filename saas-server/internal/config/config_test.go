@@ -15,6 +15,14 @@ func TestLoadRequiresDatabaseAndStrongJWTSecret(t *testing.T) {
 	}
 }
 
+func TestLoadDatabaseURL(t *testing.T) {
+	t.Setenv("SAAS_DATABASE_URL", "  postgres://configured  ")
+	value, err := LoadDatabaseURL()
+	if err != nil || value != "postgres://configured" {
+		t.Fatalf("LoadDatabaseURL() = (%q, %v), want trimmed database URL", value, err)
+	}
+}
+
 func TestParsePageSize(t *testing.T) {
 	if size, err := ParsePageSize(""); err != nil || size != 50 {
 		t.Fatalf("ParsePageSize(empty) = (%d, %v), want (50, nil)", size, err)
