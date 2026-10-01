@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -1030,7 +1030,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasBusy_ = true;
+     this.saasError_ = '';
++    let snapshot: ManagedTabStorageSnapshot|undefined;
++    let account: SaasAccount|undefined;
+     try {
+-      const snapshot =
+-          await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
+-      let account = this.saasAccounts_.find(
++      snapshot = await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
++      account = this.saasAccounts_.find(
+           item => item.account_id === tab.account_id);
+@@ -1052,4 +1053,4 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     } catch (error) {
+-      if (error instanceof SaasSnapshotConflictError) {
++      if (error instanceof SaasSnapshotConflictError && account && snapshot) {
+         this.saasSnapshotConflict_ = {
