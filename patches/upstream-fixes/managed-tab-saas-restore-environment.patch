@@ -1,7 +1,7 @@
 diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 --- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
 +++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
-@@ -933,6 +933,40 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -933,4 +933,44 @@ export class FingerprintManagerUiElement extends CrLitElement {
      }
    }
  
@@ -70,7 +70,7 @@ diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui
      await this.writeSnapshotWithRetry_(tab.id, snapshot);
    }
  
-@@ -1126,22 +1145,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+@@ -1126,21 +1145,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
      try {
        const snapshot =
            await this.saasClient_.getAccountSnapshot(account.account_id);
