@@ -58,6 +58,7 @@
 
 ## 3. 编译和变更规则
 
+- 开发验证固定使用 `build-configs/development.gn` 和独立的 `out/Development`；发版前整体测试固定使用 `build-configs/release.gn` 和 `out/Release`。
 - 日常开发只做目标文件或目标测试的局部编译；先使用依赖分析和 dry-run 判断影响范围。
 - 不因小功能自动重新生成 GN。
 - 预计造成大范围重新编译时，必须先说明原因、影响范围和预计成本，得到明确许可后再执行。

@@ -1,0 +1,15 @@
+# 开发验证模式：优先增量编译速度和局部链接速度。
+import("//build-configs/common.gn")
+
+is_official_build = false
+is_debug = false
+is_component_build = true
+
+# 开发阶段关闭 ThinLTO，减少链接等待；保留检查以尽早发现功能问题。
+use_thin_lto = false
+thin_lto_enable_optimizations = false
+dcheck_always_on = true
+
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
