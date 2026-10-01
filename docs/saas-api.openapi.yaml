@@ -457,11 +457,11 @@ components:
           format: date-time
     ConflictError:
       type: object
-      required: [code, message, current_revision]
+      required: [code, message]
       properties:
         code:
           type: string
-          enum: [snapshot_revision_conflict]
+          enum: [snapshot_revision_conflict, lease_required, lease_conflict]
         message:
           type: string
         current_revision:

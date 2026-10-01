@@ -54,6 +54,13 @@ index ee883ac2..a7d94230 100644
 +  envelope: SaasSnapshotEnvelope;
 +}
 +
++export interface SaasLease {
++  lease_id: string;
++  account_id: string;
++  device_id: string;
++  expires_at: string;
++}
++
 +class SaasApiError extends Error {
 +  constructor(public readonly status: number, message: string) {
 +    super(message);
@@ -145,6 +152,20 @@ index ee883ac2..a7d94230 100644
 +            envelope,
 +          }),
 +        });
++  }
++
++  async acquireLease(accountId: string): Promise<SaasLease> {
++    return this.request_<SaasLease>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/leases`, {
++          method: 'POST',
++          body: JSON.stringify({device_id: this.deviceId_}),
++        });
++  }
++
++  async releaseLease(accountId: string, leaseId: string): Promise<void> {
++    await this.request_<unknown>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/leases/` +
++            encodeURIComponent(leaseId), {method: 'DELETE'});
 +  }
 +
 +  private async refresh_(): Promise<void> {
@@ -492,10 +513,17 @@ index 2619d9f7..eb230e40 100644
 +        account = await this.saasClient_.createAccount(
 +            this.saasWorkspaceId_, tab.account_id, tab.title || tab.account_id);
 +      }
-+      const saved = await this.saasClient_.putAccountSnapshot(
-+          account.account_id, account.revision, snapshot);
++      const lease = await this.saasClient_.acquireLease(account.account_id);
++      let savedRevision = account.revision;
++      try {
++        const saved = await this.saasClient_.putAccountSnapshot(
++            account.account_id, account.revision, snapshot);
++        savedRevision = saved.revision;
++      } finally {
++        await this.saasClient_.releaseLease(account.account_id, lease.lease_id);
++      }
 +      await this.loadSaasAccounts_();
-+      this.saasError_ = `账号 ${account.account_id} 已同步到云端，版本 ${saved.revision}`;
++      this.saasError_ = `账号 ${account.account_id} 已同步到云端，版本 ${savedRevision}`;
 +    } catch (error) {
 +      this.saasError_ = getSaasErrorMessage(error);
 +    } finally {

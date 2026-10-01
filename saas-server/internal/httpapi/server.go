@@ -592,6 +592,34 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "无法写入账号环境快照")
 		return
 	}
+	var leaseDeviceID string
+	var leaseExpiresAt time.Time
+	leaseErr := tx.QueryRowContext(r.Context(), `
+		SELECT device_id, expires_at FROM account_leases
+		WHERE account_id = $1 FOR UPDATE`, accountID).
+		Scan(&leaseDeviceID, &leaseExpiresAt)
+	if leaseErr != nil && leaseErr != sql.ErrNoRows {
+		_ = tx.Rollback()
+		s.logger.Error("检查账号租约失败", "error", leaseErr.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法校验账号编辑租约")
+		return
+	}
+	leaseState := ""
+	if leaseErr == sql.ErrNoRows {
+		leaseState = "lease_required"
+	} else {
+		leaseState = snapshotLeaseState(deviceID, leaseDeviceID, leaseExpiresAt, time.Now())
+	}
+	if leaseState == "lease_required" {
+		_ = tx.Rollback()
+		writeError(w, http.StatusConflict, "lease_required", "账号编辑租约已失效，请重新获取")
+		return
+	}
+	if leaseState == "lease_conflict" {
+		_ = tx.Rollback()
+		writeError(w, http.StatusConflict, "lease_conflict", "该账号正在被其他设备编辑")
+		return
+	}
 	if currentRevision != expectedRevision {
 		_ = tx.Rollback()
 		writeJSON(w, http.StatusConflict, snapshotConflictResponse{
@@ -887,6 +915,16 @@ func (s *Server) accountAccess(ctx context.Context, userID, accountID string) (s
 
 func canEdit(role string) bool {
 	return role == "owner" || role == "admin" || role == "editor"
+}
+
+func snapshotLeaseState(deviceID, leaseDeviceID string, expiresAt, now time.Time) string {
+	if !expiresAt.After(now) {
+		return "lease_required"
+	}
+	if leaseDeviceID != deviceID {
+		return "lease_conflict"
+	}
+	return ""
 }
 
 func (s *Server) writeAudit(ctx context.Context, userID, action, accountID, deviceID string) error {

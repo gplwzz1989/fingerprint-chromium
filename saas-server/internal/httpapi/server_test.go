@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/base64"
 	"testing"
+	"time"
 )
 
 func TestAccountIDValidation(t *testing.T) {
@@ -55,5 +56,18 @@ func TestParseIfMatch(t *testing.T) {
 	}
 	if _, err := parseIfMatch(""); err == nil {
 		t.Fatal("parseIfMatch() accepted an empty header")
+	}
+}
+
+func TestSnapshotLeaseState(t *testing.T) {
+	now := time.Unix(100, 0)
+	if state := snapshotLeaseState("device-a", "device-a", now.Add(time.Minute), now); state != "" {
+		t.Fatalf("active lease state = %q, want empty", state)
+	}
+	if state := snapshotLeaseState("device-a", "device-a", now.Add(-time.Second), now); state != "lease_required" {
+		t.Fatalf("expired lease state = %q, want lease_required", state)
+	}
+	if state := snapshotLeaseState("device-a", "device-b", now.Add(time.Minute), now); state != "lease_conflict" {
+		t.Fatalf("other-device lease state = %q, want lease_conflict", state)
 	}
 }
