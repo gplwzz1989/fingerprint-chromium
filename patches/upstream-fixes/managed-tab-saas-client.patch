@@ -1,0 +1,929 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index ee883ac2..a7d94230 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -50,6 +50,342 @@ export interface ManagedTabStorageSnapshot {
+   };
+ }
+ 
++export interface SaasUser {
++  user_id: string;
++  email: string;
++  display_name: string;
++}
++
++export interface SaasWorkspace {
++  workspace_id: string;
++  name: string;
++  role: string;
++}
++
++export interface SaasAccount {
++  account_id: string;
++  workspace_id: string;
++  name: string;
++  labels: string[];
++  revision: number;
++  created_at: string;
++  updated_at: string;
++}
++
++interface SaasSession {
++  access_token: string;
++  refresh_token: string;
++  expires_in: number;
++  user: SaasUser;
++}
++
++interface SaasSnapshotEnvelope {
++  algorithm: 'AES-256-GCM';
++  kdf: 'PBKDF2-HMAC-SHA-256';
++  iterations: number;
++  salt: string;
++  nonce: string;
++  ciphertext: string;
++  tag: string;
++}
++
++interface SaasAccountSnapshot {
++  account_id: string;
++  revision: number;
++  schema_version: number;
++  device_id: string;
++  updated_at: string;
++  envelope: SaasSnapshotEnvelope;
++}
++
++class SaasApiError extends Error {
++  constructor(public readonly status: number, message: string) {
++    super(message);
++    this.name = 'SaasApiError';
++  }
++}
++
++const kSaasSnapshotSchemaVersion = 1;
++const kSaasKdfIterations = 600000;
++const kSaasSnapshotAadPrefix = 'fingerprint-manager:v1:';
++
++export class FingerprintManagerSaasClient {
++  private constructor(
++      private readonly baseUrl_: string, private readonly deviceId_: string,
++      private readonly password_: string, private accessToken_: string,
++      private refreshToken_: string, readonly user: SaasUser) {}
++
++  static async login(
++      baseUrl: string, email: string, password: string,
++      deviceId: string): Promise<FingerprintManagerSaasClient> {
++    const normalizedBaseUrl = normalizeSaasBaseUrl(baseUrl);
++    const response = await fetch(`${normalizedBaseUrl}/api/v1/sessions`, {
++      method: 'POST',
++      headers: {'Content-Type': 'application/json'},
++      credentials: 'omit',
++      body: JSON.stringify({email, password, device_id: deviceId}),
++    });
++    const session = await parseSaasResponse<SaasSession>(response);
++    return new FingerprintManagerSaasClient(
++        normalizedBaseUrl, deviceId, password, session.access_token,
++        session.refresh_token, session.user);
++  }
++
++  async getWorkspaces(): Promise<SaasWorkspace[]> {
++    return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
++  }
++
++  async getAccounts(workspaceId: string): Promise<SaasAccount[]> {
++    const accounts: SaasAccount[] = [];
++    let pageToken = '';
++    do {
++      const query = new URLSearchParams({page_size: '200'});
++      if (pageToken) {
++        query.set('page_token', pageToken);
++      }
++      const page = await this.request_<{
++        items: SaasAccount[], next_page_token?: string,
++      }>(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/accounts?` +
++         query.toString());
++      accounts.push(...page.items);
++      pageToken = page.next_page_token || '';
++    } while (pageToken);
++    return accounts;
++  }
++
++  async createAccount(
++      workspaceId: string, accountId: string, name: string): Promise<SaasAccount> {
++    return this.request_<SaasAccount>(
++        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/accounts`, {
++          method: 'POST',
++          body: JSON.stringify({account_id: accountId, name}),
++        });
++  }
++
++  async getAccountSnapshot(accountId: string): Promise<ManagedTabStorageSnapshot> {
++    const response = await this.request_<SaasAccountSnapshot>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/snapshot`);
++    if (response.schema_version !== kSaasSnapshotSchemaVersion ||
++        response.account_id !== accountId) {
++      throw new Error('云端账号快照版本或账号标识无效');
++    }
++    const snapshot = await this.decryptSnapshot_(accountId, response.envelope);
++    snapshot.schema_version = response.schema_version;
++    snapshot.account_id = response.account_id;
++    return snapshot;
++  }
++
++  async putAccountSnapshot(
++      accountId: string, revision: number,
++      snapshot: ManagedTabStorageSnapshot): Promise<SaasAccountSnapshot> {
++    const envelope = await this.encryptSnapshot_(accountId, snapshot);
++    return this.request_<SaasAccountSnapshot>(
++        `/api/v1/accounts/${encodeURIComponent(accountId)}/snapshot`, {
++          method: 'PUT',
++          headers: {'If-Match': String(revision)},
++          body: JSON.stringify({
++            schema_version: kSaasSnapshotSchemaVersion,
++            device_id: this.deviceId_,
++            envelope,
++          }),
++        });
++  }
++
++  private async refresh_(): Promise<void> {
++    const response = await fetch(`${this.baseUrl_}/api/v1/sessions/refresh`, {
++      method: 'POST',
++      headers: {'Content-Type': 'application/json'},
++      credentials: 'omit',
++      body: JSON.stringify({
++        refresh_token: this.refreshToken_,
++        device_id: this.deviceId_,
++      }),
++    });
++    const session = await parseSaasResponse<SaasSession>(response);
++    this.accessToken_ = session.access_token;
++    this.refreshToken_ = session.refresh_token;
++  }
++
++  private async request_<T>(path: string, init: RequestInit = {},
++                            canRefresh = true): Promise<T> {
++    const headers = new Headers(init.headers);
++    if (init.body && !headers.has('Content-Type')) {
++      headers.set('Content-Type', 'application/json');
++    }
++    headers.set('Authorization', `Bearer ${this.accessToken_}`);
++    let response = await fetch(`${this.baseUrl_}${path}`, {
++      ...init,
++      headers,
++      credentials: 'omit',
++    });
++    if (response.status === 401 && canRefresh) {
++      await this.refresh_();
++      response = await this.requestResponse_(path, init);
++    }
++    return parseSaasResponse<T>(response);
++  }
++
++  private requestResponse_(path: string, init: RequestInit): Promise<Response> {
++    const headers = new Headers(init.headers);
++    if (init.body && !headers.has('Content-Type')) {
++      headers.set('Content-Type', 'application/json');
++    }
++    headers.set('Authorization', `Bearer ${this.accessToken_}`);
++    return fetch(`${this.baseUrl_}${path}`, {
++      ...init,
++      headers,
++      credentials: 'omit',
++    });
++  }
++
++  private async encryptSnapshot_(
++      accountId: string,
++      snapshot: ManagedTabStorageSnapshot): Promise<SaasSnapshotEnvelope> {
++    const salt = crypto.getRandomValues(new Uint8Array(16));
++    const nonce = crypto.getRandomValues(new Uint8Array(12));
++    const key = await deriveSnapshotKey(this.password_, salt);
++    const plaintext = new TextEncoder().encode(JSON.stringify({
++      ...snapshot,
++      account_id: accountId,
++      schema_version: kSaasSnapshotSchemaVersion,
++    }));
++    const encrypted = new Uint8Array(await crypto.subtle.encrypt(
++        {
++          name: 'AES-GCM',
++          iv: nonce as unknown as BufferSource,
++          additionalData: snapshotAad(accountId) as unknown as BufferSource,
++        },
++        key, plaintext));
++    const tag = encrypted.slice(encrypted.length - 16);
++    const ciphertext = encrypted.slice(0, encrypted.length - 16);
++    return {
++      algorithm: 'AES-256-GCM',
++      kdf: 'PBKDF2-HMAC-SHA-256',
++      iterations: kSaasKdfIterations,
++      salt: encodeBase64(salt),
++      nonce: encodeBase64(nonce),
++      ciphertext: encodeBase64(ciphertext),
++      tag: encodeBase64(tag),
++    };
++  }
++
++  private async decryptSnapshot_(
++      accountId: string,
++      envelope: SaasSnapshotEnvelope): Promise<ManagedTabStorageSnapshot> {
++    if (envelope.algorithm !== 'AES-256-GCM' ||
++        envelope.kdf !== 'PBKDF2-HMAC-SHA-256' ||
++        envelope.iterations < kSaasKdfIterations) {
++      throw new Error('云端账号快照加密参数不受支持');
++    }
++    const salt = decodeBase64(envelope.salt);
++    const nonce = decodeBase64(envelope.nonce);
++    const ciphertext = decodeBase64(envelope.ciphertext);
++    const tag = decodeBase64(envelope.tag);
++    const encrypted = new Uint8Array(ciphertext.length + tag.length);
++    encrypted.set(ciphertext);
++    encrypted.set(tag, ciphertext.length);
++    const key = await deriveSnapshotKey(this.password_, salt);
++    let plaintext: ArrayBuffer;
++    try {
++      plaintext = await crypto.subtle.decrypt(
++          {
++            name: 'AES-GCM',
++            iv: nonce as unknown as BufferSource,
++            additionalData: snapshotAad(accountId) as unknown as BufferSource,
++          },
++          key, encrypted);
++    } catch {
++      throw new Error('无法解密云端账号快照，请确认登录密码正确');
++    }
++    let snapshot: ManagedTabStorageSnapshot;
++    try {
++      snapshot = JSON.parse(new TextDecoder().decode(plaintext)) as
++          ManagedTabStorageSnapshot;
++    } catch {
++      throw new Error('云端账号快照内容无效');
++    }
++    if (!snapshot || snapshot.account_id !== accountId ||
++        !Array.isArray(snapshot.cookies) || !snapshot.local_storage ||
++        typeof snapshot.local_storage !== 'object') {
++      throw new Error('云端账号快照结构无效');
++    }
++    return snapshot;
++  }
++}
++
++export function getSaasErrorMessage(error: unknown): string {
++  if (error instanceof Error && error.message) {
++    return error.message;
++  }
++  return 'SaaS 操作失败，请稍后重试';
++}
++
++function normalizeSaasBaseUrl(value: string): string {
++  const trimmed = value.trim().replace(/\/+$/, '');
++  let url: URL;
++  try {
++    url = new URL(trimmed);
++  } catch {
++    throw new Error('SaaS 地址格式无效');
++  }
++  if (url.protocol !== 'https:' &&
++      !(url.protocol === 'http:' &&
++        (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))) {
++    throw new Error('SaaS 地址必须使用 HTTPS');
++  }
++  return url.toString().replace(/\/+$/, '');
++}
++
++async function parseSaasResponse<T>(response: Response): Promise<T> {
++  let body: any = null;
++  try {
++    body = await response.json();
++  } catch {
++    // Use a stable user-facing message for an empty or malformed response.
++  }
++  if (!response.ok) {
++    throw new SaasApiError(
++        response.status, typeof body?.message === 'string' ? body.message :
++                                                              'SaaS 服务请求失败');
++  }
++  return body as T;
++}
++
++async function deriveSnapshotKey(password: string, salt: Uint8Array):
++    Promise<CryptoKey> {
++  const baseKey = await crypto.subtle.importKey(
++      'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
++  return crypto.subtle.deriveKey(
++      {
++        name: 'PBKDF2',
++        salt: salt as unknown as BufferSource,
++        iterations: kSaasKdfIterations,
++        hash: 'SHA-256',
++      },
++      baseKey, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
++}
++
++function snapshotAad(accountId: string): Uint8Array {
++  return new TextEncoder().encode(kSaasSnapshotAadPrefix + accountId);
++}
++
++function encodeBase64(value: Uint8Array): string {
++  let binary = '';
++  for (const byte of value) {
++    binary += String.fromCharCode(byte);
++  }
++  return btoa(binary);
++}
++
++function decodeBase64(value: string): Uint8Array {
++  const binary = atob(value);
++  const bytes = new Uint8Array(binary.length);
++  for (let index = 0; index < binary.length; ++index) {
++    bytes[index] = binary.charCodeAt(index);
++  }
++  return bytes;
++}
++
+ export interface FingerprintManagerBrowserProxy {
+   getManagedTabs(): Promise<ManagedTabState[]>;
+   createManagedTab(
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 2619d9f7..eb230e40 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -13,6 +13,10 @@ import type {
+ } from './fingerprint_manager_browser_proxy.js';
+ import {FingerprintManagerBrowserProxyImpl} from
+     './fingerprint_manager_browser_proxy.js';
++import {
++  FingerprintManagerSaasClient,
++  getSaasErrorMessage,
++} from './fingerprint_manager_browser_proxy.js';
+ import {getCss} from './fingerprint_manager_ui.css.js';
+ import {getHtml} from './fingerprint_manager_ui.html.js';
+ 
+@@ -32,6 +36,13 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       managedTabError_: {type: String},
+       storageSnapshots_: {type: Object},
+       storageLoadingId_: {type: String},
++      saasBusy_: {type: Boolean},
++      saasConnected_: {type: Boolean},
++      saasError_: {type: String},
++      saasUserEmail_: {type: String},
++      saasWorkspaces_: {type: Array},
++      saasAccounts_: {type: Array},
++      saasWorkspaceId_: {type: String},
+     };
+   }
+ 
+@@ -42,6 +53,17 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     [id: string]: ManagedTabStorageSnapshot,
+   } = {};
+   protected accessor storageLoadingId_: string = '';
++  protected accessor saasBusy_: boolean = false;
++  protected accessor saasConnected_: boolean = false;
++  protected accessor saasError_: string = '';
++  protected accessor saasUserEmail_: string = '';
++  protected accessor saasWorkspaces_: SaasWorkspace[] = [];
++  protected accessor saasAccounts_: SaasAccount[] = [];
++  protected accessor saasWorkspaceId_: string = '';
++
++  private browserProxy_: FingerprintManagerBrowserProxy =
++      FingerprintManagerBrowserProxyImpl.getInstance();
++  private saasClient_: FingerprintManagerSaasClient|null = null;
+ 
+   override render() {
+     return getHtml.bind(this)();
+@@ -270,6 +292,164 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     input.click();
+   }
+ 
++  protected async onSaasLogin_() {
++    if (this.saasBusy_) {
++      return;
++    }
++    const baseUrlInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasBaseUrl');
++    const emailInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasEmail');
++    const passwordInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasPassword');
++    const baseUrl = baseUrlInput?.value.trim() || '';
++    const email = emailInput?.value.trim() || '';
++    const password = passwordInput?.value || '';
++    if (!baseUrl || !email || !password) {
++      this.saasError_ = '请输入 SaaS 地址、邮箱和密码';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const client = await FingerprintManagerSaasClient.login(
++          baseUrl, email, password, crypto.randomUUID());
++      this.saasClient_ = client;
++      this.saasUserEmail_ = client.user.email;
++      this.saasWorkspaces_ = await client.getWorkspaces();
++      if (!this.saasWorkspaces_.length) {
++        throw new Error('当前用户没有可访问的工作区');
++      }
++      this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
++      await this.loadSaasAccounts_();
++      this.saasConnected_ = true;
++    } catch (error) {
++      this.saasClient_ = null;
++      this.saasConnected_ = false;
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++      if (passwordInput) {
++        passwordInput.value = '';
++      }
++    }
++  }
++
++  protected onSaasLogout_() {
++    this.saasClient_ = null;
++    this.saasConnected_ = false;
++    this.saasUserEmail_ = '';
++    this.saasWorkspaces_ = [];
++    this.saasAccounts_ = [];
++    this.saasWorkspaceId_ = '';
++    this.saasError_ = '';
++  }
++
++  protected async onSaasWorkspaceChange_(event: Event) {
++    const select = event.currentTarget as HTMLSelectElement;
++    this.saasWorkspaceId_ = select.value;
++    await this.loadSaasAccounts_();
++  }
++
++  protected async onSaasRefresh_() {
++    await this.loadSaasAccounts_();
++  }
++
++  private async loadSaasAccounts_() {
++    if (!this.saasClient_ || !this.saasWorkspaceId_) {
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      this.saasAccounts_ =
++          await this.saasClient_.getAccounts(this.saasWorkspaceId_);
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS 并选择工作区';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const snapshot =
++          await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
++      let account = this.saasAccounts_.find(
++          item => item.account_id === tab.account_id);
++      if (!account) {
++        account = await this.saasClient_.createAccount(
++            this.saasWorkspaceId_, tab.account_id, tab.title || tab.account_id);
++      }
++      const saved = await this.saasClient_.putAccountSnapshot(
++          account.account_id, account.revision, snapshot);
++      await this.loadSaasAccounts_();
++      this.saasError_ = `账号 ${account.account_id} 已同步到云端，版本 ${saved.revision}`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected async onSaasRestore_(account: SaasAccount) {
++    if (!this.saasClient_ || this.saasBusy_) {
++      this.saasError_ = '请先登录 SaaS';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      const snapshot =
++          await this.saasClient_.getAccountSnapshot(account.account_id);
++      let tab = this.managedTabs_.find(
++          item => item.account_id === account.account_id);
++      if (!tab) {
++        tab = await this.browserProxy_.createManagedTab(
++            snapshot.storage_url || undefined, account.account_id,
++            snapshot.proxy_rules || undefined,
++            snapshot.fingerprint_seed || undefined);
++      }
++      if (snapshot.fingerprint) {
++        await this.browserProxy_.configureManagedTabFingerprint(
++            tab.id, snapshot.fingerprint.user_agent,
++            snapshot.fingerprint.hardware_concurrency);
++      }
++      if (snapshot.storage_url) {
++        await this.browserProxy_.navigateManagedTab(tab.id, snapshot.storage_url);
++      }
++      await this.writeSnapshotWithRetry_(tab.id, snapshot);
++      await this.getManagedTabs_();
++      this.saasError_ = `账号 ${account.account_id} 已恢复到本地 Tab`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  private async writeSnapshotWithRetry_(
++      id: string, snapshot: ManagedTabStorageSnapshot) {
++    let lastError: unknown = null;
++    for (let attempt = 0; attempt < 8; ++attempt) {
++      try {
++        await this.browserProxy_.writeManagedTabStorageSnapshot(id, snapshot);
++        return;
++      } catch (error) {
++        lastError = error;
++        await new Promise(resolve => setTimeout(resolve, 500));
++      }
++    }
++    throw lastError instanceof Error ? lastError : new Error('本地 Tab 尚未准备好写入快照');
++  }
++
+   protected getTabIndex_(index: number): string {
+     return String(index + 1).padStart(2, '0');
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index e4bb0fb2..908050de 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -38,8 +38,7 @@ export function getHtml(this: FingerprintManagerUiElement) {
+       </div>
+       <div class="rail-item rail-item-muted">
+         <span class="rail-icon">03</span>
+-        <span>用户系统</span>
+-        <span class="rail-soon">即将支持</span>
++        <span>SaaS 账号</span>
+       </div>
+       <div class="rail-footer">
+         <div class="rail-footer-line"></div>
+@@ -62,6 +61,93 @@ export function getHtml(this: FingerprintManagerUiElement) {
+         </div>
+       </section>
+ 
++      <section class="saas-panel">
++        <div class="panel-heading">
++          <div>
++            <div class="section-kicker">CLOUD CONTROL PLANE / 02</div>
++            <h3>账号云端同步</h3>
++          </div>
++          <div class="saas-connection-state"
++              ?data-connected="${this.saasConnected_}">
++            <span class="status-dot"></span>
++            ${this.saasConnected_ ? '已连接' : '未连接'}
++          </div>
++        </div>
++
++        ${this.saasConnected_ ? html`
++          <div class="saas-toolbar">
++            <div class="saas-user-badge">
++              <span class="saas-avatar">@</span>
++              <div>
++                <strong>${this.saasUserEmail_}</strong>
++                <small>加密快照 · 客户端密钥</small>
++              </div>
++            </div>
++            <select class="saas-workspace-select"
++                .value="${this.saasWorkspaceId_}"
++                ?disabled="${this.saasBusy_}"
++                @change="${this.onSaasWorkspaceChange_}"
++                aria-label="选择工作区">
++              ${this.saasWorkspaces_.map(workspace => html`
++                <option value="${workspace.workspace_id}">${workspace.name}</option>
++              `)}
++            </select>
++            <button class="tool-button" type="button"
++                ?disabled="${this.saasBusy_}"
++                @click="${this.onSaasRefresh_}">
++              ${this.saasBusy_ ? '同步中…' : '刷新云端'}
++            </button>
++            <button class="text-button text-button-danger" type="button"
++                ?disabled="${this.saasBusy_}"
++                @click="${this.onSaasLogout_}">
++              退出
++            </button>
++          </div>
++          <div class="saas-account-list">
++            ${this.saasAccounts_.length ? this.saasAccounts_.map(account => html`
++              <div class="saas-account-row">
++                <div class="saas-account-mark">${account.account_id.slice(0, 2).toUpperCase()}</div>
++                <div class="saas-account-copy">
++                  <strong>${account.name}</strong>
++                  <span>${account.account_id} · 云端版本 ${account.revision}</span>
++                </div>
++                <button class="tool-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${() => this.onSaasRestore_(account)}">
++                  恢复到本地
++                </button>
++              </div>
++            `) : html`
++              <div class="saas-empty">当前工作区还没有账号目录。可在下方本地 Tab 上点击“同步云端”创建。</div>
++            `}
++          </div>
++        ` : html`
++          <div class="saas-login-grid">
++            <input id="saasBaseUrl" type="url"
++                placeholder="SaaS API 地址（必须使用 HTTPS）"
++                autocomplete="url">
++            <input id="saasEmail" type="email"
++                placeholder="登录邮箱"
++                autocomplete="username">
++            <input id="saasPassword" type="password"
++                placeholder="登录密码（仅保留在内存）"
++                autocomplete="current-password"
++                @keydown="${(event: KeyboardEvent) => {
++                  if (event.key === 'Enter') this.onSaasLogin_();
++                }}">
++            <button class="primary-button" type="button"
++                ?disabled="${this.saasBusy_}"
++                @click="${this.onSaasLogin_}">
++              ${this.saasBusy_ ? '连接中…' : '连接 SaaS'}
++            </button>
++          </div>
++          <p class="saas-login-note">登录密码只用于本地派生快照加密密钥，不会写入快照或发送给同步接口。</p>
++        `}
++        <div class="saas-message" ?hidden="${!this.saasError_}">
++          ${this.saasError_}
++        </div>
++      </section>
++
+       <section class="control-panel">
+         <div class="panel-heading">
+           <div>
+@@ -176,6 +262,11 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                       @click="${() => this.onImportStorageSnapshot_(tab.id)}">
+                     导入 JSON
+                   </button>
++                  <button class="tool-button tool-button-cloud" type="button"
++                      ?disabled="${this.saasBusy_}"
++                      @click="${() => this.onSaasSyncManagedTab_(tab)}">
++                    同步云端
++                  </button>
+                 </div>
+ 
+                 <div class="fingerprint-config">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 3c595e67..b401f7da 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -372,6 +372,209 @@ input:focus-visible {
+   background: #ffc18b;
+ }
+ 
++button:disabled {
++  cursor: wait;
++  opacity: .55;
++}
++
++.saas-panel {
++  background: linear-gradient(115deg, rgba(21, 35, 45, .95), rgba(19, 27, 37, .82));
++  border: 1px solid rgba(125, 211, 252, .22);
++  box-shadow: 0 18px 54px rgba(0, 0, 0, .14);
++  margin-bottom: 20px;
++  padding: 22px 26px;
++  position: relative;
++}
++
++.saas-panel::before {
++  background: var(--fp-orange);
++  content: '';
++  height: 2px;
++  left: 26px;
++  position: absolute;
++  top: -1px;
++  width: 48px;
++}
++
++.saas-panel .panel-heading {
++  margin-bottom: 17px;
++}
++
++.saas-connection-state {
++  align-items: center;
++  color: var(--fp-faint);
++  display: flex;
++  font-family: monospace;
++  font-size: 10px;
++  gap: 8px;
++}
++
++.saas-connection-state[data-connected="true"] {
++  color: #8bd5a2;
++}
++
++.saas-toolbar {
++  align-items: center;
++  border-bottom: 1px solid var(--fp-line);
++  display: flex;
++  gap: 12px;
++  padding-bottom: 15px;
++}
++
++.saas-user-badge {
++  align-items: center;
++  display: flex;
++  gap: 9px;
++  margin-right: auto;
++  min-width: 0;
++}
++
++.saas-avatar,
++.saas-account-mark {
++  align-items: center;
++  background: rgba(125, 211, 252, .1);
++  border: 1px solid rgba(125, 211, 252, .32);
++  color: var(--fp-cyan);
++  display: flex;
++  flex-shrink: 0;
++  font-family: monospace;
++  font-size: 11px;
++  height: 29px;
++  justify-content: center;
++  width: 29px;
++}
++
++.saas-user-badge strong,
++.saas-user-badge small {
++  display: block;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.saas-user-badge strong {
++  color: var(--fp-text);
++  font-size: 11px;
++  font-weight: 500;
++}
++
++.saas-user-badge small {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-top: 3px;
++}
++
++.saas-workspace-select,
++.saas-login-grid input {
++  background: rgba(5, 10, 16, .72);
++  border: 1px solid var(--fp-line-strong);
++  box-sizing: border-box;
++  color: var(--fp-text);
++  font-family: monospace;
++  font-size: 11px;
++  height: 32px;
++  min-width: 0;
++  padding: 0 9px;
++}
++
++.saas-workspace-select {
++  max-width: 210px;
++}
++
++.saas-workspace-select:focus,
++.saas-login-grid input:focus {
++  border-color: var(--fp-cyan);
++  outline: none;
++}
++
++.saas-account-list {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++  margin-top: 14px;
++}
++
++.saas-account-row {
++  align-items: center;
++  background: rgba(5, 10, 16, .4);
++  border: 1px solid var(--fp-line);
++  display: flex;
++  gap: 11px;
++  min-height: 49px;
++  padding: 0 10px;
++}
++
++.saas-account-mark {
++  color: var(--fp-orange);
++  height: 26px;
++  width: 26px;
++}
++
++.saas-account-copy {
++  min-width: 0;
++}
++
++.saas-account-copy strong,
++.saas-account-copy span {
++  display: block;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.saas-account-copy strong {
++  color: var(--fp-text);
++  font-size: 11px;
++  font-weight: 500;
++}
++
++.saas-account-copy span {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-top: 4px;
++}
++
++.saas-account-row .tool-button {
++  margin-left: auto;
++  white-space: nowrap;
++}
++
++.saas-login-grid {
++  display: grid;
++  gap: 9px;
++  grid-template-columns: 1.4fr 1fr 1fr auto;
++}
++
++.saas-login-grid input {
++  width: 100%;
++}
++
++.saas-login-note,
++.saas-empty {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 10px;
++  line-height: 1.6;
++  margin: 12px 0 0;
++}
++
++.saas-message {
++  border-left: 2px solid var(--fp-orange);
++  color: var(--fp-orange);
++  font-family: monospace;
++  font-size: 10px;
++  line-height: 1.5;
++  margin-top: 13px;
++  padding: 7px 9px;
++}
++
++.tool-button-cloud {
++  border-color: rgba(245, 166, 107, .38);
++  color: var(--fp-orange);
++}
++
+ .message-bar {
+   background: rgba(125, 211, 252, .08);
+   border-left: 2px solid var(--fp-cyan);
+@@ -708,6 +911,35 @@ input:focus-visible {
+     padding: 18px;
+   }
+ 
++  .saas-panel {
++    padding: 18px;
++  }
++
++  .saas-login-grid,
++  .saas-toolbar {
++    align-items: stretch;
++    display: flex;
++    flex-direction: column;
++  }
++
++  .saas-user-badge {
++    margin-right: 0;
++  }
++
++  .saas-workspace-select {
++    max-width: none;
++  }
++
++  .saas-account-row {
++    align-items: stretch;
++    flex-direction: column;
++    padding: 11px;
++  }
++
++  .saas-account-row .tool-button {
++    margin-left: 0;
++  }
++
+   .create-bar {
+     align-items: stretch;
+     flex-direction: column;

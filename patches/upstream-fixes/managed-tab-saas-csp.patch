@@ -1,0 +1,17 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui.cc b/chrome/browser/ui/webui/management/management_ui.cc
+--- a/chrome/browser/ui/webui/management/management_ui.cc
++++ b/chrome/browser/ui/webui/management/management_ui.cc
+@@ -22,6 +22,7 @@
+ #include "components/strings/grit/components_strings.h"
+ #include "extensions/buildflags/buildflags.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -56,6 +57,10 @@ content::WebUIDataSource* CreateAndAddManagementUIHtmlSource(Profile* profile) {
+ 
+   source->SetDefaultResource(IDR_MANAGEMENT_MANAGEMENT_HTML);
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ConnectSrc,
++      "connect-src 'self' https: http://localhost:* http://127.0.0.1:* "
++      "http://[::1]:*;");
+ 
+ #if BUILDFLAG(IS_CHROMEOS)

@@ -459,6 +459,9 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 type encryptedSnapshotEnvelope struct {
 	Algorithm  string `json:"algorithm"`
 	KeyWrap    string `json:"key_wrap,omitempty"`
+	KDF        string `json:"kdf,omitempty"`
+	Iterations int    `json:"iterations,omitempty"`
+	Salt       string `json:"salt,omitempty"`
 	Nonce      string `json:"nonce"`
 	Ciphertext string `json:"ciphertext"`
 	Tag        string `json:"tag"`
@@ -989,6 +992,19 @@ func validateEnvelope(envelope encryptedSnapshotEnvelope) bool {
 		if keyWrap, ok := decodeBase64(envelope.KeyWrap); !ok || len(keyWrap) == 0 {
 			return false
 		}
+	}
+	if envelope.KDF != "" {
+		if envelope.KDF != "PBKDF2-HMAC-SHA-256" ||
+			envelope.Iterations < 600000 || envelope.Iterations > 2000000 {
+			return false
+		}
+		salt, ok := decodeBase64(envelope.Salt)
+		if !ok || len(salt) < 16 || len(salt) > 64 {
+			return false
+		}
+	}
+	if envelope.KeyWrap == "" && envelope.KDF == "" {
+		return false
 	}
 	return true
 }

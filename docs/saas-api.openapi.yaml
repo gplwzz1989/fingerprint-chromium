@@ -408,6 +408,17 @@ components:
         key_wrap:
           type: string
           description: 用账号恢复密钥或租户密钥包装数据密钥后的密文。
+        kdf:
+          type: string
+          enum: [PBKDF2-HMAC-SHA-256]
+          description: 未使用 key_wrap 时，用于从用户密钥派生快照密钥的算法。
+        iterations:
+          type: integer
+          minimum: 600000
+          maximum: 2000000
+        salt:
+          type: string
+          description: Base64 编码的 KDF 随机盐。
         nonce:
           type: string
           description: Base64 编码的随机 nonce。
