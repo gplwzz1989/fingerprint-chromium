@@ -1,7 +1,7 @@
 diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
 --- a/chrome/common/webui_url_constants.h
 +++ b/chrome/common/webui_url_constants.h
-@@ -184,7 +184,9 @@
+@@ -184,6 +184,8 @@
  inline constexpr char kChromeUILocalStateHost[] = "local-state";
  inline constexpr char kChromeUILocalStateURL[] = "chrome://local-state";
  inline constexpr char kChromeUILocationInternalsHost[] = "location-internals";
@@ -13,7 +13,7 @@ diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_const
 diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
 --- a/chrome/common/webui_url_constants.cc
 +++ b/chrome/common/webui_url_constants.cc
-@@ -103,7 +103,8 @@
+@@ -103,6 +103,7 @@
        kChromeUIInterstitialHost,
        kChromeUILocalStateHost,
  #if !BUILDFLAG(IS_ANDROID)
@@ -32,10 +32,7 @@ diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/u
 +#include "chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.h"
 +#endif  // !BUILDFLAG(IS_CHROMEOS)
  #include "chrome/browser/ui/webui/history/history_ui.h"
-diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
---- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-+++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -318,8 +318,11 @@
+@@ -318,7 +318,10 @@
    map.AddWebUIConfig(std::make_unique<ContextualTasksUIConfig>());
    map.AddWebUIConfig(std::make_unique<CustomizeChromeUIConfig>());
    map.AddWebUIConfig(std::make_unique<DownloadsUIConfig>());
@@ -61,7 +58,7 @@ diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
 diff --git a/chrome/browser/resources/BUILD.gn b/chrome/browser/resources/BUILD.gn
 --- a/chrome/browser/resources/BUILD.gn
 +++ b/chrome/browser/resources/BUILD.gn
-@@ -44,7 +44,8 @@
+@@ -44,6 +44,7 @@
        "data_sharing:resources",
        "downloads:resources",
        "feedback:resources",
@@ -83,7 +80,7 @@ diff --git a/third_party/lit/v3_0/BUILD.gn b/third_party/lit/v3_0/BUILD.gn
 diff --git a/tools/gritsettings/resource_ids.spec b/tools/gritsettings/resource_ids.spec
 --- a/tools/gritsettings/resource_ids.spec
 +++ b/tools/gritsettings/resource_ids.spec
-@@ -444,4 +444,8 @@
+@@ -444,5 +444,9 @@
    "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/feedback/resources.grd": {
      "META": {"sizes": {"includes": [30],}},
      "includes": [3980],
