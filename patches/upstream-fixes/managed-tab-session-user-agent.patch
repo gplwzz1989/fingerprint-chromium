@@ -1,0 +1,96 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -92,6 +92,7 @@ class ManagedTabContext final
+   static constexpr char kSessionFingerprintSeedKey[] = "fingerprint_seed";
+   static constexpr char kSessionHardwareConcurrencyKey[] =
+       "hardware_concurrency";
++  static constexpr char kSessionUserAgentKey[] = "user_agent";
+ 
+   const std::string& id() const { return id_; }
+@@ -151,6 +152,7 @@ class ManagedTabContext final
+   static std::string GetNetworkProxyRulesForId(const std::string& id);
+   static std::string GetFingerprintSeedForId(const std::string& id);
+   static int GetSessionHardwareConcurrencyForId(const std::string& id);
++  static std::string GetSessionUserAgentForId(const std::string& id);
+ 
+   // content::WebContentsObserver:
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -118,6 +118,12 @@ base::flat_map<std::string, int>& ManagedTabRestoreHardwareConcurrency() {
+   return *values;
+ }
+ 
++base::flat_map<std::string, std::string>& ManagedTabRestoreUserAgents() {
++  static base::NoDestructor<base::flat_map<std::string, std::string>>
++      user_agents;
++  return *user_agents;
++}
+ 
+ bool ParseManagedTabProxyRules(const std::string& proxy_rules,
+                                net::ProxyConfig::ProxyRules* parsed_rules) {
+@@ -398,1 +398,8 @@ bool ManagedTabContext::PrepareSessionRestore(
++  const auto user_agent = extra_data.find(kSessionUserAgentKey);
++  const std::string user_agent_value =
++      user_agent == extra_data.end() ? std::string() : user_agent->second;
++  if (user_agent_value.size() > 512) {
++    return false;
++  }
++
+   if (proxy_rules_value.empty()) {
+@@ -411,6 +424,7 @@ bool ManagedTabContext::PrepareSessionRestore(
+           : fingerprint_seed_value;
+   ManagedTabRestoreHardwareConcurrency()[managed_tab_id->second] =
+       hardware_concurrency;
++  ManagedTabRestoreUserAgents()[managed_tab_id->second] = user_agent_value;
+   return true;
+ }
+@@ -449,6 +463,19 @@ int ManagedTabContext::GetSessionHardwareConcurrencyForId(
+   return hardware_concurrency;
+ }
+ 
++// static
++std::string ManagedTabContext::GetSessionUserAgentForId(
++    const std::string& id) {
++  auto it = ManagedTabRestoreUserAgents().find(id);
++  if (it == ManagedTabRestoreUserAgents().end()) {
++    return std::string();
++  }
++
++  std::string user_agent = std::move(it->second);
++  ManagedTabRestoreUserAgents().erase(it);
++  return user_agent;
++}
+ 
+ // static
+ void ManagedTabContext::ConfigureNetworkContextParams(
+@@ -632,10 +659,16 @@ ManagedTabContext::ManagedTabContext(content::WebContents* web_contents)
+       current_url_(web_contents->GetURL()),
+       fingerprint_user_agent_override_(web_contents->GetUserAgentOverride()),
+       fingerprint_hardware_concurrency_(
+           GetSessionHardwareConcurrencyForId(id_)) {
++  const std::string session_user_agent = GetSessionUserAgentForId(id_);
++  if (!session_user_agent.empty()) {
++    SetFingerprintUserAgent(session_user_agent);
++  }
+   ApplyFingerprintHardwareConcurrencyOverride();
+ }
+ 
+ ManagedTabContext::~ManagedTabContext() {
+   ManagedTabProxyRules().erase(id_);
+   ManagedTabFingerprintSeeds().erase(id_);
++  ManagedTabRestoreUserAgents().erase(id_);
+ }
+diff --git a/chrome/browser/ui/browser_live_tab_context.cc b/chrome/browser/ui/browser_live_tab_context.cc
+--- a/chrome/browser/ui/browser_live_tab_context.cc
++++ b/chrome/browser/ui/browser_live_tab_context.cc
+@@ -180,6 +180,8 @@ std::map<std::string, std::string>
+   data[ManagedTabContext::kSessionHardwareConcurrencyKey] =
+       base::NumberToString(
+           managed_tab_context->fingerprint_hardware_concurrency());
++  data[ManagedTabContext::kSessionUserAgentKey] =
++      managed_tab_context->fingerprint_user_agent_override()
++          .ua_string_override;
+   return data;
+ }
