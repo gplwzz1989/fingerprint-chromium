@@ -37,9 +37,9 @@
 | 部分 | 内容 | 建议保护方式 |
 | --- | --- | --- |
 | 账号清单 | `tenant_id`、`account_id`、名称、标签、版本、更新时间、状态 | TLS + 服务端访问控制 |
-| 账号环境 | Cookie、LocalStorage、指纹配置、代理配置、当前页面来源 | TLS + 加密后存储，优先客户端加密 |
+| 账号环境 | Cookie、LocalStorage、SessionStorage、指纹配置、代理配置、当前页面来源 | TLS + 加密后存储，优先客户端加密 |
 
-浏览器当前已能导出和写入 Cookie、LocalStorage、代理、User-Agent、硬件并发数和指纹种子。IndexedDB、Cache Storage、Service Worker 状态不应在未实现完整一致性校验前宣称支持同步。
+浏览器当前已能导出和写入 Cookie、LocalStorage、SessionStorage、代理、User-Agent、硬件并发数和指纹种子。IndexedDB、Cache Storage、Service Worker 状态不应在未实现完整一致性校验前宣称支持同步。
 
 建议快照至少包含以下元数据：
 
@@ -56,9 +56,13 @@ fingerprint
 proxy_rules
 cookies
 local_storage
+session_storage
+sync_options
 ```
 
 `schema_version` 用于结构升级，`revision` 用于并发控制，不能由客户端自行递增后覆盖云端版本。
+
+同步能力本身是 SaaS 账号管理器的必选能力，但账号环境中的数据类别可以分别选择：Cookie、LocalStorage、SessionStorage、指纹、代理和页面地址。未勾选的类别不会上传或覆盖本地现状；恢复时也不会用云端的空数据清空本地对应类别。快照中的 `sync_options` 记录本次选择，缺少该字段的旧快照按原有的全量 Cookie、LocalStorage、指纹、代理和页面地址行为兼容处理，SessionStorage 则按未同步处理。
 
 ## 3. 接口契约与实现
 
@@ -89,7 +93,7 @@ local_storage
 ## 4. 加密和凭证边界
 
 - 所有云端连接必须使用 TLS，并校验服务端证书。
-- Cookie、LocalStorage 和代理凭证属于敏感数据，不能写入普通日志、URL、错误消息或剪贴板提示。
+- Cookie、LocalStorage、SessionStorage 和代理凭证属于敏感数据，不能写入普通日志、URL、错误消息或剪贴板提示。
 - 推荐采用客户端信封加密：随机生成数据密钥，用账号恢复密钥或租户密钥包装数据密钥，云端只保存密文和必要元数据。
 - 访问令牌只保存在本地安全存储中，不能写入账号快照。
 - 浏览器可选择保存 SaaS 登录状态；本地只保存经 Chromium 系统凭据存储加密的刷新令牌，邮箱和设备标识仅作为非敏感会话元数据保存。
@@ -105,15 +109,15 @@ local_storage
 2. 下载并解密指定账号快照。
 3. 使用稳定 `account_id`、指纹种子和代理配置创建原生 Tab。
 4. 等待对应 StoragePartition 和渲染器环境就绪。
-5. 校验快照来源与当前页面来源一致后写入 Cookie、LocalStorage。
+5. 校验快照来源与当前页面来源一致后写入 Cookie、LocalStorage、SessionStorage。
 6. 导航到保存的页面并验证关键存储是否写入成功。
-7. 上报恢复结果和失败原因，不上传 Cookie 或 LocalStorage 明文日志。
+7. 上报恢复结果和失败原因，不上传 Cookie、LocalStorage 或 SessionStorage 明文日志。
 
 ## 6. 当前实现状态和后续开发顺序
 
 当前已具备：
 
-- 本地代理侧的原生 Tab、独立 StoragePartition、账号级代理、指纹种子、Cookie/LocalStorage 读写和快照导入导出；
+- 本地代理侧的原生 Tab、独立 StoragePartition、账号级代理、指纹种子、Cookie/LocalStorage/SessionStorage 读写和快照导入导出；
 - 服务端用户会话、设备会话列表与撤销、工作区成员角色、账号目录、客户端加密快照、版本冲突、设备租约和审计记录；
 - 登录用户可以创建工作区并自动成为所有者，后续通过邀请管理团队成员；
 - 服务端工作区成员邀请与受邀用户密码初始化；

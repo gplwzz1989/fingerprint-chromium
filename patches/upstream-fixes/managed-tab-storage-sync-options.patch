@@ -1,0 +1,617 @@
+diff --git a/chrome/browser/managed_tab/managed_tab_context.h b/chrome/browser/managed_tab/managed_tab_context.h
+--- a/chrome/browser/managed_tab/managed_tab_context.h
++++ b/chrome/browser/managed_tab/managed_tab_context.h
+@@ -47,6 +47,7 @@ class ManagedTabContext final
+     GURL storage_url;
+     net::CookieList cookies;
+     base::Value local_storage;
++    base::Value session_storage;
+     bool consistent = true;
+   };
+ 
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -36,6 +36,15 @@ export interface ManagedTabCookie {
+   };
+ }
+ 
++export interface ManagedTabSyncOptions {
++  cookies: boolean;
++  local_storage: boolean;
++  session_storage: boolean;
++  fingerprint: boolean;
++  proxy: boolean;
++  page: boolean;
++}
++
+ export interface ManagedTabStorageSnapshot {
+   schema_version?: number;
+   account_id?: string;
+@@ -43,6 +52,8 @@ export interface ManagedTabStorageSnapshot {
+   fingerprint_seed?: string;
+   cookies: ManagedTabCookie[];
+   local_storage: {[key: string]: string};
++  session_storage?: {[key: string]: string};
++  sync_options?: ManagedTabSyncOptions;
+   storage_url?: string;
+   fingerprint?: {
+     user_agent: string;
+@@ -538,7 +549,12 @@ export class FingerprintManagerSaasClient {
+     }
+     if (!snapshot || snapshot.account_id !== accountId ||
+         !Array.isArray(snapshot.cookies) || !snapshot.local_storage ||
+-        typeof snapshot.local_storage !== 'object') {
++        typeof snapshot.local_storage !== 'object' ||
++        (snapshot.session_storage !== undefined &&
++         (!snapshot.session_storage ||
++          typeof snapshot.session_storage !== 'object')) ||
++        (snapshot.sync_options !== undefined &&
++         !isValidSaasSyncOptions(snapshot.sync_options))) {
+       throw new Error('云端账号快照结构无效');
+     }
+     return snapshot;
+@@ -552,6 +568,15 @@ export class FingerprintManagerSaasClient {
+   }
+ }
+ 
++function isValidSaasSyncOptions(value: unknown): value is ManagedTabSyncOptions {
++  if (!value || typeof value !== 'object') {
++    return false;
++  }
++  const options = value as Record<string, unknown>;
++  return ['cookies', 'local_storage', 'session_storage', 'fingerprint',
++    'proxy', 'page'].every(key => typeof options[key] === 'boolean');
++}
++
+ export function getSaasErrorMessage(error: unknown): string {
+   if (error instanceof Error && error.message) {
+     return error.message;
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -494,6 +494,15 @@ button:disabled {
+   gap: 7px;
+ }
+ 
++.saas-sync-options {
++  align-items: center;
++  border-bottom: 1px solid var(--fp-line);
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px 14px;
++  padding: 12px 0;
++}
++
+ .saas-workspace-select,
+ .saas-login-grid input,
+ .saas-invite-accept-grid input {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -144,6 +144,48 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               退出
+             </button>
+           </div>
++          <div class="saas-sync-options">
++            <span class="tool-label">同步内容</span>
++            <label class="saas-remember-session">
++              <input type="checkbox" ?checked="${this.saasSyncOptions_.cookies}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'cookies')}">
++              Cookie
++            </label>
++            <label class="saas-remember-session">
++              <input type="checkbox"
++                  ?checked="${this.saasSyncOptions_.local_storage}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'local_storage')}">
++              LocalStorage
++            </label>
++            <label class="saas-remember-session">
++              <input type="checkbox"
++                  ?checked="${this.saasSyncOptions_.session_storage}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'session_storage')}">
++              SessionStorage
++            </label>
++            <label class="saas-remember-session">
++              <input type="checkbox"
++                  ?checked="${this.saasSyncOptions_.fingerprint}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'fingerprint')}">
++              指纹
++            </label>
++            <label class="saas-remember-session">
++              <input type="checkbox" ?checked="${this.saasSyncOptions_.proxy}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'proxy')}">
++              代理
++            </label>
++            <label class="saas-remember-session">
++              <input type="checkbox" ?checked="${this.saasSyncOptions_.page}"
++                  @change="${(event: Event) =>
++                      this.onSaasSyncOptionChange_(event, 'page')}">
++              页面地址
++            </label>
++          </div>
+           <div class="saas-account-list">
+             ${this.saasAccounts_.length ? this.saasAccounts_.map(account => html`
+               <div class="saas-account-row">
+@@ -599,7 +641,8 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                         <div class="section-kicker">STORAGE SNAPSHOT</div>
+                         <strong>
+                           ${this.storageSnapshots_[tab.id]!.cookies.length} Cookie ·
+-                          ${this.getStorageKeyCount_(this.storageSnapshots_[tab.id]!)} LocalStorage
++                          ${this.getStorageKeyCount_(this.storageSnapshots_[tab.id]!)} LocalStorage ·
++                          ${this.getSessionStorageKeyCount_(this.storageSnapshots_[tab.id]!)} SessionStorage
+                         </strong>
+                       </div>
+                       <button class="tool-button" type="button"
+@@ -640,6 +683,21 @@ export function getHtml(this: FingerprintManagerUiElement) {
+                           <div class="storage-empty">没有 LocalStorage 数据</div>
+                         `}
+                       </div>
++                      <div class="storage-column">
++                        <h5>SessionStorage</h5>
++                        ${this.getSessionStorageKeyCount_(
++                            this.storageSnapshots_[tab.id]!) ?
++                            Object.entries(
++                                this.storageSnapshots_[tab.id]!.session_storage || {})
++                                .map(([key, value]) => html`
++                          <div class="storage-entry">
++                            <code>${key}</code>
++                            <span title="${value}">${value}</span>
++                          </div>
++                        `) : html`
++                          <div class="storage-empty">没有 SessionStorage 数据</div>
++                        `}
++                      </div>
+                     </div>
+                   </div>
+                 ` : ''}
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -8,6 +8,7 @@ import type {
+   FingerprintManagerBrowserProxy,
+   ManagedTabState,
+   ManagedTabStorageSnapshot,
++  ManagedTabSyncOptions,
+   SaasAccount,
+   SaasAccountMember,
+   SaasAccountMemberList,
+@@ -58,6 +59,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasWorkspaceId_: {type: String},
+       saasInviteToken_: {type: String},
+       saasInviteMode_: {type: Boolean},
++      saasSyncOptions_: {type: Object},
+     };
+   }
+ 
+@@ -89,6 +91,14 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasWorkspaceId_: string = '';
+   protected accessor saasInviteToken_: string = '';
+   protected accessor saasInviteMode_: boolean = false;
++  protected accessor saasSyncOptions_: ManagedTabSyncOptions = {
++    cookies: true,
++    local_storage: true,
++    session_storage: true,
++    fingerprint: true,
++    proxy: true,
++    page: true,
++  };
+ 
+   private browserProxy_: FingerprintManagerBrowserProxy =
+       FingerprintManagerBrowserProxyImpl.getInstance();
+@@ -301,7 +311,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+              snapshot.schema_version !== 1) ||
+             !Array.isArray(snapshot.cookies) ||
+             !snapshot.local_storage ||
+-            typeof snapshot.local_storage !== 'object') {
++            typeof snapshot.local_storage !== 'object' ||
++            (snapshot.session_storage !== undefined &&
++             (!snapshot.session_storage ||
++              typeof snapshot.session_storage !== 'object'))) {
+           this.managedTabError_ = '导入文件不是有效的存储快照或版本不受支持';
+           return;
+         }
+@@ -944,6 +957,15 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasError_ = '';
+   }
+ 
++  protected onSaasSyncOptionChange_(
++      source: Event, option: keyof ManagedTabSyncOptions) {
++    const input = source.currentTarget as HTMLInputElement;
++    this.saasSyncOptions_ = {
++      ...this.saasSyncOptions_,
++      [option]: input.checked,
++    };
++  }
++
+   protected async onSaasAcceptInvite_() {
+     if (this.saasBusy_) {
+       return;
+@@ -990,8 +1012,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+         !this.saasSnapshotUnlocked_) {
+       throw new Error('请先登录 SaaS 并解锁账号快照');
+     }
+-    const snapshot =
++    const rawSnapshot =
+         await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
++    const snapshot = this.getSaasSnapshot_(rawSnapshot);
+     let account = this.saasAccounts_.find(
+         item => item.account_id === tab.account_id);
+     if (!account) {
+@@ -1008,17 +1031,44 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+   }
+ 
++  private getSaasSnapshot_(snapshot: ManagedTabStorageSnapshot):
++      ManagedTabStorageSnapshot {
++    const options = {...this.saasSyncOptions_};
++    const filtered: ManagedTabStorageSnapshot = {
++      ...snapshot,
++      cookies: options.cookies ? snapshot.cookies : [],
++      local_storage: options.local_storage ? snapshot.local_storage : {},
++      session_storage: options.session_storage ?
++          (snapshot.session_storage || {}) : {},
++      sync_options: options,
++    };
++    if (!options.fingerprint) {
++      delete filtered.fingerprint;
++      delete filtered.fingerprint_seed;
++    }
++    if (!options.proxy) {
++      delete filtered.proxy_rules;
++    }
++    if (!options.page) {
++      delete filtered.storage_url;
++    }
++    return filtered;
++  }
++
+   private async prepareSaasManagedTab_(
+       account: SaasAccount,
+       snapshot: ManagedTabStorageSnapshot): Promise<ManagedTabState> {
+     let tab = this.managedTabs_.find(
+         item => item.account_id === account.account_id);
+-    const proxyRules = snapshot.proxy_rules || '';
+-    const fingerprintSeed = snapshot.fingerprint_seed || '';
++    const options = this.getSnapshotSyncOptions_(snapshot);
++    const proxyRules = options.proxy ? snapshot.proxy_rules || '' :
++                                       tab?.proxy_rules || '';
++    const fingerprintSeed = options.fingerprint ?
++        snapshot.fingerprint_seed || '' : tab?.fingerprint_seed || '';
+     if (tab &&
+-        ((snapshot.proxy_rules !== undefined &&
++        ((options.proxy && snapshot.proxy_rules !== undefined &&
+           tab.proxy_rules !== proxyRules) ||
+-         (snapshot.fingerprint_seed !== undefined &&
++         (options.fingerprint && snapshot.fingerprint_seed !== undefined &&
+           tab.fingerprint_seed !== fingerprintSeed))) {
+       const oldTabId = tab.id;
+       if (!await this.browserProxy_.closeManagedTab(oldTabId)) {
+@@ -1033,17 +1083,18 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+     if (!tab) {
+       tab = await this.browserProxy_.createManagedTab(
+-          snapshot.storage_url || undefined,
++          options.page ? snapshot.storage_url || undefined : undefined,
+           account.account_id,
+-          snapshot.proxy_rules || undefined,
+-          snapshot.fingerprint_seed || undefined);
++          options.proxy ? snapshot.proxy_rules || undefined : undefined,
++          options.fingerprint ? snapshot.fingerprint_seed || undefined :
++                                 undefined);
+     }
+-    if (snapshot.fingerprint) {
++    if (options.fingerprint && snapshot.fingerprint) {
+       await this.browserProxy_.configureManagedTabFingerprint(
+           tab.id, snapshot.fingerprint.user_agent,
+           snapshot.fingerprint.hardware_concurrency);
+     }
+-    if (snapshot.storage_url) {
++    if (options.page && snapshot.storage_url) {
+       if (!await this.browserProxy_.navigateManagedTab(
+           tab.id, snapshot.storage_url)) {
+         throw new Error('无法导航到云端账号页面，云端环境尚未恢复');
+@@ -1052,6 +1103,14 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     return tab;
+   }
+ 
++  private getSnapshotSyncOptions_(
++      snapshot: ManagedTabStorageSnapshot): ManagedTabSyncOptions {
++    return {
++      ...this.saasSyncOptions_,
++      ...(snapshot.sync_options || {}),
++    };
++  }
++
+   protected async onSaasSyncAllManagedTabs_() {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ ||
+         !this.saasSnapshotUnlocked_ || this.saasBusy_) {
+@@ -1136,8 +1195,9 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     let snapshot: ManagedTabStorageSnapshot|undefined;
+     let account: SaasAccount|undefined;
+     try {
+-      snapshot =
++      const rawSnapshot =
+           await this.browserProxy_.getManagedTabStorageSnapshot(tab.id);
++      snapshot = this.getSaasSnapshot_(rawSnapshot);
+       account = this.saasAccounts_.find(
+           item => item.account_id === tab.account_id);
+       if (!account) {
+@@ -1275,6 +1335,10 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     return Object.keys(snapshot.local_storage).length;
+   }
+ 
++  protected getSessionStorageKeyCount_(
++      snapshot: ManagedTabStorageSnapshot): number {
++    return Object.keys(snapshot.session_storage || {}).length;
++  }
+ }
+ 
+ const kSaasDeviceIdStorageKey = 'fingerprint-manager.saas-device-id';
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -103,7 +103,8 @@ constexpr char16_t kLocalStorageSnapshotScript[] =
+     u"    }"
+     u"    return snapshot;"
+     u"  };"
+-    u"  return readStorage(localStorage);"
++    u"  return {local_storage: readStorage(localStorage),"
++    u" session_storage: readStorage(sessionStorage)};"
+     u"})()";
+ 
+ constexpr char kManagedTabPartitionDomain[] = "managedtab";
+@@ -145,11 +146,13 @@ void FinishStorageSnapshot(ManagedTabContext::StorageSnapshotCallback callback,
+                            GURL storage_url,
+                            bool consistent,
+                            net::CookieList cookies,
+-                           base::Value local_storage) {
++                           base::Value local_storage,
++                           base::Value session_storage) {
+   ManagedTabContext::StorageSnapshot snapshot;
+   snapshot.storage_url = std::move(storage_url);
+   snapshot.cookies = std::move(cookies);
+   snapshot.local_storage = std::move(local_storage);
++  snapshot.session_storage = std::move(session_storage);
+   snapshot.consistent = consistent;
+   std::move(callback).Run(std::move(snapshot));
+ }
+@@ -162,21 +165,26 @@ void FinishStorageSnapshotFromScript(
+     base::Value result) {
+   if (!consistent || !result.is_dict()) {
+     FinishStorageSnapshot(std::move(callback), std::move(storage_url), false,
+-                          std::move(cookies), base::Value::Dict());
++                          std::move(cookies), base::Value::Dict(),
++                          base::Value::Dict());
+     return;
+   }
+ 
+   const base::Value::Dict& values = result.GetDict();
+   const base::Value::Dict* local_storage =
+       values.FindDict("local_storage");
+-  if (!local_storage) {
++  const base::Value::Dict* session_storage =
++      values.FindDict("session_storage");
++  if (!local_storage || !session_storage) {
+     FinishStorageSnapshot(std::move(callback), std::move(storage_url), false,
+-                          std::move(cookies), base::Value::Dict());
++                          std::move(cookies), base::Value::Dict(),
++                          base::Value::Dict());
+     return;
+   }
+ 
+   FinishStorageSnapshot(std::move(callback), std::move(storage_url), true,
+-                        std::move(cookies), local_storage->Clone());
++                        std::move(cookies), local_storage->Clone(),
++                        session_storage->Clone());
+ }
+ 
+ struct StorageWriteCompletion {
+@@ -805,7 +813,7 @@ void ManagedTabContext::GetStorageSnapshot(StorageSnapshotCallback callback) {
+   content::WebContents* contents = web_contents();
+   if (!contents) {
+     FinishStorageSnapshot(std::move(callback), current_url_, false, {},
+-                          base::Value::Dict());
++                          base::Value::Dict(), base::Value::Dict());
+     return;
+   }
+ 
+@@ -827,14 +835,16 @@ void ManagedTabContext::OnCookiesForStorageSnapshot(
+       web_contents()->GetPrimaryMainFrame();
+   if (!frame_host || !frame_host->IsRenderFrameLive()) {
+     FinishStorageSnapshot(std::move(callback), storage_url, false,
+-                          net::CookieList(cookies), base::Value::Dict());
++                          net::CookieList(cookies), base::Value::Dict(),
++                          base::Value::Dict());
+     return;
+   }
+ 
+   if (current_url_ != storage_url ||
+       frame_host->GetLastCommittedURL() != storage_url) {
+     FinishStorageSnapshot(std::move(callback), storage_url, false,
+-                          net::CookieList(cookies), base::Value::Dict());
++                          net::CookieList(cookies), base::Value::Dict(),
++                          base::Value::Dict());
+     return;
+   }
+ 
+@@ -856,23 +866,65 @@ void ManagedTabContext::WriteStorageSnapshot(
+   const base::Value::List* cookies = snapshot.FindList("cookies");
+   const base::Value::Dict* local_storage =
+       snapshot.FindDict("local_storage");
+-  if (!cookies || !local_storage || cookies->size() > 5000) {
++  const base::Value::Dict* session_storage =
++      snapshot.FindDict("session_storage");
++  const base::Value::Dict* sync_options =
++      snapshot.FindDict("sync_options");
++  const auto get_sync_option = [&](const char* key,
++                                   bool default_value) -> std::optional<bool> {
++    if (!sync_options) {
++      return default_value;
++    }
++    if (const base::Value* value = sync_options->Find(key)) {
++      return value->GetIfBool();
++    }
++    return default_value;
++  };
++  const std::optional<bool> sync_cookies = get_sync_option("cookies", true);
++  const std::optional<bool> sync_local_storage =
++      get_sync_option("local_storage", true);
++  const std::optional<bool> sync_session_storage = get_sync_option(
++      "session_storage", session_storage != nullptr);
++  if (!cookies || !local_storage || !sync_cookies || !sync_local_storage ||
++      !sync_session_storage || cookies->size() > 5000) {
+     std::move(callback).Run(false, "存储快照格式无效");
+     return;
+   }
+ 
+-  std::string local_storage_json;
+-  if (!base::JSONWriter::Write(*local_storage, &local_storage_json) ||
+-      local_storage_json.size() > 10 * 1024 * 1024) {
+-    std::move(callback).Run(false, "LocalStorage 数据过大或格式无效");
+-    return;
++  std::string local_storage_json = "{}";
++  if (*sync_local_storage) {
++    if (!base::JSONWriter::Write(*local_storage, &local_storage_json) ||
++        local_storage_json.size() > 10 * 1024 * 1024) {
++      std::move(callback).Run(false, "LocalStorage 数据过大或格式无效");
++      return;
++    }
++    for (const auto& entry : *local_storage) {
++      if (!entry.second.is_string() || entry.first.size() > 1024 ||
++          entry.second.GetString().size() > 1024 * 1024) {
++        std::move(callback).Run(false, "LocalStorage 数据格式无效");
++        return;
++      }
++    }
++  }
++
++  base::Value::Dict empty_session_storage;
++  if (!session_storage) {
++    session_storage = &empty_session_storage;
+   }
+-  for (const auto& entry : *local_storage) {
+-    if (!entry.second.is_string() || entry.first.size() > 1024 ||
+-        entry.second.GetString().size() > 1024 * 1024) {
+-      std::move(callback).Run(false, "LocalStorage 数据格式无效");
++  std::string session_storage_json = "{}";
++  if (*sync_session_storage) {
++    if (!base::JSONWriter::Write(*session_storage, &session_storage_json) ||
++        session_storage_json.size() > 10 * 1024 * 1024) {
++      std::move(callback).Run(false, "SessionStorage 数据过大或格式无效");
+       return;
+     }
++    for (const auto& entry : *session_storage) {
++      if (!entry.second.is_string() || entry.first.size() > 1024 ||
++          entry.second.GetString().size() > 1024 * 1024) {
++        std::move(callback).Run(false, "SessionStorage 数据格式无效");
++        return;
++      }
++    }
+   }
+ 
+   std::vector<std::unique_ptr<net::CanonicalCookie>> canonical_cookies;
+@@ -973,7 +1025,7 @@ void ManagedTabContext::WriteStorageSnapshot(
+ 
+   content::RenderFrameHost* frame_host = web_contents()->GetPrimaryMainFrame();
+   if (!frame_host || !frame_host->IsRenderFrameLive()) {
+-    std::move(callback).Run(false, "当前页面尚未准备好写入 LocalStorage");
++    std::move(callback).Run(false, "当前页面尚未准备好写入存储");
+     return;
+   }
+ 
+@@ -991,23 +1043,43 @@ void ManagedTabContext::WriteStorageSnapshot(
+   auto cookies_to_write = std::make_shared<
+       std::vector<std::unique_ptr<net::CanonicalCookie>>>(
+       std::move(canonical_cookies));
+-  cookie_manager->DeleteCookies(
+-      network::mojom::CookieDeletionFilter::New(),
+-      base::BindOnce(&OnCookiesCleared, cookie_manager, cookies_to_write,
+-                     cookie_options, completion));
+-
+-  const std::u16string local_storage_script = base::UTF8ToUTF16(
+-      "(() => {"
+-      "const snapshot = " +
+-      local_storage_json +
+-      "; localStorage.clear();"
+-      "for (const [key, value] of Object.entries(snapshot)) "
+-      "localStorage.setItem(key, value); return true;"
+-      "})()");
+-  frame_host->ExecuteJavaScriptInIsolatedWorld(
+-      local_storage_script,
+-      base::BindOnce(&OnLocalStorageWriteResult, completion),
+-      ISOLATED_WORLD_ID_CHROME_INTERNAL);
++  if (*sync_cookies) {
++    cookie_manager->DeleteCookies(
++        network::mojom::CookieDeletionFilter::New(),
++        base::BindOnce(&OnCookiesCleared, cookie_manager, cookies_to_write,
++                       cookie_options, completion));
++  } else {
++    completion->cookies_finished = true;
++  }
++
++  if (*sync_local_storage || *sync_session_storage) {
++    std::string storage_script = "(() => {";
++    storage_script += "const snapshot = " + local_storage_json + ";";
++    storage_script +=
++        "const sessionSnapshot = " + session_storage_json + ";";
++    if (*sync_local_storage) {
++      storage_script += "localStorage.clear();";
++      storage_script +=
++          "for (const [key, value] of Object.entries(snapshot)) {"
++          "localStorage.setItem(key, value);}";
++    }
++    if (*sync_session_storage) {
++      storage_script += "sessionStorage.clear();";
++      storage_script +=
++          "for (const [key, value] of Object.entries(sessionSnapshot)) {"
++          "sessionStorage.setItem(key, value);}";
++    }
++    storage_script += "return true;})()";
++    const std::u16string local_storage_script =
++        base::UTF8ToUTF16(storage_script);
++    frame_host->ExecuteJavaScriptInIsolatedWorld(
++        local_storage_script,
++        base::BindOnce(&OnLocalStorageWriteResult, completion),
++        ISOLATED_WORLD_ID_CHROME_INTERNAL);
++  } else {
++    completion->local_storage_succeeded = true;
++    completion->local_storage_finished = true;
++  }
+   MaybeFinishStorageWrite(completion);
+ }
+ 
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -1012,6 +1012,15 @@ void ManagementUIHandler::OnManagedTabStorageSnapshot(
+   result.Set("schema_version", kManagedTabSnapshotSchemaVersion);
+   result.Set("cookies", std::move(cookies));
+   result.Set("local_storage", std::move(snapshot.local_storage));
++  result.Set("session_storage", std::move(snapshot.session_storage));
++  base::Value::Dict sync_options;
++  sync_options.Set("cookies", true);
++  sync_options.Set("local_storage", true);
++  sync_options.Set("session_storage", true);
++  sync_options.Set("fingerprint", true);
++  sync_options.Set("proxy", true);
++  sync_options.Set("page", true);
++  result.Set("sync_options", std::move(sync_options));
+   base::Value::Dict state = context->GetState();
+   result.Set("account_id", context->id());
+   base::Value::Dict fingerprint;
+@@ -1109,7 +1118,7 @@ void ManagementUIHandler::HandleWriteManagedTabStorageSnapshot(
+         url::Origin::Create(snapshot_url) !=
+             url::Origin::Create(context->current_url())) {
+       RejectJavascriptCallback(
+-      args[0], base::Value("LocalStorage 所属来源与当前页面不一致，请先导航到对应网站"));
++          args[0], base::Value("存储所属来源与当前页面不一致，请先导航到对应网站"));
+       return;
+     }
+   }
+

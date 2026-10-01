@@ -79,6 +79,7 @@ upstream-fixes/managed-tab-saas-workspace-create.patch
 upstream-fixes/managed-tab-saas-account-create.patch
 upstream-fixes/managed-tab-saas-operation-status.patch
 upstream-fixes/managed-tab-storage-consistency.patch
+upstream-fixes/managed-tab-storage-sync-options.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch
