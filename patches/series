@@ -52,6 +52,7 @@ upstream-fixes/managed-tab-account-snapshot.patch
 upstream-fixes/managed-tab-saas-network-proxy.patch
 upstream-fixes/managed-tab-saas-schema.patch
 upstream-fixes/managed-tab-saas-client.patch
+upstream-fixes/managed-tab-saas-session-ui.patch
 upstream-fixes/managed-tab-saas-csp.patch
 upstream-fixes/hide-chromium-profile-ui.patch
 core/ungoogled-chromium/block-requests.patch

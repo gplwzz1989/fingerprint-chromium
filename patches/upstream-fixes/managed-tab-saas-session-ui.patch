@@ -1,0 +1,281 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -72,6 +72,15 @@ export interface SaasAccount {
+   updated_at: string;
+ }
+ 
++export interface SaasDeviceSession {
++  session_id: string;
++  device_id: string;
++  device_name: string;
++  created_at: string;
++  expires_at: string;
++  current: boolean;
++}
++
+ interface SaasSession {
+   access_token: string;
+   refresh_token: string;
+@@ -142,6 +151,17 @@ export class FingerprintManagerSaasClient {
+     await this.request_<unknown>('/api/v1/sessions/revoke', {method: 'POST'});
+   }
+ 
++  async getSessions(): Promise<SaasDeviceSession[]> {
++    return this.request_<SaasDeviceSession[]>('/api/v1/sessions');
++  }
++
++  async revokeSessionById(sessionId: string): Promise<void> {
++    await this.request_<unknown>(
++        `/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
++          method: 'DELETE',
++        });
++  }
++
+   async getWorkspaces(): Promise<SaasWorkspace[]> {
+     return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -9,6 +9,7 @@ import type {
+   ManagedTabState,
+   ManagedTabStorageSnapshot,
+   SaasAccount,
++  SaasDeviceSession,
+   SaasWorkspace,
+ } from './fingerprint_manager_browser_proxy.js';
+ import {FingerprintManagerBrowserProxyImpl} from
+@@ -42,6 +43,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasUserEmail_: {type: String},
+       saasWorkspaces_: {type: Array},
+       saasAccounts_: {type: Array},
++      saasSessions_: {type: Array},
+       saasWorkspaceId_: {type: String},
+     };
+   }
+@@ -59,6 +61,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasUserEmail_: string = '';
+   protected accessor saasWorkspaces_: SaasWorkspace[] = [];
+   protected accessor saasAccounts_: SaasAccount[] = [];
++  protected accessor saasSessions_: SaasDeviceSession[] = [];
+   protected accessor saasWorkspaceId_: string = '';
+ 
+   private browserProxy_: FingerprintManagerBrowserProxy =
+@@ -323,6 +326,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       }
+       this.saasWorkspaceId_ = this.saasWorkspaces_[0]!.workspace_id;
+       await this.loadSaasAccounts_();
++      await this.loadSaasSessions_();
+       this.saasConnected_ = true;
+     } catch (error) {
+       this.saasClient_ = null;
+@@ -353,6 +357,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasUserEmail_ = '';
+     this.saasWorkspaces_ = [];
+     this.saasAccounts_ = [];
++    this.saasSessions_ = [];
+     this.saasWorkspaceId_ = '';
+     this.saasError_ = logoutError;
+     this.saasBusy_ = false;
+@@ -365,7 +370,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   }
+ 
+   protected async onSaasRefresh_() {
+-    await this.loadSaasAccounts_();
++    await Promise.all([this.loadSaasAccounts_(), this.loadSaasSessions_()]);
+   }
+ 
+   private async loadSaasAccounts_() {
+@@ -384,6 +389,38 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+   }
+ 
++  private async loadSaasSessions_() {
++    if (!this.saasClient_) {
++      return;
++    }
++    try {
++      this.saasSessions_ = await this.saasClient_.getSessions();
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    }
++  }
++
++  protected async onSaasRevokeSession_(session: SaasDeviceSession) {
++    if (!this.saasClient_ || this.saasBusy_) {
++      return;
++    }
++    if (session.current) {
++      this.saasError_ = '当前设备请使用“退出”按钮结束会话';
++      return;
++    }
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    try {
++      await this.saasClient_.revokeSessionById(session.session_id);
++      await this.loadSaasSessions_();
++      this.saasError_ = `已撤销设备会话：${session.device_name || session.device_id}`;
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+       this.saasError_ = '请先登录 SaaS 并选择工作区';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -121,6 +121,34 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               <div class="saas-empty">当前工作区还没有账号目录。可在下方本地 Tab 上点击“同步云端”创建。</div>
+             `}
+           </div>
++          <div class="saas-session-section">
++            <div class="saas-subheading">
++              <span>已授权设备</span>
++              <small>${this.saasSessions_.length} 个有效会话</small>
++            </div>
++            <div class="saas-session-list">
++              ${this.saasSessions_.length ? this.saasSessions_.map(session => html`
++                <div class="saas-session-row">
++                  <div class="saas-session-mark">${session.current ? '本' : '端'}</div>
++                  <div class="saas-session-copy">
++                    <strong>${session.device_name || '未命名设备'}${session.current ? '（当前设备）' : ''}</strong>
++                    <span>${session.device_id} · 到期 ${session.expires_at}</span>
++                  </div>
++                  ${session.current ? html`
++                    <span class="saas-session-current">当前会话</span>
++                  ` : html`
++                    <button class="tool-button text-button-danger" type="button"
++                        ?disabled="${this.saasBusy_}"
++                        @click="${() => this.onSaasRevokeSession_(session)}">
++                      撤销
++                    </button>
++                  `}
++                </div>
++              `) : html`
++                <div class="saas-empty">暂无有效设备会话。</div>
++              `}
++            </div>
++          </div>
+         ` : html`
+           <div class="saas-login-grid">
+             <input id="saasBaseUrl" type="url"
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -541,6 +541,93 @@ button:disabled {
+   white-space: nowrap;
+ }
+ 
++.saas-session-section {
++  border-top: 1px solid var(--fp-line);
++  margin-top: 18px;
++  padding-top: 15px;
++}
++
++.saas-subheading {
++  align-items: baseline;
++  color: var(--fp-text);
++  display: flex;
++  font-size: 11px;
++  justify-content: space-between;
++}
++
++.saas-subheading small {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++}
++
++.saas-session-list {
++  display: flex;
++  flex-direction: column;
++  gap: 7px;
++  margin-top: 10px;
++}
++
++.saas-session-row {
++  align-items: center;
++  background: rgba(5, 10, 16, .28);
++  border: 1px solid var(--fp-line);
++  display: flex;
++  gap: 10px;
++  min-height: 43px;
++  padding: 0 10px;
++}
++
++.saas-session-mark {
++  align-items: center;
++  border: 1px solid rgba(125, 211, 252, .26);
++  color: var(--fp-cyan);
++  display: flex;
++  flex-shrink: 0;
++  font-family: monospace;
++  font-size: 10px;
++  height: 24px;
++  justify-content: center;
++  width: 24px;
++}
++
++.saas-session-copy {
++  min-width: 0;
++}
++
++.saas-session-copy strong,
++.saas-session-copy span {
++  display: block;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.saas-session-copy strong {
++  color: var(--fp-text);
++  font-size: 10px;
++  font-weight: 500;
++}
++
++.saas-session-copy span {
++  color: var(--fp-faint);
++  font-family: monospace;
++  font-size: 9px;
++  margin-top: 3px;
++}
++
++.saas-session-row .tool-button,
++.saas-session-current {
++  margin-left: auto;
++  white-space: nowrap;
++}
++
++.saas-session-current {
++  color: #8bd5a2;
++  font-family: monospace;
++  font-size: 9px;
++}
++
+ .saas-login-grid {
+   display: grid;
+   gap: 9px;
+@@ -940,6 +1027,17 @@ button:disabled {
+     margin-left: 0;
+   }
+ 
++  .saas-session-row {
++    align-items: stretch;
++    flex-direction: column;
++    padding: 11px;
++  }
++
++  .saas-session-row .tool-button,
++  .saas-session-current {
++    margin-left: 0;
++  }
++
+   .create-bar {
+     align-items: stretch;
+     flex-direction: column;
