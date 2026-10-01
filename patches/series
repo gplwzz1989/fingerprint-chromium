@@ -76,6 +76,7 @@ upstream-fixes/managed-tab-navigation-validation.patch
 upstream-fixes/managed-tab-saas-restore-validation.patch
 upstream-fixes/managed-tab-session-user-agent.patch
 upstream-fixes/managed-tab-saas-workspace-create.patch
+upstream-fixes/managed-tab-saas-account-create.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch
 core/ungoogled-chromium/doh-changes.patch

@@ -1,0 +1,68 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -538,6 +538,43 @@
+   protected async onSaasRefresh_() {
+     await Promise.all([
+       this.loadSaasAccounts_(), this.loadSaasMembers_(), this.loadSaasSessions_(),
+       this.saasAccountMembersAccountId_ ?
+           this.loadSaasAccountMembers_(this.saasAccountMembersAccountId_) :
+           Promise.resolve(),
+     ]);
+   }
++
++  protected async onSaasCreateAccount_() {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ ||
++        !this.saasSnapshotUnlocked_ || this.saasBusy_) {
++      return;
++    }
++    const accountId =
++        window.prompt('请输入账号标识（仅限字母、数字、下划线和短横线）')?.trim() || '';
++    if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
++      this.saasError_ = '账号标识无效，请使用 1 到 128 位字母、数字、下划线或短横线';
++      return;
++    }
++    const name = window.prompt('请输入账号名称')?.trim() || '';
++    if (!name || name.length > 256) {
++      this.saasError_ = '账号名称不能为空且不能超过 256 个字符';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    let accountCreated = false;
++    try {
++      const account = await this.saasClient_.createAccount(
++          this.saasWorkspaceId_, accountId, name);
++      accountCreated = true;
++      this.saasAccounts_ = [...this.saasAccounts_, account];
++      const tab = await this.browserProxy_.createManagedTab(
++          undefined, account.account_id);
++      await this.syncManagedTabToSaas_(tab);
++      await this.loadSaasAccounts_();
++      this.saasError_ = `账号 ${account.account_id} 已创建并同步到本地 Tab`;
++    } catch (error) {
++      const message = getSaasErrorMessage(error);
++      this.saasError_ = accountCreated ?
++          `云端账号已创建，但本地 Tab 初始化失败：${message}` : message;
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
+ 
+   private async loadSaasAccounts_() {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -116,6 +116,11 @@
+                 @click="${this.onSaasCreateWorkspace_}">
+               新建工作区
+             </button>
++            <button class="tool-button tool-button-cloud" type="button"
++                ?disabled="${this.saasBusy_ || !this.saasSnapshotUnlocked_}"
++                @click="${this.onSaasCreateAccount_}">
++              新建账号
++            </button>
+             <button class="tool-button" type="button"
+                 ?disabled="${this.saasBusy_}"
+                 @click="${this.onSaasRefresh_}">
