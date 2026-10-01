@@ -65,7 +65,7 @@ index e03399db..a3e47a64 100644
  #include "components/policy/core/common/cloud/enterprise_metrics.h"
  #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
  #include "components/policy/core/common/management/management_service.h"
-@@ -114,6 +116,29 @@ enum class ReportingType {
+@@ -114,6 +116,30 @@ enum class ReportingType {
  namespace {
  
  constexpr int kManagedTabSnapshotSchemaVersion = 1;
@@ -280,7 +280,7 @@ index c35874af..8d9557af 100644
    }
  
    static async acceptInvite(
-@@ -366,6 +394,25 @@ export class FingerprintManagerSaasClient {
+@@ -366,6 +394,17 @@ export class FingerprintManagerSaasClient {
              encodeURIComponent(leaseId), {method: 'DELETE'});
    }
  
