@@ -1,0 +1,95 @@
+diff --git a/chrome/browser/sessions/session_restore.cc b/chrome/browser/sessions/session_restore.cc
+--- a/chrome/browser/sessions/session_restore.cc
++++ b/chrome/browser/sessions/session_restore.cc
+@@ -375,11 +375,16 @@ class SessionRestoreImpl : public BrowserListObserver {
+     selected_index = std::max(
+         0,
+         std::min(selected_index, static_cast<int>(tab.navigations.size() - 1)));
+ 
+-    bool use_new_window = disposition == WindowOpenDisposition::NEW_WINDOW;
++    // Managed browser mode keeps foreign-session tabs in the existing parent
++    // window, including requests that originally asked for a new window.
++    bool use_new_window = false;
+ 
+-    Browser* browser =
+-        use_new_window ? Browser::Create(Browser::CreateParams(profile_, true))
+-                       : browser_.get();
++    Browser* browser = browser_.get();
++    if (!browser) {
++      browser = Browser::Create(Browser::CreateParams(profile_, false));
++      browser_ = browser;
++      browser->window()->Show();
++    }
+ 
+     RecordAppLaunchForTab(browser, tab, selected_index);
+@@ -462,6 +467,10 @@ class SessionRestoreImpl : public BrowserListObserver {
+                                std::vector<RestoredTab>& restored_tabs) {
+     Browser* browser = nullptr;
+     if (!created_tabbed_browser && always_create_tabbed_browser_) {
+-      browser = Browser::Create(Browser::CreateParams(profile_, false));
++      browser = browser_.get();
++      if (!browser) {
++        browser = Browser::Create(Browser::CreateParams(profile_, false));
++        browser_ = browser;
++      }
+       if (startup_tabs_.empty() ||
+           (startup_tabs_.size() == 1 && whats_new::IsEnabled() &&
+            startup_tabs_[0].url == whats_new::GetWebUIStartupURL())) {
+@@ -712,20 +721,18 @@ class SessionRestoreImpl : public BrowserListObserver {
+     }
+ #endif  //  BUILDFLAG(IS_CHROMEOS)
+ 
++    // Managed browser mode restores every session window into one parent.
++    Browser* managed_parent_browser = browser_;
++
+     for (const std::unique_ptr<sessions::SessionWindow>& window : *windows) {
+       ++(*window_count);
+-      // 1. Choose between restoring tabs in an existing browser or in a newly
+-      //    created browser.
+-      Browser* browser = nullptr;
++      // 1. Restore tabs in the existing managed parent whenever possible.
++      Browser* browser = managed_parent_browser;
+       const bool is_first_window = window.get() == windows->begin()->get();
+       const bool is_normal_window =
+           window->type == sessions::SessionWindow::TYPE_NORMAL;
+ 
+-      if (is_first_window && is_normal_window &&
+-          ShouldRestoreToExistingBrowser()) {
+-        // The first set of tabs is added to the existing browser.
+-        browser = browser_;
+-      } else {
++      if (!browser) {
+ #if BUILDFLAG(IS_CHROMEOS)
+         ash::BootTimesRecorder::Get()->AddLoginTimeMarker(
+             "SessionRestore-CreateRestoredBrowser-Start", false);
+@@ -742,6 +749,10 @@ class SessionRestoreImpl : public BrowserListObserver {
+             window->workspace, window->visible_on_all_workspaces, show_state,
+             window->app_name, window->user_title, window->extra_data,
+             window->window_id.id());
++        managed_parent_browser = browser;
++        browser_ = browser;
++        browser->window()->Show();
++
+ #if BUILDFLAG(IS_CHROMEOS)
+         aura::Window* browser_window = browser->window()->GetNativeWindow();
+         if (occlusion_helper) {
+@@ -1239,14 +1250,11 @@ class SessionRestoreImpl : public BrowserListObserver {
+     if (last_normal_browser && !normal_startup_tabs.empty()) {
+       AppendURLsToBrowser(last_normal_browser, normal_startup_tabs);
+     }
+-    if (!startup_tabs_from_last_and_urls_pref.empty()) {
+-      Browser::CreateParams params =
+-          Browser::CreateParams(profile_, /*user_gesture*/ false);
+-      params.creation_source = Browser::CreationSource::kLastAndUrlsStartupPref;
+-      Browser* new_browser = Browser::Create(params);
+-      AppendURLsToBrowser(new_browser, startup_tabs_from_last_and_urls_pref);
+-      new_browser->window()->Show();
+-      browser_to_activate = new_browser;
++    if (!startup_tabs_from_last_and_urls_pref.empty() &&
++        last_normal_browser) {
++      AppendURLsToBrowser(last_normal_browser,
++                          startup_tabs_from_last_and_urls_pref);
++      browser_to_activate = last_normal_browser;
+     }
+     return browser_to_activate;
+   }
