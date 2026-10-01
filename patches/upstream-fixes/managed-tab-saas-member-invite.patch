@@ -1,0 +1,260 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -62,6 +62,15 @@ export interface SaasWorkspace {
+   role: string;
+ }
+ 
++export interface SaasWorkspaceInvite {
++  invite_id: string;
++  workspace_id: string;
++  email: string;
++  role: string;
++  expires_at: string;
++  invite_token: string;
++}
++
+ export interface SaasAccount {
+   account_id: string;
+   workspace_id: string;
+@@ -173,6 +182,16 @@ export class FingerprintManagerSaasClient {
+     return this.request_<SaasWorkspace[]>('/api/v1/workspaces');
+   }
+ 
++  async createWorkspaceInvite(
++      workspaceId: string, email: string, role: string):
++      Promise<SaasWorkspaceInvite> {
++    return this.request_<SaasWorkspaceInvite>(
++        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/invitations`, {
++          method: 'POST',
++          body: JSON.stringify({email, role}),
++        });
++  }
++
+   async getAccounts(workspaceId: string): Promise<SaasAccount[]> {
+     const accounts: SaasAccount[] = [];
+     let pageToken = '';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -45,6 +45,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasAccounts_: {type: Array},
+       saasSessions_: {type: Array},
+       saasWorkspaceId_: {type: String},
++      saasInviteToken_: {type: String},
+     };
+   }
+ 
+@@ -63,6 +64,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected accessor saasAccounts_: SaasAccount[] = [];
+   protected accessor saasSessions_: SaasDeviceSession[] = [];
+   protected accessor saasWorkspaceId_: string = '';
++  protected accessor saasInviteToken_: string = '';
+ 
+   private browserProxy_: FingerprintManagerBrowserProxy =
+       FingerprintManagerBrowserProxyImpl.getInstance();
+@@ -362,6 +364,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     this.saasAccounts_ = [];
+     this.saasSessions_ = [];
+     this.saasWorkspaceId_ = '';
++    this.saasInviteToken_ = '';
+     this.saasError_ = logoutError;
+     this.saasBusy_ = false;
+   }
+@@ -369,6 +372,7 @@ export class FingerprintManagerUiElement extends CrLitElement {
+   protected async onSaasWorkspaceChange_(event: Event) {
+     const select = event.currentTarget as HTMLSelectElement;
+     this.saasWorkspaceId_ = select.value;
++    this.saasInviteToken_ = '';
+     await this.loadSaasAccounts_();
+   }
+@@ -461,6 +465,59 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     }
+   }
+ 
++  protected canManageMembers_(): boolean {
++    const workspace = this.saasWorkspaces_.find(
++        item => item.workspace_id === this.saasWorkspaceId_);
++    return workspace?.role === 'owner' || workspace?.role === 'admin';
++  }
++
++  protected async onSaasInviteMember_() {
++    if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
++      return;
++    }
++    const emailInput =
++        this.shadowRoot.querySelector<HTMLInputElement>('#saasInviteEmail');
++    const roleInput =
++        this.shadowRoot.querySelector<HTMLSelectElement>('#saasInviteRole');
++    const email = emailInput?.value.trim() || '';
++    const role = roleInput?.value || '';
++    if (!email || !role) {
++      this.saasError_ = '请输入受邀邮箱并选择成员角色';
++      return;
++    }
++
++    this.saasBusy_ = true;
++    this.saasError_ = '';
++    this.saasInviteToken_ = '';
++    try {
++      const invite = await this.saasClient_.createWorkspaceInvite(
++          this.saasWorkspaceId_, email, role);
++      this.saasInviteToken_ = invite.invite_token;
++      this.saasError_ = `邀请已生成，有效期至 ${invite.expires_at}；请通过受控渠道交给受邀用户`;
++      if (emailInput) {
++        emailInput.value = '';
++      }
++    } catch (error) {
++      this.saasError_ = getSaasErrorMessage(error);
++    } finally {
++      this.saasBusy_ = false;
++    }
++  }
++
++  protected onCopySaasInviteToken_() {
++    if (!this.saasInviteToken_) {
++      return;
++    }
++    if (!navigator.clipboard) {
++      this.saasError_ = '当前页面不支持复制，请手动复制邀请令牌';
++      return;
++    }
++    navigator.clipboard.writeText(this.saasInviteToken_).then(
++        () => this.saasError_ = '邀请令牌已复制，请仅通过受控渠道发送',
++        () => this.saasError_ = '复制邀请令牌失败，请手动复制');
++  }
++
+   protected async onSaasSyncManagedTab_(tab: ManagedTabState) {
+     if (!this.saasClient_ || !this.saasWorkspaceId_ || this.saasBusy_) {
+       this.saasError_ = '请先登录 SaaS 并选择工作区';
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -132,6 +132,39 @@ export function getHtml(this: FingerprintManagerUiElement) {
+               <div class="saas-empty">当前工作区还没有账号目录。可在下方本地 Tab 上点击“同步云端”创建。</div>
+             `}
+           </div>
++          ${this.canManageMembers_() ? html`
++            <div class="saas-invite-section">
++              <div class="saas-subheading">
++                <span>邀请工作区成员</span>
++                <small>邀请令牌只显示一次</small>
++              </div>
++              <div class="saas-invite-form">
++                <input id="saasInviteEmail" type="email"
++                    placeholder="受邀用户邮箱" autocomplete="off">
++                <select id="saasInviteRole" aria-label="成员角色">
++                  <option value="viewer">查看者</option>
++                  <option value="editor">编辑者</option>
++                  ${this.saasWorkspaces_.find(
++                      item => item.workspace_id === this.saasWorkspaceId_)?.role ===
++                          'owner' ? html`<option value="admin">管理员</option>` : ''}
++                </select>
++                <button class="tool-button" type="button"
++                    ?disabled="${this.saasBusy_}"
++                    @click="${this.onSaasInviteMember_}">
++                  生成邀请
++                </button>
++              </div>
++              ${this.saasInviteToken_ ? html`
++                <div class="saas-invite-token">
++                  <code>${this.saasInviteToken_}</code>
++                  <button class="tool-button" type="button"
++                      @click="${this.onCopySaasInviteToken_}">
++                    复制令牌
++                  </button>
++                </div>
++              ` : ''}
++            </div>
++          ` : ''}
+           <div class="saas-session-section">
+             <div class="saas-subheading">
+               <span>已授权设备</span>
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+index 0000000..0000000 100644
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -563,6 +563,58 @@ button:disabled {
+   white-space: nowrap;
+ }
+ 
++.saas-invite-section {
++  border-top: 1px solid var(--fp-line);
++  margin-top: 18px;
++  padding-top: 15px;
++}
++
++.saas-invite-form {
++  display: grid;
++  gap: 8px;
++  grid-template-columns: minmax(0, 1fr) 130px auto;
++  margin-top: 10px;
++}
++
++.saas-invite-form input,
++.saas-invite-form select {
++  background: rgba(5, 10, 16, .4);
++  border: 1px solid var(--fp-line-strong);
++  box-sizing: border-box;
++  color: var(--fp-text);
++  font-family: monospace;
++  font-size: 10px;
++  height: 32px;
++  min-width: 0;
++  padding: 0 9px;
++}
++
++.saas-invite-form input:focus,
++.saas-invite-form select:focus {
++  border-color: var(--fp-cyan);
++  outline: none;
++}
++
++.saas-invite-token {
++  align-items: center;
++  background: rgba(245, 166, 107, .06);
++  border: 1px solid rgba(245, 166, 107, .3);
++  display: flex;
++  gap: 10px;
++  margin-top: 10px;
++  padding: 8px 10px;
++}
++
++.saas-invite-token code {
++  color: var(--fp-orange);
++  flex: 1;
++  font-family: monospace;
++  font-size: 10px;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
+ .saas-session-section {
+   border-top: 1px solid var(--fp-line);
+   margin-top: 18px;
+@@ -1025,7 +1077,8 @@ button:disabled {
+   }
+ 
+   .saas-login-grid,
+-  .saas-toolbar {
++  .saas-toolbar,
++  .saas-invite-form {
+     align-items: stretch;
+     display: flex;
+     flex-direction: column;
+@@ -1049,6 +1102,11 @@ button:disabled {
+     margin-left: 0;
+   }
+ 
++  .saas-invite-token {
++    align-items: stretch;
++    flex-direction: column;
++  }
++
+   .saas-session-row {
+     align-items: stretch;
+     flex-direction: column;

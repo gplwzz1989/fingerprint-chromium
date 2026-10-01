@@ -30,6 +30,7 @@ const (
 	currentSnapshotSchemaVersion = 1
 	maxSnapshotBodySize          = 20 << 20
 	leaseDuration                = 5 * time.Minute
+	workspaceInviteDuration      = 7 * 24 * time.Hour
 )
 
 func NewServer(db *sql.DB, cfg config.Config, logger *slog.Logger) *Server {
@@ -44,7 +45,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions/revoke", s.handleRevokeSession)
 	mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
 	mux.HandleFunc("DELETE /api/v1/sessions/{session_id}", s.handleRevokeSessionByID)
+	mux.HandleFunc("POST /api/v1/invitations/accept", s.handleAcceptWorkspaceInvite)
 	mux.HandleFunc("GET /api/v1/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/invitations", s.handleCreateWorkspaceInvite)
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}", s.handleUpdateAccount)
@@ -377,6 +380,264 @@ type workspaceResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Role        string `json:"role"`
+}
+
+type createWorkspaceInviteRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+type workspaceInviteResponse struct {
+	InviteID    string `json:"invite_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Email       string `json:"email"`
+	Role        string `json:"role"`
+	ExpiresAt   string `json:"expires_at"`
+	InviteToken string `json:"invite_token,omitempty"`
+}
+
+type acceptWorkspaceInviteRequest struct {
+	InviteToken string `json:"invite_token"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name"`
+}
+
+type acceptWorkspaceInviteResponse struct {
+	UserID      string `json:"user_id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	WorkspaceID string `json:"workspace_id"`
+	Role        string `json:"role"`
+}
+
+func (s *Server) handleCreateWorkspaceInvite(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.PathValue("workspace_id")
+	if !looksLikeUUID(workspaceID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "工作区标识无效")
+		return
+	}
+	role, ok := s.workspaceRole(r.Context(), userID, workspaceID)
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "没有访问该工作区的权限")
+		return
+	}
+
+	var request createWorkspaceInviteRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
+	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
+	if !validEmail(request.Email) || !validWorkspaceInviteRole(request.Role) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "邀请参数无效")
+		return
+	}
+	if !canInviteMember(role, request.Role) {
+		writeError(w, http.StatusForbidden, "forbidden", "当前用户无权授予该成员角色")
+		return
+	}
+
+	inviteToken, tokenHash, err := auth.NewInviteToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "生成邀请令牌失败，请稍后重试")
+		return
+	}
+	inviteID, err := newUUID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "生成邀请标识失败，请稍后重试")
+		return
+	}
+	expiresAt := time.Now().Add(workspaceInviteDuration)
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始创建工作区邀请事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建邀请失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+
+	var memberExists bool
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM workspace_members wm
+			JOIN users u ON u.id = wm.user_id
+			WHERE wm.workspace_id = $1::uuid AND lower(u.email) = $2
+		)`, workspaceID, request.Email).Scan(&memberExists); err != nil {
+		s.logger.Error("检查工作区成员失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建邀请失败，请稍后重试")
+		return
+	}
+	if memberExists {
+		writeError(w, http.StatusConflict, "conflict", "该邮箱已经是工作区成员")
+		return
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE workspace_invites
+		SET revoked_at = now()
+		WHERE workspace_id = $1::uuid AND lower(email) = $2
+		  AND accepted_at IS NULL AND revoked_at IS NULL`,
+		workspaceID, request.Email); err != nil {
+		s.logger.Error("撤销旧工作区邀请失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建邀请失败，请稍后重试")
+		return
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO workspace_invites
+		    (invite_id, workspace_id, inviter_user_id, email, role,
+		     token_hash, expires_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7)`,
+		inviteID, workspaceID, userID, request.Email, request.Role,
+		tokenHash, expiresAt); err != nil {
+		s.logger.Error("保存工作区邀请失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建邀请失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交工作区邀请失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "创建邀请失败，请稍后重试")
+		return
+	}
+
+	if err := s.writeAudit(r.Context(), userID, "member_invited", "", deviceID); err != nil {
+		s.logger.Error("写入成员邀请审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusCreated, workspaceInviteResponse{
+		InviteID: inviteID, WorkspaceID: workspaceID, Email: request.Email,
+		Role: request.Role, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+		InviteToken: inviteToken,
+	})
+}
+
+func (s *Server) handleAcceptWorkspaceInvite(w http.ResponseWriter, r *http.Request) {
+	var request acceptWorkspaceInviteRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.InviteToken = strings.TrimSpace(request.InviteToken)
+	request.DisplayName = strings.TrimSpace(request.DisplayName)
+	if request.InviteToken == "" || len(request.InviteToken) > 256 ||
+		len(request.Password) < 12 || len(request.Password) > 256 ||
+		len(request.DisplayName) > 128 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "邀请加入参数无效")
+		return
+	}
+
+	tokenDigest := sha256.Sum256([]byte(request.InviteToken))
+	tokenHash := base64.RawURLEncoding.EncodeToString(tokenDigest[:])
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始接受工作区邀请事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+
+	var inviteID, workspaceID, email, role string
+	var expiresAt time.Time
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT invite_id::text, workspace_id::text, email, role, expires_at
+		FROM workspace_invites
+		WHERE token_hash = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+		FOR UPDATE`, tokenHash).Scan(
+		&inviteID, &workspaceID, &email, &role, &expiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "邀请令牌无效或已过期")
+			return
+		}
+		s.logger.Error("查询工作区邀请失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+	if !expiresAt.After(time.Now()) {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "邀请令牌无效或已过期")
+		return
+	}
+
+	var userID, passwordHash, displayName string
+	userErr := tx.QueryRowContext(r.Context(), `
+		SELECT id::text, password_hash, display_name
+		FROM users WHERE lower(email) = $1 FOR UPDATE`, email).
+		Scan(&userID, &passwordHash, &displayName)
+	if userErr != nil && userErr != sql.ErrNoRows {
+		s.logger.Error("查询受邀用户失败", "error", userErr.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+	if userErr == sql.ErrNoRows {
+		passwordHash, err = auth.HashPassword(request.Password)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "密码长度或格式无效")
+			return
+		}
+		userID, err = newUUID()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "生成用户标识失败，请稍后重试")
+			return
+		}
+		displayName = request.DisplayName
+		if _, err := tx.ExecContext(r.Context(), `
+			INSERT INTO users (id, email, password_hash, display_name)
+			VALUES ($1::uuid, $2, $3, $4)`,
+			userID, email, passwordHash, displayName); err != nil {
+			s.logger.Error("创建受邀用户失败", "error", err.Error())
+			writeError(w, http.StatusConflict, "conflict", "用户邮箱已存在，请直接登录后重试")
+			return
+		}
+	} else {
+		valid, verifyErr := auth.VerifyPassword(passwordHash, request.Password)
+		if verifyErr != nil {
+			s.logger.Error("校验受邀用户密码失败", "error", verifyErr.Error())
+			writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+			return
+		}
+		if !valid {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "用户密码错误")
+			return
+		}
+	}
+
+	result, err := tx.ExecContext(r.Context(), `
+		INSERT INTO workspace_members (workspace_id, user_id, role)
+		VALUES ($1::uuid, $2::uuid, $3)
+		ON CONFLICT (workspace_id, user_id) DO NOTHING`, workspaceID, userID, role)
+	if err != nil {
+		s.logger.Error("加入工作区失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		writeError(w, http.StatusConflict, "conflict", "用户已经是该工作区成员")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE workspace_invites SET accepted_at = now()
+		WHERE invite_id = $1::uuid`, inviteID); err != nil {
+		s.logger.Error("标记工作区邀请已接受失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交工作区成员加入失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "接受邀请失败，请稍后重试")
+		return
+	}
+
+	if err := s.writeAudit(r.Context(), userID, "member_joined", "", ""); err != nil {
+		s.logger.Error("写入成员加入审计失败", "error", err.Error())
+	}
+	writeJSON(w, http.StatusCreated, acceptWorkspaceInviteResponse{
+		UserID: userID, Email: email, DisplayName: displayName,
+		WorkspaceID: workspaceID, Role: role,
+	})
 }
 
 func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
@@ -1137,6 +1398,20 @@ func (s *Server) accountAccess(ctx context.Context, userID, accountID string) (s
 
 func canEdit(role string) bool {
 	return role == "owner" || role == "admin" || role == "editor"
+}
+
+func validWorkspaceInviteRole(role string) bool {
+	return role == "admin" || role == "editor" || role == "viewer"
+}
+
+func canInviteMember(inviterRole, invitedRole string) bool {
+	if !validWorkspaceInviteRole(invitedRole) {
+		return false
+	}
+	if inviterRole == "owner" {
+		return true
+	}
+	return inviterRole == "admin" && invitedRole != "admin"
 }
 
 func snapshotLeaseState(deviceID, leaseDeviceID string, expiresAt, now time.Time) string {

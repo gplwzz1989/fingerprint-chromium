@@ -43,6 +43,8 @@
 - `POST /api/v1/sessions/refresh`
 - `POST /api/v1/sessions/revoke`
 - `GET /api/v1/workspaces`
+- `POST /api/v1/workspaces/{workspace_id}/invitations`
+- `POST /api/v1/invitations/accept`
 - `GET /api/v1/workspaces/{workspace_id}/accounts`
 - `POST /api/v1/workspaces/{workspace_id}/accounts`
 - `PATCH /api/v1/accounts/{account_id}`
@@ -55,10 +57,13 @@
 
 快照接口只接受客户端加密信封，并使用 `If-Match` 做乐观并发控制。
 
+工作区所有者可以邀请管理员、编辑者或查看者；管理员可以邀请编辑者或查看者。创建邀请后，接口只返回一次原始邀请令牌，部署方应通过受控渠道交给受邀用户。令牌服务端只保存摘要，有效期为 7 天且只能接受一次。新用户通过 `/api/v1/invitations/accept` 设置密码；已有用户需要再次验证自己的密码后才能加入工作区。
+
 ## 安全边界
 
 - 密码只接收 HTTPS 请求，并使用 Argon2id 哈希后存储。
 - 访问令牌为短期 JWT，刷新令牌只保存 SHA-256 摘要。
+- 工作区邀请令牌只保存 SHA-256 摘要，过期或接受后立即失效。
 - 错误响应不返回数据库、密码哈希或令牌原始错误。
 - Cookie、LocalStorage、代理凭证和指纹配置不得写入服务日志。
 - 生产部署必须在 TLS 终止和访问控制完善的反向代理之后运行。

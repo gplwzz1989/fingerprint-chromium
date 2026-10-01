@@ -74,6 +74,20 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS audit_events_account_idx
      ON audit_events (account_id, created_at DESC)`,
 	`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_name TEXT NOT NULL DEFAULT ''`,
+	`CREATE TABLE IF NOT EXISTS workspace_invites (
+        invite_id UUID PRIMARY KEY,
+        workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        inviter_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'viewer')),
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        accepted_at TIMESTAMPTZ,
+        revoked_at TIMESTAMPTZ
+    )`,
+	`CREATE INDEX IF NOT EXISTS workspace_invites_lookup_idx
+     ON workspace_invites (workspace_id, lower(email), expires_at)`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

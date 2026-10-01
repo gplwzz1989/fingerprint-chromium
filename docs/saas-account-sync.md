@@ -69,7 +69,9 @@ local_storage
 | `POST` | `/api/v1/sessions` | 用户登录并建立本地代理会话 |
 | `GET` | `/api/v1/sessions` | 获取当前用户的有效设备会话 |
 | `DELETE` | `/api/v1/sessions/{session_id}` | 撤销指定设备会话 |
+| `POST` | `/api/v1/invitations/accept` | 通过一次性令牌加入工作区并设置新用户密码 |
 | `GET` | `/api/v1/workspaces` | 获取用户可访问的工作区 |
+| `POST` | `/api/v1/workspaces/{workspace_id}/invitations` | 工作区管理员生成成员邀请 |
 | `GET` | `/api/v1/workspaces/{workspace_id}/accounts` | 分页获取账号清单 |
 | `POST` | `/api/v1/workspaces/{workspace_id}/accounts` | 创建账号及其稳定标识 |
 | `PATCH` | `/api/v1/accounts/{account_id}` | 更新账号名称和标签 |
@@ -88,6 +90,7 @@ local_storage
 - 推荐采用客户端信封加密：随机生成数据密钥，用账号恢复密钥或租户密钥包装数据密钥，云端只保存密文和必要元数据。
 - 访问令牌只保存在本地安全存储中，不能写入账号快照。
 - 管理器为本地安装保存稳定的设备标识；设备标识不是认证凭据，重新登录同一设备会替换该设备的旧会话。
+- 成员邀请令牌只保存服务端摘要，限时且只能使用一次；管理员必须通过受控渠道把原始令牌交给受邀用户，令牌不得写入日志。
 - 代理密码不应放入当前 `proxy_rules` 明文字符串；后续应拆分为代理地址、认证引用和凭证密文。
 - 账号导入、导出、恢复、删除和设备授权都必须写入审计事件。
 
@@ -107,6 +110,7 @@ local_storage
 
 - 本地代理侧的原生 Tab、独立 StoragePartition、账号级代理、指纹种子、Cookie/LocalStorage 读写和快照导入导出；
 - 服务端用户会话、设备会话列表与撤销、工作区成员角色、账号目录、客户端加密快照、版本冲突、设备租约和审计记录；
+- 服务端工作区成员邀请与受邀用户密码初始化；
 - 浏览器 WebUI 的 SaaS 登录、工作区账号列表、加密同步和恢复；
 - 受控的 `fingerprint-saas bootstrap-user` 首个用户初始化流程。
 
@@ -115,7 +119,7 @@ local_storage
 后续按以下顺序推进：
 
 1. 真实 PostgreSQL 环境下的初始化、登录、同步和租约集成测试。
-2. 设备会话管理、成员邀请和 SaaS 计费/配额边界。
+2. 成员移除、角色调整和 SaaS 计费/配额边界。
 3. 客户端安全凭证存储和登录状态恢复策略。
 4. IndexedDB 等扩展存储的明确支持范围和一致性测试。
 

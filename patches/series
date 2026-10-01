@@ -58,6 +58,7 @@ upstream-fixes/managed-tab-stable-device-id.patch
 upstream-fixes/managed-tab-saas-session-ui.patch
 upstream-fixes/managed-tab-saas-csp.patch
 upstream-fixes/managed-tab-saas-account-metadata.patch
+upstream-fixes/managed-tab-saas-member-invite.patch
 upstream-fixes/hide-chromium-profile-ui.patch
 core/ungoogled-chromium/block-requests.patch
 core/ungoogled-chromium/disable-privacy-sandbox.patch

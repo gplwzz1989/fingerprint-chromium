@@ -111,3 +111,24 @@ func TestCORSAllowsPatchPreflight(t *testing.T) {
 		t.Fatal("preflight response did not allow PATCH")
 	}
 }
+
+func TestWorkspaceInviteRolePolicy(t *testing.T) {
+	tests := []struct {
+		inviter string
+		invited string
+		want    bool
+	}{
+		{inviter: "owner", invited: "admin", want: true},
+		{inviter: "owner", invited: "editor", want: true},
+		{inviter: "admin", invited: "viewer", want: true},
+		{inviter: "admin", invited: "admin", want: false},
+		{inviter: "editor", invited: "viewer", want: false},
+		{inviter: "owner", invited: "owner", want: false},
+	}
+	for _, test := range tests {
+		if got := canInviteMember(test.inviter, test.invited); got != test.want {
+			t.Errorf("canInviteMember(%q, %q) = %t, want %t",
+				test.inviter, test.invited, got, test.want)
+		}
+	}
+}

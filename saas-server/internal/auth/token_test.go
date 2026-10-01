@@ -33,3 +33,20 @@ func TestAccessTokenRejectsTampering(t *testing.T) {
 		t.Fatal("ParseAccessToken() accepted a tampered token")
 	}
 }
+
+func TestInviteTokenDigest(t *testing.T) {
+	value, digest, err := NewInviteToken()
+	if err != nil {
+		t.Fatalf("NewInviteToken() error = %v", err)
+	}
+	if value == "" || digest == "" || value == digest {
+		t.Fatalf("unexpected invite token pair: value=%q digest=%q", value, digest)
+	}
+	otherValue, otherDigest, err := NewInviteToken()
+	if err != nil {
+		t.Fatalf("second NewInviteToken() error = %v", err)
+	}
+	if value == otherValue || digest == otherDigest {
+		t.Fatal("NewInviteToken() returned duplicate token material")
+	}
+}

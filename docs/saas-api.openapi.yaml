@@ -10,6 +10,7 @@ security:
 tags:
   - name: 会话
   - name: 工作区
+  - name: 邀请
   - name: 账号
   - name: 设备租约
   - name: 审计
@@ -124,6 +125,53 @@ paths:
                   $ref: '#/components/schemas/Workspace'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/invitations/accept:
+    post:
+      tags: [邀请]
+      summary: 接受工作区邀请并创建或验证用户
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptWorkspaceInviteRequest'
+      responses:
+        '201':
+          description: 已加入工作区
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptWorkspaceInviteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/workspaces/{workspace_id}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    post:
+      tags: [邀请]
+      summary: 生成工作区成员邀请
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceInviteRequest'
+      responses:
+        '201':
+          description: 邀请创建成功；原始令牌只在此响应中返回
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceInvite'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/workspaces/{workspace_id}/accounts:
     parameters:
@@ -412,6 +460,71 @@ components:
         role:
           type: string
           enum: [owner, admin, editor, viewer]
+    CreateWorkspaceInviteRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, editor, viewer]
+    WorkspaceInvite:
+      type: object
+      required: [invite_id, workspace_id, email, role, expires_at, invite_token]
+      properties:
+        invite_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, editor, viewer]
+        expires_at:
+          type: string
+          format: date-time
+        invite_token:
+          type: string
+          writeOnly: true
+    AcceptWorkspaceInviteRequest:
+      type: object
+      required: [invite_token, password]
+      properties:
+        invite_token:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 256
+        display_name:
+          type: string
+          maxLength: 128
+    AcceptWorkspaceInviteResponse:
+      type: object
+      required: [user_id, email, workspace_id, role]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        workspace_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [admin, editor, viewer]
     CreateAccountRequest:
       type: object
       required: [account_id, name]
@@ -550,7 +663,7 @@ components:
           type: string
         action:
           type: string
-          enum: [login, token_refreshed, logout, session_revoked, account_created, account_updated, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
+          enum: [login, token_refreshed, logout, session_revoked, member_invited, member_joined, account_created, account_updated, snapshot_read, snapshot_written, snapshot_restored, lease_acquired, lease_released]
         device_id:
           type: string
         created_at:

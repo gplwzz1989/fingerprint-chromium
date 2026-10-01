@@ -51,9 +51,17 @@ func ParseAccessToken(secret []byte, value string) (*AccessClaims, error) {
 }
 
 func NewRefreshToken() (value string, digest string, err error) {
+	return newOpaqueToken()
+}
+
+func NewInviteToken() (value string, digest string, err error) {
+	return newOpaqueToken()
+}
+
+func newOpaqueToken() (value string, digest string, err error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
-		return "", "", fmt.Errorf("生成刷新令牌失败: %w", err)
+		return "", "", fmt.Errorf("生成一次性令牌失败: %w", err)
 	}
 	value = base64.RawURLEncoding.EncodeToString(bytes)
 	hash := sha256.Sum256([]byte(value))
