@@ -29,8 +29,14 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $bridgeRoot 'src\main\java'),
 if ($LASTEXITCODE -ne 0) { throw 'Java 适配器编译失败' }
 & $java "-Djava.io.tmpdir=$OutputDirectory" '-Dfile.encoding=UTF-8' -cp $OutputDirectory com.fingerprint.saas.bridge.SnapshotCryptoSelfTest
 if ($LASTEXITCODE -ne 0) { throw 'JVM 自测失败' }
+foreach ($testClass in @('SaasOriginPolicySelfTest', 'SaasBridgeDispatcherSelfTest', 'SaasHttpClientSelfTest')) {
+    & $java "-Djava.io.tmpdir=$OutputDirectory" '-Dfile.encoding=UTF-8' -cp $OutputDirectory "com.fingerprint.saas.bridge.$testClass"
+    if ($LASTEXITCODE -ne 0) { throw '原生桥安全与消息路由自测失败' }
+}
 & $NodeExecutable (Join-Path $PSScriptRoot 'snapshot-interop.cjs') $java $OutputDirectory
 if ($LASTEXITCODE -ne 0) { throw 'Node／JVM 交叉兼容验证失败' }
+& $NodeExecutable (Join-Path $PSScriptRoot 'port-interop.cjs') $java $OutputDirectory
+if ($LASTEXITCODE -ne 0) { throw '原生端口／网页／JVM 消息互操作验证失败' }
 if ($KotlinCompilerDirectory) {
     $KotlinCompilerDirectory = [IO.Path]::GetFullPath($KotlinCompilerDirectory)
     if (-not $KotlinCompilerDirectory.StartsWith('D:\', [StringComparison]::OrdinalIgnoreCase)) {

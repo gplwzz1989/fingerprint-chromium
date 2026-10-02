@@ -27,6 +27,18 @@ func TestAccountIDValidation(t *testing.T) {
 	}
 }
 
+func TestSaasFrameAncestorPolicy(t *testing.T) {
+	server := &Server{}
+	handler := server.withSecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := response.Header().Get("Content-Security-Policy"); got != "frame-ancestors 'self' chrome://fingerprint-manager" {
+		t.Fatalf("SaaS 嵌入来源限制无效：%q", got)
+	}
+}
+
 func TestWorkspaceNameValidation(t *testing.T) {
 	for _, value := range []string{"主工作区", "team-01", "工作区 2"} {
 		if !validWorkspaceName(value) {

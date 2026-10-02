@@ -46,7 +46,7 @@
 | `fingerprint` | 已接入 | 待接入 | 与账号 Tab 绑定的指纹配置 |
 | `files` | 已接入绝对路径 | SAF 授权 URI | 桌面端支持系统绝对路径；相对路径仍以 `SaasFiles` 为根，不能引用上级目录 |
 | `http` | 已接入首版 | 原生网络适配 | 支持自定义方法、请求头、Base64 正文和可选会话凭据；单次响应上限 16 MiB、超时 30 秒 |
-| `crypto` | 已编码，待运行联调 | 待接入 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
+| `crypto` | 已编码，待运行联调 | 端口宿主已编码，待 APK 验证 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
 
 文件能力沿用原生桥完整 Origin 白名单，可以读写当前进程系统权限允许的绝对路径，相对路径保留专用目录兼容行为。读写在后台线程执行，单文件上限 64 MiB；写入采用同目录临时文件与替换流程。原生文件辅助函数已通过真实 Windows 文件系统测试，包括中文路径、二进制、空文件和失败保留原内容；客户端桥接运行联调仍待完成。原生 HTTP 默认不携带浏览器 Cookie，调用方明确设置 `includeCredentials` 后才携带。未接入的平台继续报告能力不可用，不使用模拟数据替代。
 
@@ -55,3 +55,9 @@
 原生 `crypto.encryptSnapshot` 接收 `{accountId, password, snapshot}`，返回标准加密信封；`crypto.decryptSnapshot` 接收 `{accountId, password, envelope}`，返回验证账号和版本后的快照。两个方法沿用同一来源白名单，在后台线程派生密钥，不保存密码或快照明文，不输出原始加密库错误。未实现该能力的平台必须报告 `crypto: false`。
 
 Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。Tab 生命周期与 Activity/任务栈分离，账号数据目录由应用私有存储管理；会话密钥使用 Android Keystore，应用进程被回收后通过账号标识恢复，而不是依赖进程常驻。
+
+Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，以精确目标 Origin 把端口交给真实主框架；来源读取 `RenderFrameHost.getLastCommittedOrigin()`，不信任消息自报地址。初始化和后续消息均为 JSON 字符串。网页客户端仅接受来自固定原生来源、`source=null` 的可信初始化事件；这层网页检查不代替原生来源授权。
+
+端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。当前仅加密路由已编码开放，其余能力继续为 false；尚未完成 Android 平台运行验收。
+
+桌面 iframe 客户端只向 `chrome://fingerprint-manager` 发送请求并接受该宿主来源的回复，不再使用通配目标来源。服务端提供 `frame-ancestors 'self' chrome://fingerprint-manager` 防止第三方嵌入；生产独立静态部署也应保留该响应头，PC Chrome 实际宿主兼容性仍需运行版验收。

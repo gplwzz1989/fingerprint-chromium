@@ -38,7 +38,10 @@ fingerprint-saas
 
 局部验证：`node --test saas-web/snapshot-sync.test.cjs`，共 9 项。测试使用真实 WebCrypto 验证加密往返、账号绑定、错误密码、旧信封兼容、合并冲突和锁定/会话切换停止写入；HTTP 回退与版本竞争只在测试隔离上下文中验证接口边界。
 
+桌面 iframe 仅与 `chrome://fingerprint-manager` 宿主通信；`node --test saas-web/bridge-contract.test.cjs` 验证固定目标来源、拒绝伪造父来源和失败清理。Android 客户端新增原生消息端口传输，初始化为 JSON 字符串，收到撤销或页面离开时拒绝未完成请求；真实端口／网页／JVM 互通测试位于 `android-bridge/tests/port-interop.cjs`，不代表 APK 运行验收。
+
 - 原生桥必须由 Chromium 客户端按完整 Origin（协议、主机、端口）校验后注入；`SAAS_ALLOWED_ORIGINS` 只控制 API 的跨源访问，不能代替客户端桥接授权。
+- 独立静态部署应设置响应头 `Content-Security-Policy: frame-ancestors 'self' chrome://fingerprint-manager`，不允许第三方网页把控制台嵌入并冒充原生宿主；由 `saas-server` 托管时已提供该头。
 - 文件和网络能力使用类型明确的接口；文件能力仅授予编译白名单来源，不向普通页面暴露任意进程执行或裸 IPC。
 - 生产环境中获得原生能力的 SaaS 页面使用 HTTPS；HTTP 仅用于本机开发或受控内网。
 - Cookie、网页存储、代理凭证和指纹配置不写入前端日志，也不写入 URL。

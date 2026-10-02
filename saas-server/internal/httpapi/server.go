@@ -2082,6 +2082,8 @@ func (s *Server) writeAudit(ctx context.Context, userID, action, accountID, devi
 func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// SaaS 仅允许同来源页面或原生控制台宿主嵌入，避免外部页面伪造桥接宿主。
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' chrome://fingerprint-manager")
 		w.Header().Set("Cache-Control", "no-store")
 		if r.TLS != nil {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")

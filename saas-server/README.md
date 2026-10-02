@@ -133,3 +133,4 @@ go test ./internal/httpapi -run TestRateLimitConcurrentRequestsAndCapacity -coun
 - 错误响应不返回数据库、密码哈希或令牌原始错误。
 - Cookie、LocalStorage、SessionStorage、同步选项、代理凭证和指纹配置不得写入服务日志。
 - 生产部署必须在 TLS 终止和访问控制完善的反向代理之后运行。
+- 服务响应包含 `Content-Security-Policy: frame-ancestors 'self' chrome://fingerprint-manager`，限制第三方页面嵌入控制台；反向代理应保留该头，独立静态托管应配置相同策略。原生宿主兼容性仍需最新 PC 运行版验收。

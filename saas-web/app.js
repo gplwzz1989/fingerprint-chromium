@@ -538,6 +538,9 @@
     showToast, userMessage, logout});
   global.saasConsoleAdministration.configure({request, getState: () => state,
     refreshAccounts: loadAccounts, showToast, userMessage});
+  global.addEventListener('saas-native-bridge-ready', () => inspectBridge().catch(() => {
+    showToast('原生桥状态更新失败，请重新加载控制台', true);
+  }));
   state.session = readSession();
   render();
   if (state.session) {

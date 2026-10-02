@@ -12,15 +12,91 @@
   }
 
   let embeddedBridge = null;
+  const embeddedHostOrigin = 'chrome://fingerprint-manager';
   let embeddedRequestSequence = 0;
   const embeddedRequests = new Map();
+
+  let nativePortBridge = null;
+  let closeNativePort = null;
+  // Android 宿主只向已授权的真实主框架传递端口；普通网页 postMessage 的 source 不为 null。
+  global.addEventListener('message', (event) => {
+    if (!event.isTrusted || event.source !== null || event.origin !== 'https://fingerprint-native.invalid' ||
+        global.parent !== global || typeof event.data !== 'string' || event.data.length > 4096 || event.ports?.length !== 1) return;
+    let origin, initialization;
+    try {
+      initialization = JSON.parse(event.data);
+      if (initialization?.type !== 'fingerprint-saas-bridge:init' || initialization.version !== '1.0') return;
+      origin = new URL(initialization.origin).origin;
+    } catch (_) { return; }
+    if (origin !== global.location.origin) return;
+    const port = event.ports[0], pending = new Map();
+    let sequence = 0, closed = false;
+    const previousBridge = nativePortBridge;
+    closeNativePort?.();
+    const close = () => {
+      if (closed) return;
+      closed = true; port.close();
+      for (const value of pending.values()) {
+        global.clearTimeout(value.timeout);
+        value.reject(new BridgeUnavailableError('原生桥授权已失效，请重新加载控制台'));
+      }
+      pending.clear();
+      if (global.saasBridge === nativePortBridge) delete global.saasBridge;
+      nativePortBridge = null;
+      global.dispatchEvent(new Event('saas-native-bridge-ready'));
+    };
+    const request = (method, args = {}) => new Promise((resolve, reject) => {
+      if (closed || pending.size >= 32) {
+        reject(new BridgeUnavailableError('原生桥不可用或请求过多，请稍后重试')); return;
+      }
+      const requestId = `android-${++sequence}`;
+      const timeout = global.setTimeout(() => {
+        pending.delete(requestId);
+        reject(new BridgeUnavailableError('原生桥响应超时，请稍后重试'));
+      }, method === 'storage.writeSnapshot' ? 60000 : 40000);
+      pending.set(requestId, {resolve, reject, timeout});
+      try { port.postMessage(JSON.stringify({type: 'fingerprint-saas-bridge:request', requestId, method, args})); }
+      catch (_) {
+        global.clearTimeout(timeout); pending.delete(requestId);
+        reject(new BridgeUnavailableError('原生桥请求发送失败，请检查参数后重试'));
+      }
+    });
+    port.onmessage = (messageEvent) => {
+      if (typeof messageEvent.data !== 'string' || messageEvent.data.length > 24 * 1024 * 1024) { close(); return; }
+      let message;
+      try { message = JSON.parse(messageEvent.data); } catch (_) { close(); return; }
+      if (message?.type === 'fingerprint-saas-bridge:revoked') { close(); return; }
+      if (message?.type !== 'fingerprint-saas-bridge:response' || typeof message.ok !== 'boolean') return;
+      const value = pending.get(message.requestId);
+      if (!value) return;
+      pending.delete(message.requestId); global.clearTimeout(value.timeout);
+      if (message.ok) value.resolve(message.result);
+      else value.reject(new Error(typeof message.error === 'string' && /[\u4e00-\u9fff]/.test(message.error) ? message.error : '原生桥请求失败'));
+    };
+    port.onmessageerror = close;
+    const methods = {
+      tabs: ['list', 'create', 'activate', 'navigate', 'close'],
+      storage: ['getSnapshot', 'writeSnapshot'], fingerprint: ['get', 'set'],
+      files: ['list', 'read', 'write'], http: ['request'], crypto: ['encryptSnapshot', 'decryptSnapshot'],
+    };
+    nativePortBridge = {version: '1.0', origin, getCapabilities: () => request('getCapabilities')};
+    for (const [group, names] of Object.entries(methods)) {
+      nativePortBridge[group] = Object.freeze(Object.fromEntries(names.map((name) => [name, (args) => request(`${group}.${name}`, args)])));
+    }
+    Object.freeze(nativePortBridge);
+    if (!global.saasBridge || global.saasBridge === previousBridge) global.saasBridge = nativePortBridge;
+    closeNativePort = close;
+    port.start();
+    global.dispatchEvent(new Event('saas-native-bridge-ready'));
+  });
+  global.addEventListener('pagehide', () => closeNativePort?.());
 
   function getEmbeddedBridge() {
     if (global.parent === global) return null;
     if (embeddedBridge) return embeddedBridge;
 
     global.addEventListener('message', (event) => {
-      if (event.source !== global.parent) return;
+      if (event.source !== global.parent || event.origin !== embeddedHostOrigin) return;
       const message = event.data;
       if (!message || message.type !== 'fingerprint-saas-bridge:response' ||
           typeof message.requestId !== 'string') {
@@ -44,12 +120,17 @@
         reject(new BridgeUnavailableError('原生桥响应超时，请确认已在客户端中加载控制台'));
       }, method === 'storage.writeSnapshot' ? 60000 : 40000);
       embeddedRequests.set(requestId, {resolve, reject, timeout});
-      global.parent.postMessage({
-        type: 'fingerprint-saas-bridge:request',
-        requestId,
-        method,
-        args: args || {},
-      }, '*');
+      try {
+        global.parent.postMessage({
+          type: 'fingerprint-saas-bridge:request',
+          requestId,
+          method,
+          args: args || {},
+        }, embeddedHostOrigin);
+      } catch (_) {
+        embeddedRequests.delete(requestId); global.clearTimeout(timeout);
+        reject(new BridgeUnavailableError('当前宿主没有可用的原生桥'));
+      }
     });
 
     embeddedBridge = {
@@ -88,7 +169,7 @@
   }
 
   function getRawBridge() {
-    const bridge = global.saasBridge || getEmbeddedBridge();
+    const bridge = global.saasBridge || nativePortBridge || getEmbeddedBridge();
     if (!bridge || typeof bridge !== 'object') {
       throw new BridgeUnavailableError('当前页面没有连接受支持的浏览器原生桥');
     }

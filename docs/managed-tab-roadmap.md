@@ -74,12 +74,13 @@
 - 限流任务的 `go test ./...`、`go vet ./...` 通过；整合后已配置独立 PostgreSQL 再次验证全包通过。竞态检测因缺少 CGO 所需 C 编译器未运行，配置包额外覆盖率采集被 Windows 拒绝执行；普通配置测试通过。
 - 继续完成多设备并发恢复、审计和敏感数据不落日志的整体运行测试。
 
-### 阶段 F：Android 移动客户端（契约与独立快照加密已实现，Chromium 与 APK 尚未集成）
+### 阶段 F：Android 移动客户端（消息宿主与加密已编码，完整编译和 APK 待验收）
 
 - 已建立 `android-bridge/` 契约目录；下一步建立独立 Android GN 输出和最小编译验证，不复用 Windows 的输出目录和工具链。
 - Android 启动流程和关闭过滤已接入共享默认地址，JNI 生成及补丁反向应用检查通过；完整 Java/C++ 编译及 APK 运行验收尚未完成。
 - `SnapshotCrypto`、`SnapshotJson` 与 Kotlin 适配器已完成真实 PBKDF2/AES-GCM 实现；JVM 55 项、网页与 JVM 双向互通 39 项、Kotlin 适配器 8 项通过，覆盖 Unicode、错误密码、跨账号、篡改及明文/密文容量边界。
-- 上述结果仅为独立模块验证；Chromium Android 消息通道、Origin 校验、平台能力和 APK/AAB 未集成，`capabilities.crypto` 保持 `false`，尚未完成设备运行验证。
+- 新增 Chromium Android 消息端口宿主与 JNI 来源配置挂接源码；只向真实主框架的精确白名单 Origin 传递端口，跨文档导航、WebContents 替换和退出时撤销，旧代次回复不会进入新连接。
+- 独立模块与真实端口/JVM互操作已验证；新宿主只编码提供 `crypto`，Tab、存储、指纹、文件和 HTTP 仍不可用。Android Java/C++ 完整编译、平台生命周期与 APK/AAB 设备运行尚未验收，不能把端口互操作测试当作 Android 浏览器已完成。
 - 复用独立 SaaS Web 前端，通过同一套 `window.saasBridge` 契约接入 Android 原生适配层。
 - 实现 Android Tab、账号隔离、指纹配置、Cookie/网页存储、Keystore 会话和应用生命周期恢复。
 - 文件能力使用 Android Storage Access Framework 和授权 URI；网络能力使用 Android 原生适配，不假设存在 Windows 文件路径。
@@ -108,6 +109,6 @@
 2. 用开发版目标编译验证桌面桥接，确认白名单页面能调用 Tab、存储和指纹，普通页面不能调用。
 3. 完成真实 PostgreSQL 集成、HTTP 部署和生产 HTTPS 边界测试。
 4. 完成文件与原生 HTTP 的权限撤销、审计、异常恢复和运行版验证；未接入的平台继续保持能力不可用。
-5. 配置 Android 独立 SDK/NDK 构建输出，完成最小构建及 Chromium 原生消息通道与平台适配，再将已验证的快照加密模块集成到 APK。
+5. 配置 Android 独立 SDK/NDK 构建输出，验证已编码的消息宿主及加密挂接，继续实现 Tab/存储/指纹、SAF 文件、原生 HTTP 和 Keystore，再进行 APK 设备验收。现有 WSL 因虚拟化组件未启用而无法启动，不擅自修改系统功能或重启。
 6. 决定 IndexedDB、Cache Storage、Service Worker 是否进入 SaaS 同步范围；在决定前保持明确不支持状态。
 7. 完成产品化安全项后，再申请 Windows 和 Android Release 整体编译与发布回归。
