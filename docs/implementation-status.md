@@ -21,6 +21,7 @@
 - Android 平台无关桥接契约，后续使用 Android Storage Access Framework、Keystore 和原生网络适配。
 - Android 独立快照加密模块：`SnapshotCrypto`、`SnapshotJson` 和 Kotlin 适配器已实现真实 PBKDF2/AES-GCM，与网页信封互通；平台接口默认不获得页面授权，具体消息宿主挂接状态见下一项。
 - 本轮已补充 Android 消息端口宿主、精确来源策略、后台加密路由和 JNI 配置挂接源码；成功绑定的新宿主仅提供 `crypto`，其余能力仍为 `false`。没有生成或安装新 APK，不能把已编码挂接当作 Android 浏览器已可运行。
+- 后续单代理阶段已编码安卓固定账号分区工厂、按 BrowserContext 保存的本地配置、代理/指纹种子平台钩子、JNI 创建入口、禁止共享复制与 Java 单页导航保护；`tabs` 仍未开放，冻结和重启恢复仍待接入。
 - 桌面 iframe 请求固定发往原生宿主来源并校验回复 Origin；HTTP 服务增加 `frame-ancestors`，避免第三方嵌入页面伪装原生桥。
 - 构建模式、同步边界、桥接消息、部署方式和测试结果文档。
 
@@ -31,6 +32,7 @@
 - Android 独立模块：JVM 55 项、网页与 JVM 双向互通 39 项、Kotlin 适配器 8 项通过，包含错误密码、跨账号、篡改、Unicode、14 MiB 明文及 16 MiB 密文边界；只证明模块和协议兼容，未完成 Android 设备、Chromium 桥或 APK 验证。
 - 本轮 Android/消息复测共 461 项通过：加密 55、来源 136、消息路由 20、JVM 网络 187、网页加密互通 39、真实端口互通 16、Kotlin 8。网络模块需 JDK11+，未接入 Android；端口初始化事件为测试上下文注入，不构成 Android 主框架或生命周期的运行验收。
 - 新增 JNI 生成、Android 源文件清单语法与源码补丁反向应用检查通过；未执行 GN 重生成。网页同步 9 项、iframe 消息安全 2 项及真实 PostgreSQL 全包复测通过。
+- 单代理阶段：新账号环境头文件、共享 `chrome_content_browser_client.cc` 和参数测试源码局部语法检查通过；原生参数测试对象编译及链接通过，但运行遇到入口加载错误/系统拒绝启动，未计为运行测试通过，未修改系统策略。新增 JNI 和账号环境补丁反向检查通过；网页 11 项回归通过。
 - `saas-web`：Node JavaScript 语法检查通过。
 - Chromium WebUI：TypeScript 静态检查通过。
 - 独立 Web 加密同步：真实 PBKDF2/AES-GCM 往返、账号绑定、错误密码拒绝、同步类别过滤及旧 WebUI 信封兼容测试通过。

@@ -69,6 +69,14 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 该模块不是 Android 原生 HTTP 的完成实现，未打包进本轮 Chromium 安卓源文件清单，宿主 `http=false`。缺少 JDK11 后端的运行时明确拒绝请求；仍需接入 Chromium/Android 原生网络。当前仅支持列明的七种方法及受限类型化头，不自动携带浏览器 Cookie，`includeCredentials=true` 明确拒绝；不能据此宣称安卓已具备完整自定义网络能力。
 
+## 安卓账号环境创建基础
+
+`src/chromium/native/saas_account_environment.h` 与 `managed-tab-android-account-environment.patch` 提供创建基础。账号使用 `saasandroid` 域下的固定持久化 `StoragePartition`，先设置代理/指纹种子，再创建 SiteInstance 和 WebContents；不通过清空全局 Cookie 或无痕模式模拟隔离。配置注册表绑定真实 BrowserContext，活跃账号不能重复创建，不同配置不能静默复用已有网络缓存。
+
+现阶段关闭环境后，如代理或指纹种子与已有缓存不同，会明确要求重启浏览器，不报告虚假的配置切换成功。账号环境不允许 Clone 复用同一分区；Java 新 Tab 导航入口复用原页面，保留请求正文、发起来源和额外请求头。尚未覆盖所有原生 Popup WebContents 入口，也未完成冻结和重启恢复，故不开放 `tabs` 能力。
+
+验证边界：实际原生参数函数测试源码保存在 `tests/account-environment-validation.cc`，可复用 `utils/check_cpp_syntax.py` 的现有编译参数。头文件、共享浏览器代码和测试源码语法检查通过；测试对象编译和链接通过，但测试程序启动被系统拒绝，不能宣称参数运行测试或 Android 分区运行验收通过。新增 JNI 生成和源码补丁反向检查通过；没有全量构建或修改系统策略。
+
 ## 完整构建限制
 
 现有 WSL 的 Linux 发行版因虚拟化组件未启用而无法启动，尚无可运行的 Android Chromium 构建环境。本轮没有修改 Windows 系统功能、启用虚拟化或重启，也没有安装新工具。生产默认地址仍需由唯一 C++ 常量设置为设备可访问的真实 SaaS 服务；Android 的 `127.0.0.1` 指向设备自身，不会自动访问 PC 服务。

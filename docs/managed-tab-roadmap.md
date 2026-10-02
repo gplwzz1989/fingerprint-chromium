@@ -83,6 +83,8 @@
 - 独立模块与真实端口/JVM互操作已验证；新宿主只编码提供 `crypto`，Tab、存储、指纹、文件和 HTTP 仍不可用。Android Java/C++ 完整编译、平台生命周期与 APK/AAB 设备运行尚未验收，不能把端口互操作测试当作 Android 浏览器已完成。
 - 复用独立 SaaS Web 前端，通过同一套 `window.saasBridge` 契约接入 Android 原生适配层。
 - 实现 Android Tab、账号隔离、指纹配置、Cookie/网页存储、Keystore 会话和应用生命周期恢复。
+- 已编码安卓账号环境创建基础：导航前建立固定持久化分区，配置按 BrowserContext 隔离，防止同账号重复活跃环境；网络代理与渲染器指纹种子接入安卓实现，不再引用桌面专用实现。共享分区复制被拒绝，Java 新 Tab 请求改为原账号内导航并保留 POST 参数。
+- 当前仍不开放 `tabs` 能力：冻结/冷启动恢复的分区元数据尚未接入，直接创建 Popup WebContents 的其他入口仍需回归；不能把工厂源码完成当作 Android Tab 全链路已完成。
 - 文件能力使用 Android Storage Access Framework 和授权 URI；网络能力使用 Android 原生适配，不假设存在 Windows 文件路径。
 - 完成 APK/AAB 构建、安装升级、权限撤销、断网恢复和移动端账号隔离测试。
 
