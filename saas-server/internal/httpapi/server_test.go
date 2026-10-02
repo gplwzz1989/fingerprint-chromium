@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -129,6 +130,48 @@ func TestCORSAllowsPatchPreflight(t *testing.T) {
 	}
 	if !strings.Contains(response.Header().Get("Access-Control-Allow-Methods"), http.MethodPatch) {
 		t.Fatal("preflight response did not allow PATCH")
+	}
+
+	fullRequest := httptest.NewRequest(http.MethodOptions,
+		"/api/v1/accounts/account-01", nil)
+	fullRequest.Header.Set("Origin", "https://manager.example")
+	fullRequest.Header.Set("Access-Control-Request-Method", http.MethodPatch)
+	fullResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(fullResponse, fullRequest)
+	if fullResponse.Code != http.StatusNoContent {
+		t.Fatalf("full handler preflight status = %d, want %d",
+			fullResponse.Code, http.StatusNoContent)
+	}
+}
+
+func TestWebHandlerServesStaticFilesAndSpaFallback(t *testing.T) {
+	webDir := t.TempDir()
+	if err := os.WriteFile(webDir+string(os.PathSeparator)+"index.html", []byte("index"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(webDir+string(os.PathSeparator)+"styles.css", []byte("styles"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{cfg: config.Config{WebDir: webDir}}
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/", want: "index"},
+		{path: "/styles.css", want: "styles"},
+		{path: "/console/accounts", want: "index"},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		response := httptest.NewRecorder()
+		server.handleWeb(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want %d", test.path, response.Code, http.StatusOK)
+		}
+		if response.Body.String() != test.want {
+			t.Fatalf("GET %s body = %q, want %q", test.path, response.Body.String(), test.want)
+		}
 	}
 }
 

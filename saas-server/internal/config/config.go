@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	HTTPAddr        string
+	WebDir          string
 	DatabaseURL     string
 	JWTSecret       []byte
 	AccessTokenTTL  time.Duration
@@ -40,6 +41,7 @@ func Load() (Config, error) {
 
 	return Config{
 		HTTPAddr:        valueOrDefault("SAAS_HTTP_ADDR", "127.0.0.1:8787"),
+		WebDir:          strings.TrimSpace(os.Getenv("SAAS_WEB_DIR")),
 		DatabaseURL:     databaseURL,
 		JWTSecret:       jwtSecret,
 		AccessTokenTTL:  accessTokenTTL,

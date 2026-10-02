@@ -7,7 +7,7 @@ enable_mdns=false
 enable_remoting=false
 enable_reporting=false
 enable_service_discovery=false
-enable_widevine=true
+enable_widevine=false
 exclude_unwind_tables=true
 google_api_key=""
 google_default_client_id=""
@@ -16,3 +16,6 @@ safe_browsing_mode=0
 treat_warnings_as_errors=false
 use_official_google_api_keys=false
 use_unofficial_version_number=false
+
+# 默认使用组件化编译；正式 Release 通过 is_official_build=true 自动关闭组件化编译。
+is_component_build=!is_official_build

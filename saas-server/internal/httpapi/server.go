@@ -12,6 +12,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/mail"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +43,9 @@ func NewServer(db *sql.DB, cfg config.Config, logger *slog.Logger) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("OPTIONS /api/", s.handleAPIOptions)
+	mux.HandleFunc("OPTIONS /api", s.handleAPIOptions)
+	mux.Handle("/", http.HandlerFunc(s.handleWeb))
 	mux.HandleFunc("POST /api/v1/sessions", s.handleCreateSession)
 	mux.HandleFunc("POST /api/v1/sessions/refresh", s.handleRefreshSession)
 	mux.HandleFunc("POST /api/v1/sessions/revoke", s.handleRevokeSession)
@@ -64,6 +70,49 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/accounts/{account_id}/leases/{lease_id}", s.handleReleaseLease)
 	mux.HandleFunc("GET /api/v1/accounts/{account_id}/audit-events", s.handleListAuditEvents)
 	return s.withSecurityHeaders(s.withCORS(mux))
+}
+
+func (s *Server) handleAPIOptions(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleWeb(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.WebDir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "该页面只支持读取")
+		return
+	}
+
+	root, err := filepath.Abs(s.cfg.WebDir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	relativePath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	if relativePath == "" || relativePath == "." {
+		relativePath = "index.html"
+	}
+	target := filepath.Join(root, filepath.FromSlash(relativePath))
+	relativeTarget, err := filepath.Rel(root, target)
+	if err != nil || relativeTarget == ".." || strings.HasPrefix(relativeTarget, ".."+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	info, err := os.Stat(target)
+	if err != nil || info.IsDir() {
+		// 页面路由交给前端处理，但目录不能被当作静态文件目录列出。
+		target = filepath.Join(root, "index.html")
+		info, err = os.Stat(target)
+	}
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, target)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

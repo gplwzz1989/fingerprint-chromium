@@ -1,0 +1,522 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -8,3 +8,4 @@
+ #include <memory>
++#include <optional>
+ #include <set>
+ #include <string>
+@@ -35,7 +35,11 @@
+ namespace enterprise_management {
+ class GetUserEligiblePromotionsResponse;
+ }  // namespace enterprise_management
+ 
++namespace network {
++class SimpleURLLoader;
++}  // namespace network
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ namespace device_signals {
+ class UserPermissionService;
+@@ -131,8 +135,18 @@
+   void HandleGetSaasSession(const base::Value::List& args);
+   void HandleSetSaasSession(const base::Value::List& args);
+   void HandleClearSaasSession(const base::Value::List& args);
+   void HandleGetSaasBridgePolicy(const base::Value::List& args);
+   void HandleSaasBridgeRequest(const base::Value::List& args);
++  void HandleSaasFilesList(const base::Value::List& args);
++  void HandleSaasFilesRead(const base::Value::List& args);
++  void HandleSaasFilesWrite(const base::Value::List& args);
++  void HandleSaasHttpRequest(const base::Value::List& args);
++  void OnSaasFileResult(base::Value callback_id,
++                        base::Value::Dict result);
++  void OnSaasHttpResponse(
++      std::unique_ptr<network::SimpleURLLoader> loader,
++      base::Value callback_id,
++      std::optional<std::string> response_body);
+   void OnManagedTabStorageSnapshot(
+       base::Value callback_id,
+       std::string tab_id,
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -21,9 +21,13 @@
+ #include "base/functional/callback.h"
+ #include "base/functional/callback_helpers.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/strings/escape.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/task/thread_pool.h"
++#include "base/time/time.h"
+ #include "base/values.h"
+@@ -75,8 +79,16 @@
+ #include "net/cookies/canonical_cookie.h"
+ #include "net/cookies/cookie_partition_key.h"
++#include "net/base/net_errors.h"
++#include "net/http/http_response_headers.h"
++#include "net/http/http_util.h"
+ #include "url/origin.h"
+ #include "net/base/load_flags.h"
+ #include "net/traffic_annotation/network_traffic_annotation.h"
+ #include "net/url_request/referrer_policy.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++#include "services/network/public/mojom/url_loader.mojom.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/webui/web_ui_util.h"
+@@ -158,13 +165,174 @@
+ bool IsAllowedSaasOrigin(const std::string& value) {
+   const GURL url(value);
+   if (!url.is_valid() || url.has_username() || url.has_password() ||
+       (!url.SchemeIs("http") && !url.SchemeIs("https"))) {
+     return false;
+   }
+   if (url::Origin::Create(url).Serialize() != value) {
+     return false;
+   }
+   return base::Contains(GetAllowedSaasOrigins(), value);
+ }
++
++constexpr char kSaasFilesDirectory[] = "SaasFiles";
++constexpr size_t kMaxSaasFileBytes = 64 * 1024 * 1024;
++constexpr size_t kMaxSaasHttpResponseBytes = 16 * 1024 * 1024;
++
++base::Value::Dict MakeSaasFileResult(bool success,
++                                     base::Value value,
++                                     std::string error = {}) {
++  base::Value::Dict result;
++  result.Set("success", success);
++  if (success) {
++    result.Set("value", std::move(value));
++  } else {
++    result.Set("error", std::move(error));
++  }
++  return result;
++}
++
++std::optional<base::FilePath> ResolveSaasFilePath(
++    const base::FilePath& root,
++    std::string_view relative_path,
++    bool allow_root,
++    std::string* error) {
++  if (relative_path.empty()) {
++    if (allow_root) {
++      return root;
++    }
++    *error = "文件路径不能为空";
++    return std::nullopt;
++  }
++  if (relative_path.size() > 1024 || relative_path.find('\0') !=
++                                         std::string_view::npos) {
++    *error = "文件路径无效";
++    return std::nullopt;
++  }
++
++  const base::FilePath relative =
++      base::FilePath::FromUTF8Unsafe(std::string(relative_path));
++  if (relative.empty() || relative.IsAbsolute() || relative.ReferencesParent() ||
++      relative == base::FilePath(FILE_PATH_LITERAL("."))) {
++    *error = "文件路径必须位于桥接专用目录内";
++    return std::nullopt;
++  }
++  return root.Append(relative);
++}
++
++base::Value::Dict ListSaasFilesOnBlockingThread(base::FilePath root,
++                                                std::string relative_path) {
++  std::string error;
++  const std::optional<base::FilePath> directory = ResolveSaasFilePath(
++      root, relative_path, /*allow_root=*/true, &error);
++  if (!directory) {
++    return MakeSaasFileResult(false, base::Value(), std::move(error));
++  }
++  if (!base::PathExists(*directory)) {
++    if (relative_path.empty()) {
++      return MakeSaasFileResult(true, base::Value(base::Value::List()));
++    }
++    return MakeSaasFileResult(false, base::Value(), "目录不存在");
++  }
++
++  base::File::Info directory_info;
++  if (!base::GetFileInfo(*directory, &directory_info) ||
++      !directory_info.is_directory) {
++    return MakeSaasFileResult(false, base::Value(), "目标不是目录");
++  }
++
++  base::Value::List entries;
++  base::FileEnumerator enumerator(
++      *directory, /*recursive=*/false,
++      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath current = enumerator.Next(); !current.empty();
++       current = enumerator.Next()) {
++    const base::FileEnumerator::FileInfo info = enumerator.GetInfo();
++    const std::string name = info.GetName().AsUTF8Unsafe();
++    base::Value::Dict entry;
++    entry.Set("name", name);
++    entry.Set("path", relative_path.empty() ? name
++                                             : relative_path + "/" + name);
++    entry.Set("directory", info.IsDirectory());
++    entry.Set("size", static_cast<double>(
++                          info.IsDirectory() ? 0 : info.GetSize()));
++    entries.Append(std::move(entry));
++  }
++  return MakeSaasFileResult(true, base::Value(std::move(entries)));
++}
++
++base::Value::Dict ReadSaasFileOnBlockingThread(base::FilePath root,
++                                               std::string relative_path) {
++  std::string error;
++  const std::optional<base::FilePath> file = ResolveSaasFilePath(
++      root, relative_path, /*allow_root=*/false, &error);
++  if (!file) {
++    return MakeSaasFileResult(false, base::Value(), std::move(error));
++  }
++
++  base::File::Info info;
++  if (!base::GetFileInfo(*file, &info) || info.is_directory) {
++    return MakeSaasFileResult(false, base::Value(), "文件不存在");
++  }
++  if (info.size < 0 || static_cast<uint64_t>(info.size) > kMaxSaasFileBytes) {
++    return MakeSaasFileResult(false, base::Value(), "文件超过允许读取大小");
++  }
++  const std::optional<std::vector<uint8_t>> bytes = base::ReadFileToBytes(*file);
++  if (!bytes) {
++    return MakeSaasFileResult(false, base::Value(), "文件读取失败");
++  }
++
++  base::Value::Dict result;
++  result.Set("path", relative_path);
++  result.Set("size", static_cast<int>(bytes->size()));
++  result.Set("dataBase64", base::Base64Encode(*bytes));
++  return MakeSaasFileResult(true, base::Value(std::move(result)));
++}
++
++base::Value::Dict WriteSaasFileOnBlockingThread(
++    base::FilePath root,
++    std::string relative_path,
++    std::vector<uint8_t> bytes) {
++  std::string error;
++  const std::optional<base::FilePath> file = ResolveSaasFilePath(
++      root, relative_path, /*allow_root=*/false, &error);
++  if (!file) {
++    return MakeSaasFileResult(false, base::Value(), std::move(error));
++  }
++  if (bytes.size() > kMaxSaasFileBytes) {
++    return MakeSaasFileResult(false, base::Value(), "文件超过允许写入大小");
++  }
++  if (!base::CreateDirectory(file->DirName())) {
++    return MakeSaasFileResult(false, base::Value(), "文件目录创建失败");
++  }
++
++  const std::string contents(
++      reinterpret_cast<const char*>(bytes.data()), bytes.size());
++  if (base::WriteFile(*file, contents) != static_cast<int>(contents.size())) {
++    return MakeSaasFileResult(false, base::Value(), "文件写入失败");
++  }
++
++  base::Value::Dict result;
++  result.Set("path", relative_path);
++  result.Set("size", static_cast<int>(bytes.size()));
++  return MakeSaasFileResult(true, base::Value(std::move(result)));
++}
++
++constexpr net::NetworkTrafficAnnotationTag kSaasBridgeHttpTrafficAnnotation =
++    net::DefineNetworkTrafficAnnotation("fingerprint_saas_bridge_http", R"(
++      semantics {
++        sender: "Fingerprint SaaS bridge"
++        description:
++          "An explicitly allowlisted SaaS page makes a native HTTP request."
++        trigger: "The SaaS page invokes the versioned native bridge."
++        data: "The URL, headers, and request body selected by the SaaS page."
++        destination: OTHER
++      }
++      policy {
++        cookies_allowed: YES
++        cookies_store: "The active Chromium profile"
++        setting: "Only a compile-time allowlisted SaaS origin can invoke this API."
++        policy_exception_justification:
++          "The product requires native HTTP access for its SaaS integration."
++      })");
+ 
+ bool IsValidSaasSessionField(const std::string* value) {
+@@ -1403,6 +1565,6 @@
+     capabilities.Set("tabs", true);
+     capabilities.Set("storage", true);
+     capabilities.Set("fingerprint", true);
+-    capabilities.Set("files", false);
+-    capabilities.Set("http", false);
++    capabilities.Set("files", true);
++    capabilities.Set("http", true);
+     base::Value::Dict result;
+@@ -1418,5 +1582,19 @@
+   if (method == "tabs.list") {
+     HandleGetManagedTabs(forwarded);
+     return;
+   }
++  if (method == "files.list" || method == "files.read" ||
++      method == "files.write" || method == "http.request") {
++    forwarded.Append(input.Clone());
++    if (method == "files.list") {
++      HandleSaasFilesList(forwarded);
++    } else if (method == "files.read") {
++      HandleSaasFilesRead(forwarded);
++    } else if (method == "files.write") {
++      HandleSaasFilesWrite(forwarded);
++    } else {
++      HandleSaasHttpRequest(forwarded);
++    }
++    return;
++  }
+   if (method == "tabs.create") {
+@@ -1513,7 +1690,244 @@
+   }
+   RejectJavascriptCallback(args[0], base::Value("该原生桥能力尚未实现"));
+ }
+ 
++void ManagementUIHandler::HandleSaasFilesList(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("文件列表参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& input = args[1].GetDict();
++  const base::Value* path_value = input.Find("path");
++  if (path_value && !path_value->is_string()) {
++    RejectJavascriptCallback(args[0], base::Value("文件路径参数无效"));
++    return;
++  }
++  const std::string relative_path =
++      path_value ? path_value->GetString() : std::string();
++  Profile* profile = Profile::FromWebUI(web_ui());
++  if (!profile) {
++    RejectJavascriptCallback(args[0], base::Value("当前浏览器配置不可用"));
++    return;
++  }
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock()},
++      base::BindOnce(&ListSaasFilesOnBlockingThread,
++                     profile->GetPath().AppendASCII(kSaasFilesDirectory),
++                     relative_path),
++      base::BindOnce(&ManagementUIHandler::OnSaasFileResult,
++                     weak_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void ManagementUIHandler::HandleSaasFilesRead(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("文件读取参数无效"));
++    }
++    return;
++  }
++  const std::string* relative_path = args[1].GetDict().FindString("path");
++  if (!relative_path || relative_path->empty()) {
++    RejectJavascriptCallback(args[0], base::Value("文件路径参数无效"));
++    return;
++  }
++
++  Profile* profile = Profile::FromWebUI(web_ui());
++  if (!profile) {
++    RejectJavascriptCallback(args[0], base::Value("当前浏览器配置不可用"));
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock()},
++      base::BindOnce(&ReadSaasFileOnBlockingThread,
++                     profile->GetPath().AppendASCII(kSaasFilesDirectory),
++                     *relative_path),
++      base::BindOnce(&ManagementUIHandler::OnSaasFileResult,
++                     weak_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void ManagementUIHandler::HandleSaasFilesWrite(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("文件写入参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& input = args[1].GetDict();
++  const std::string* relative_path = input.FindString("path");
++  const std::string* encoded_data = input.FindString("dataBase64");
++  if (!relative_path || relative_path->empty() || !encoded_data) {
++    RejectJavascriptCallback(args[0], base::Value("文件写入参数无效"));
++    return;
++  }
++  const std::optional<std::vector<uint8_t>> bytes =
++      base::Base64Decode(*encoded_data);
++  if (!bytes || bytes->size() > kMaxSaasFileBytes) {
++    RejectJavascriptCallback(args[0], base::Value("文件内容无效或超过大小限制"));
++    return;
++  }
++
++  Profile* profile = Profile::FromWebUI(web_ui());
++  if (!profile) {
++    RejectJavascriptCallback(args[0], base::Value("当前浏览器配置不可用"));
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock()},
++      base::BindOnce(&WriteSaasFileOnBlockingThread,
++                     profile->GetPath().AppendASCII(kSaasFilesDirectory),
++                     *relative_path, *bytes),
++      base::BindOnce(&ManagementUIHandler::OnSaasFileResult,
++                     weak_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void ManagementUIHandler::OnSaasFileResult(base::Value callback_id,
++                                            base::Value::Dict result) {
++  const std::optional<bool> success = result.FindBool("success");
++  base::Value* value = result.Find("value");
++  if (!success.value_or(false) || !value) {
++    const std::string* error = result.FindString("error");
++    RejectJavascriptCallback(
++        callback_id,
++        base::Value(error ? *error : "文件操作失败"));
++    return;
++  }
++  ResolveJavascriptCallback(callback_id, std::move(*value));
++}
++
++void ManagementUIHandler::HandleSaasHttpRequest(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 2 || !args[1].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("原生 HTTP 参数无效"));
++    }
++    return;
++  }
++
++  const base::Value::Dict& input = args[1].GetDict();
++  const std::string* url_value = input.FindString("url");
++  if (!url_value) {
++    RejectJavascriptCallback(args[0], base::Value("缺少 HTTP 地址"));
++    return;
++  }
++  const GURL url(*url_value);
++  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS()) {
++    RejectJavascriptCallback(args[0], base::Value("HTTP 地址无效"));
++    return;
++  }
++
++  std::string method = input.FindString("method")
++                           ? *input.FindString("method")
++                           : "GET";
++  method = base::ToUpperASCII(method);
++  if (!net::HttpUtil::IsToken(method)) {
++    RejectJavascriptCallback(args[0], base::Value("HTTP 方法无效"));
++    return;
++  }
++
++  auto request = std::make_unique<network::ResourceRequest>();
++  request->url = url;
++  request->method = method;
++  request->credentials_mode =
++      input.FindBool("includeCredentials").value_or(false)
++          ? network::mojom::CredentialsMode::kInclude
++          : network::mojom::CredentialsMode::kOmit;
++
++  if (const base::Value::Dict* headers = input.FindDict("headers")) {
++    for (const auto [name, value] : *headers) {
++      if (!value.is_string() || !net::HttpUtil::IsValidHeaderName(name) ||
++          !net::HttpUtil::IsValidHeaderValue(value.GetString())) {
++        RejectJavascriptCallback(args[0], base::Value("HTTP 请求头无效"));
++        return;
++      }
++      request->headers.SetHeader(name, value.GetString());
++    }
++  }
++
++  std::string request_body;
++  if (const std::string* encoded_body = input.FindString("bodyBase64")) {
++    const std::optional<std::vector<uint8_t>> body =
++        base::Base64Decode(*encoded_body);
++    if (!body || body->size() > kMaxSaasFileBytes) {
++      RejectJavascriptCallback(args[0], base::Value("HTTP 请求正文无效"));
++      return;
++    }
++    request_body.assign(reinterpret_cast<const char*>(body->data()),
++                        body->size());
++  }
++  std::string content_type = "application/octet-stream";
++  if (const std::string* value = input.FindString("contentType")) {
++    if (!net::HttpUtil::IsValidHeaderValue(*value)) {
++      RejectJavascriptCallback(args[0], base::Value("HTTP 内容类型无效"));
++      return;
++    }
++    content_type = *value;
++  }
++
++  Profile* profile = Profile::FromWebUI(web_ui());
++  if (!profile) {
++    RejectJavascriptCallback(args[0], base::Value("当前浏览器配置不可用"));
++    return;
++  }
++  auto loader = network::SimpleURLLoader::Create(
++      std::move(request), kSaasBridgeHttpTrafficAnnotation);
++  loader->SetAllowHttpErrorResults(true);
++  loader->SetTimeoutDuration(base::Seconds(30));
++  if (input.FindString("bodyBase64")) {
++    loader->AttachStringForUpload(std::move(request_body), content_type);
++  }
++  network::SimpleURLLoader* loader_ptr = loader.get();
++  loader_ptr->DownloadToString(
++      profile->GetURLLoaderFactory().get(),
++      base::BindOnce(&ManagementUIHandler::OnSaasHttpResponse,
++                     weak_factory_.GetWeakPtr(), std::move(loader),
++                     args[0].Clone()),
++      kMaxSaasHttpResponseBytes);
++}
++
++void ManagementUIHandler::OnSaasHttpResponse(
++    std::unique_ptr<network::SimpleURLLoader> loader,
++    base::Value callback_id,
++    std::optional<std::string> response_body) {
++  if (!response_body && loader->NetError() != net::ERR_HTTP_RESPONSE_CODE_FAILURE) {
++    RejectJavascriptCallback(callback_id, base::Value("原生 HTTP 请求失败"));
++    return;
++  }
++
++  int response_code = 0;
++  base::Value::Dict response_headers;
++  if (const network::mojom::URLResponseHead* response_info =
++          loader->ResponseInfo()) {
++    if (response_info->headers) {
++      response_code = response_info->headers->response_code();
++      size_t iterator = 0;
++      std::string name;
++      std::string value;
++      while (response_info->headers->EnumerateHeaderLines(
++          &iterator, &name, &value)) {
++        response_headers.Set(name, value);
++      }
++    }
++  }
++
++  base::Value::Dict result;
++  result.Set("status", response_code);
++  result.Set("headers", std::move(response_headers));
++  result.Set("bodyBase64",
++             base::Base64Encode(response_body.value_or(std::string())));
++  ResolveJavascriptCallback(callback_id, std::move(result));
++}
+ 
+ void ManagementUIHandler::HandleGetSaasSession(
+     const base::Value::List& args) {

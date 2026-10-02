@@ -1455,3 +1455,17 @@ new file mode 100644
 +  }
 +}
 +
+diff --git a/chrome/chrome_paks.gni b/chrome/chrome_paks.gni
+--- a/chrome/chrome_paks.gni
++++ b/chrome/chrome_paks.gni
+@@ -208,3 +208,4 @@ template("chrome_extra_paks") {
+         "$root_gen_dir/chrome/downloads_resources.pak",
+         "$root_gen_dir/chrome/feedback_resources.pak",
++        "$root_gen_dir/chrome/fingerprint_manager_resources.pak",
+         "$root_gen_dir/chrome/gaia_auth_host_resources.pak",
+@@ -264,3 +265,4 @@ template("chrome_extra_paks") {
+         "//chrome/browser/resources/autofill_ml_internals:resources",
+         "//chrome/browser/resources/commerce/product_specifications:resources",
+         "//chrome/browser/resources/contextual_tasks:resources",
++        "//chrome/browser/resources/fingerprint_manager:resources",
+         "//chrome/browser/resources/lens/overlay:resources",

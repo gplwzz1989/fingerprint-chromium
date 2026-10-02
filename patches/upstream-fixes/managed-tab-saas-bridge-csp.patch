@@ -1,0 +1,18 @@
+diff --git a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+--- a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
++++ b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+@@ -10,5 +10,6 @@
+ #include "chrome/grit/fingerprint_manager_resources.h"
+ #include "chrome/grit/fingerprint_manager_resources_map.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
+ #include "ui/webui/webui_util.h"
+@@ -159,5 +159,7 @@ void CreateAndAddFingerprintManagerSource(Profile* profile) {
+   source->SetDefaultResource(IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
+   webui::SetupWebUIDataSource(
+       source, kFingerprintManagerResources,
+       IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::FrameSrc, "frame-src http: https:;");
+ }

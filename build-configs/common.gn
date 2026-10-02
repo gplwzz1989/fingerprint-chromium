@@ -1,6 +1,13 @@
 # Chromium 指纹多账号管理器的两套构建模式共用参数。
 # 模式差异放在 development.gn 和 release.gn，避免开发与发版配置漂移。
 
+declare_args() {
+  # 逗号分隔的完整 Origin 列表；协议、主机和端口必须精确匹配。
+  # 默认仅允许本机开发服务，生产编译时应在 args.gn 覆盖为实际 SaaS 来源。
+  fingerprint_saas_allowed_origins =
+      "http://127.0.0.1:8787,http://localhost:8787"
+}
+
 build_with_tflite_lib = false
 chrome_pgo_phase = 0
 clang_use_chrome_plugins = false

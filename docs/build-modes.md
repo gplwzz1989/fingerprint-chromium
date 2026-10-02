@@ -17,10 +17,10 @@
 在 Windows PowerShell 中初始化开发输出目录：
 
 ```powershell
-$src = 'F:\mywork\chrome-finger\build\src'
+$repo = 'F:\mywork\chrome-finger'
+$src = Join-Path $repo 'build\src'
+& (Join-Path $repo 'utils\prepare_build_mode.ps1') -Mode development
 $out = Join-Path $src 'out\Development'
-New-Item -ItemType Directory -Force -Path $out | Out-Null
-Copy-Item 'F:\mywork\chrome-finger\build-configs\development.gn' (Join-Path $out 'args.gn') -Force
 & (Join-Path $src 'out\Release\gn.exe') gen $out
 ```
 
@@ -46,9 +46,10 @@ Copy-Item 'F:\mywork\chrome-finger\build-configs\development.gn' (Join-Path $out
 初始化或更新 Release 输出目录：
 
 ```powershell
-$src = 'F:\mywork\chrome-finger\build\src'
+$repo = 'F:\mywork\chrome-finger'
+$src = Join-Path $repo 'build\src'
+& (Join-Path $repo 'utils\prepare_build_mode.ps1') -Mode release
 $out = Join-Path $src 'out\Release'
-Copy-Item 'F:\mywork\chrome-finger\build-configs\release.gn' (Join-Path $out 'args.gn') -Force
 & (Join-Path $out 'gn.exe') gen $out
 ```
 

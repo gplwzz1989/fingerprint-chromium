@@ -49,11 +49,14 @@
 
 | 项目 | Tab 1 | Tab 2 |
 |---|---|---|
-| 指纹种子 | `59608448` | `1419342226` |
+| 指纹种子 | `1813383119` | `212691557` |
 | 配置的 User-Agent | Chrome 120 | Chrome 131 |
+| 实际 `navigator.userAgent` | Chrome 120 | Chrome 131 |
 | 配置的硬件并发数 | `8` | `16` |
 | 实际 `navigator.hardwareConcurrency` | `8` | `16` |
-| Canvas 测试哈希 | `432d3ed7` | `1a27446f` |
+| `navigator.userAgentData` 版本 | Chromium/Google Chrome 120 | Chromium/Google Chrome 131 |
+| 首次请求 `Sec-CH-UA` | Chromium/Google Chrome 120 | Chromium/Google Chrome 131 |
+| Canvas 测试哈希 | `feb8251b` | `fa4b6648` |
 
 测试结果表明：
 
@@ -96,23 +99,23 @@ server_sync_probe=written-to-tab-2
 
 ## 6. 已发现的问题
 
-### 6.1 User-Agent 尚未反映到页面 JavaScript
+### 6.1 User-Agent 与 UA-CH 一致性已修复
 
-虽然管理器状态和存储快照中已经保存了 Tab 1、Tab 2 不同的 User-Agent 配置，但重新加载和重新导航后，页面中的：
+初始测试发现，虽然管理器状态和存储快照中已经保存了 Tab 1、Tab 2 不同的 User-Agent 配置，但页面中的 `navigator.userAgent` 仍显示 Chrome 144。修复导航条目的 User-Agent 覆盖标记后，重新加载和重新导航的结果已经变为：
 
 ```js
-navigator.userAgent
+Tab 1: Chrome/120.0.0.0
+Tab 2: Chrome/131.0.0.0
 ```
 
-仍显示当前 Chromium 的 Chrome 144 字符串，两个 Tab 没有显示配置的 Chrome 120 和 Chrome 131。
+进一步补充 Tab 级 `UserAgentMetadata` 后，当前结论：
 
-当前结论：
+- User-Agent 配置的保存链路和页面 JavaScript 应用链路均已工作。
+- 页面刷新和重新导航后，两个 Tab 仍保持各自的 User-Agent。
+- `navigator.userAgentData.brands` 已分别显示 120 和 131。
+- 首次导航和刷新产生的 `Sec-CH-UA` 请求头已分别显示 120 和 131，平台为 Windows。
 
-- User-Agent 配置的保存链路已工作。
-- User-Agent 配置对页面 JavaScript 的实际应用尚未完成。
-- 在修复前，不能宣称“每个 Tab 的完整 User-Agent 指纹已经隔离”。
-
-初步定位为现有 `SetUserAgentOverride` 应用路径没有正确标记当前导航条目，导致渲染进程没有在页面环境中使用该覆盖值。该问题需要单独修复并重新进行局部编译验证。
+本次修复包括两部分：在 `SetUserAgentOverride` 应用前为当前导航条目标记覆盖状态，使刷新和导航能够继承每个 Tab 的 User-Agent；同时根据 Tab 的 UA 字符串生成 `UserAgentMetadata`，并在渲染层和请求层跳过进程级默认指纹覆盖。
 
 ### 6.2 指纹配置界面不完整
 
@@ -128,20 +131,22 @@ navigator.userAgent
 - 存储快照读取。
 - 存储快照写入。
 - 硬件并发数的 Tab 级指纹配置。
+- User-Agent 的 Tab 级页面值覆盖及刷新、导航保持。
+- `navigator.userAgentData` 与请求 UA-CH 的 Tab 级覆盖及刷新保持。
 - Canvas 指纹种子差异。
 - 指纹配置随账号快照保存。
 
 尚未完成：
 
-- User-Agent 对页面 JavaScript 的实际覆盖。
 - 面向用户的指纹配置编辑界面。
+- 独立 SaaS Web 在开发版中的完整桥接运行验证；文件专用目录读写和原生 HTTP 已完成编码及 C++ 局部语法编译，仍需运行版权限撤销、审计和异常恢复验证。
 - IndexedDB、Cache Storage、Service Worker 等更复杂存储的跨设备同步。
 - Release 版本的完整编译、安装包制作和整体回归测试。
 
 ## 8. 后续开发顺序
 
-1. 修复 User-Agent 覆盖链路，优先进行局部编译和 BrowserLeaks 回归验证。
-2. 在管理页面增加指纹配置表单，并复用现有 WebUI 接口。
-3. 验证 `window.open`、`target=_blank` 和会话恢复是否始终保持在同一父窗口及正确账号 Tab 中。
+1. 在管理页面增加完整的指纹配置表单，并复用现有 WebUI 接口。
+2. 验证 `window.open`、`target=_blank` 和会话恢复是否始终保持在同一父窗口及正确账号 Tab 中。
+3. 在开发版运行验证独立 SaaS Web 的白名单桥接、文件专用目录读写和原生 HTTP 请求。
 4. 完成 SaaS 快照加密、上传、恢复和冲突处理测试。
 5. 所有功能完成后，再申请 Release 全量编译和发版回归测试。

@@ -18,11 +18,23 @@
 可选配置：
 
 - `SAAS_HTTP_ADDR`：监听地址，默认 `127.0.0.1:8787`
+- `SAAS_WEB_DIR`：可选的独立 Web 前端静态目录；配置后服务根路径提供 `saas-web/`，未知页面路由回退到 `index.html`
 - `SAAS_ACCESS_TOKEN_TTL`：访问令牌有效期，默认 `15m`
 - `SAAS_REFRESH_TOKEN_TTL`：刷新令牌有效期，默认 `720h`
 - `SAAS_ALLOWED_ORIGINS`：允许浏览器 WebUI 访问的来源，多个来源用逗号分隔；不设置时不允许跨源请求
 
 服务启动时会执行幂等数据库迁移。迁移不会创建用户、工作区或账号，初始数据必须通过受控的管理流程写入数据库。
+
+## 部署独立 Web 前端
+
+服务端可以直接托管仓库中的独立前端：
+
+```powershell
+$env:SAAS_WEB_DIR = "F:\\mywork\\chrome-finger\\saas-web"
+fingerprint-saas
+```
+
+前端不包含演示账号或模拟接口。生产部署建议由 HTTPS 反向代理提供静态资源和 API；如果前端与 API 使用不同来源，需要同时配置前端 API 根地址和 `SAAS_ALLOWED_ORIGINS`。
 
 ## 初始化首个用户
 

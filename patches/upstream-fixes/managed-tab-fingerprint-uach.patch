@@ -1,0 +1,332 @@
+diff --git a/chrome/browser/ui/browser_tab_strip_model_delegate.cc b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -6,10 +6,11 @@
+ 
+ #include <cmath>
+ #include <memory>
+ #include <optional>
+ #include <stddef.h>
++#include <string_view>
+ #include <utility>
+ 
+ #include "base/barrier_closure.h"
+ #include "base/command_line.h"
+ #include "base/containers/flat_map.h"
+@@ -80,10 +81,11 @@
+ #include "third_party/blink/public/common/web_preferences/web_preferences.h"
+ #include "net/cookies/cookie_partition_key.h"
+ #include "net/proxy_resolution/proxy_config.h"
+ #include "services/network/public/mojom/network_context.mojom.h"
+ #include "components/ungoogled/ungoogled_switches.h"
++#include "components/ungoogled/fingerprint_data.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+ #include "ui/gfx/range/range.h"
+ 
+ #if BUILDFLAG(ENABLE_GLIC)
+@@ -108,10 +110,139 @@ constexpr char16_t kLocalStorageSnapshotScript[] =
+     u" session_storage: readStorage(sessionStorage)};"
+     u"})()";
+ 
+ constexpr char kManagedTabPartitionDomain[] = "managedtab";
+ 
++std::optional<std::string> ExtractUserAgentToken(
++    const std::string& user_agent,
++    std::string_view token) {
++  const size_t token_position = user_agent.find(token);
++  if (token_position == std::string::npos) {
++    return std::nullopt;
++  }
++
++  const size_t version_start = token_position + token.size();
++  const size_t version_end = user_agent.find_first_of(" ;)", version_start);
++  const std::string version = user_agent.substr(
++      version_start, version_end == std::string::npos
++                        ? std::string::npos
++                        : version_end - version_start);
++  return version.empty() ? std::nullopt : std::make_optional(version);
++}
++
++std::string UserAgentMajorVersion(const std::string& version) {
++  const size_t separator = version.find('.');
++  return separator == std::string::npos ? version : version.substr(0, separator);
++}
++
++std::optional<std::string> ExtractPlatformVersion(
++    const std::string& user_agent,
++    std::string_view token,
++    bool replace_underscores) {
++  std::optional<std::string> version =
++      ExtractUserAgentToken(user_agent, token);
++  if (version && replace_underscores) {
++    for (char& character : *version) {
++      if (character == '_') {
++        character = '.';
++      }
++    }
++  }
++  return version;
++}
++
++std::optional<blink::UserAgentMetadata> BuildManagedTabUserAgentMetadata(
++    const std::string& user_agent) {
++  std::optional<std::string> chromium_version =
++      ExtractUserAgentToken(user_agent, "Chrome/");
++  if (!chromium_version) {
++    return std::nullopt;
++  }
++
++  blink::UserAgentMetadata metadata;
++  const std::string chromium_major = UserAgentMajorVersion(*chromium_version);
++  metadata.brand_version_list.push_back({"Chromium", chromium_major});
++  metadata.brand_full_version_list.push_back({"Chromium", *chromium_version});
++  metadata.full_version = *chromium_version;
++
++  std::optional<std::string> edge_version =
++      ExtractUserAgentToken(user_agent, "Edg/");
++  std::optional<std::string> opera_version =
++      ExtractUserAgentToken(user_agent, "OPR/");
++  std::optional<std::string> vivaldi_version =
++      ExtractUserAgentToken(user_agent, "Vivaldi/");
++  if (edge_version) {
++    metadata.brand_version_list.push_back(
++        {ungoogled::fingerprint::kEdgeDisplayName,
++         UserAgentMajorVersion(*edge_version)});
++    metadata.brand_full_version_list.push_back(
++        {ungoogled::fingerprint::kEdgeDisplayName, *edge_version});
++  } else if (opera_version) {
++    metadata.brand_version_list.push_back(
++        {ungoogled::fingerprint::kOperaDisplayName,
++         UserAgentMajorVersion(*opera_version)});
++    metadata.brand_full_version_list.push_back(
++        {ungoogled::fingerprint::kOperaDisplayName, *opera_version});
++  } else if (vivaldi_version) {
++    metadata.brand_version_list.push_back(
++        {ungoogled::fingerprint::kVivaldiDisplayName,
++         UserAgentMajorVersion(*vivaldi_version)});
++    metadata.brand_full_version_list.push_back(
++        {ungoogled::fingerprint::kVivaldiDisplayName, *vivaldi_version});
++  } else {
++    metadata.brand_version_list.push_back(
++        {ungoogled::fingerprint::kChromeDisplayName, chromium_major});
++    metadata.brand_full_version_list.push_back(
++        {ungoogled::fingerprint::kChromeDisplayName, *chromium_version});
++  }
++
++  metadata.mobile = user_agent.find("Mobile") != std::string::npos ||
++                    user_agent.find("Android") != std::string::npos ||
++                    user_agent.find("iPhone") != std::string::npos ||
++                    user_agent.find("iPad") != std::string::npos;
++  if (user_agent.find("Windows NT ") != std::string::npos) {
++    metadata.platform = ungoogled::fingerprint::kWindowsPlatform;
++    metadata.platform_version =
++        ExtractPlatformVersion(user_agent, "Windows NT ", false).value_or("");
++    metadata.architecture = ungoogled::fingerprint::kX86Architecture;
++    metadata.bitness = user_agent.find("Win64") != std::string::npos ||
++                              user_agent.find("x64") != std::string::npos
++                          ? "64"
++                          : "32";
++  } else if (user_agent.find("Android") != std::string::npos) {
++    metadata.platform = "Android";
++    metadata.platform_version =
++        ExtractPlatformVersion(user_agent, "Android ", false).value_or("");
++    metadata.architecture = user_agent.find("arm64") != std::string::npos
++                                ? "arm"
++                                : ungoogled::fingerprint::kX86Architecture;
++    metadata.bitness = user_agent.find("arm64") != std::string::npos
++                          ? "64"
++                          : "32";
++  } else if (user_agent.find("Mac OS X ") != std::string::npos) {
++    metadata.platform = ungoogled::fingerprint::kMacOSPlatform;
++    metadata.platform_version = ExtractPlatformVersion(
++        user_agent, "Mac OS X ", true).value_or("");
++    metadata.architecture = user_agent.find("Intel") != std::string::npos
++                                ? ungoogled::fingerprint::kX86Architecture
++                                : ungoogled::fingerprint::kArmArchitecture;
++    metadata.bitness = "64";
++  } else if (user_agent.find("Linux") != std::string::npos) {
++    metadata.platform = ungoogled::fingerprint::kLinuxPlatform;
++    metadata.architecture = user_agent.find("aarch64") != std::string::npos
++                                ? ungoogled::fingerprint::kArmArchitecture
++                                : ungoogled::fingerprint::kX86Architecture;
++    metadata.bitness = user_agent.find("x86_64") != std::string::npos ||
++                              user_agent.find("aarch64") != std::string::npos
++                          ? "64"
++                          : "32";
++  }
++  metadata.form_factors.push_back(metadata.mobile ? blink::kMobileFormFactor
++                                                  : blink::kDesktopFormFactor);
++  return metadata;
++}
++
+ base::flat_map<std::string, std::string>& ManagedTabProxyRules() {
+   static base::NoDestructor<base::flat_map<std::string, std::string>> rules;
+   return *rules;
+ }
+ 
+@@ -789,11 +918,15 @@ bool ManagedTabContext::SetFingerprintUserAgent(const std::string& user_agent) {
+   if (!web_contents()) {
+     return false;
+   }
+ 
+   blink::UserAgentOverride user_agent_override;
+-  user_agent_override.ua_string_override = user_agent;
++  user_agent_override = blink::UserAgentOverride::UserAgentOnly(user_agent);
++  if (!user_agent.empty()) {
++    user_agent_override.ua_metadata_override =
++        BuildManagedTabUserAgentMetadata(user_agent);
++  }
+   SetFingerprintUserAgentOverride(user_agent_override);
+   return true;
+ }
+ 
+ bool ManagedTabContext::SetFingerprintHardwareConcurrency(
+diff --git a/third_party/blink/renderer/core/frame/navigator_ua.cc b/third_party/blink/renderer/core/frame/navigator_ua.cc
+--- a/third_party/blink/renderer/core/frame/navigator_ua.cc
++++ b/third_party/blink/renderer/core/frame/navigator_ua.cc
+@@ -5,24 +5,44 @@
+ #include "third_party/blink/renderer/core/frame/navigator_ua.h"
+ 
+ #include "base/compiler_specific.h"
+ #include "third_party/blink/public/common/features.h"
+ #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
++#include "third_party/blink/public/web/web_local_frame.h"
++#include "third_party/blink/public/web/web_local_frame_client.h"
++#include "third_party/blink/renderer/core/frame/local_frame_client.h"
+ #include "third_party/blink/renderer/core/frame/navigator_ua_data.h"
++#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+ 
+ namespace blink {
++namespace {
++
++bool HasUserAgentMetadataOverride(ExecutionContext* execution_context) {
++  auto* window = DynamicTo<LocalDOMWindow>(execution_context);
++  if (!window || !window->GetFrame() || !window->GetFrame()->Client()) {
++    return false;
++  }
++
++  WebLocalFrame* web_frame = window->GetFrame()->Client()->GetWebFrame();
++  WebLocalFrameClient* web_client = web_frame ? web_frame->Client() : nullptr;
++  return web_client && web_client->UserAgentMetadataOverride().has_value();
++}
+ 
++}  // namespace
++
+ NavigatorUAData* NavigatorUA::userAgentData() {
+   NavigatorUAData* ua_data =
+       MakeGarbageCollected<NavigatorUAData>(GetUAExecutionContext());
+   if (base::FeatureList::IsEnabled(blink::features::kRemoveClientHints))
+     return ua_data;
+ 
+   UserAgentMetadata metadata = GetUserAgentMetadata();
+ 
+-  UpdateUserAgentMetadataFingerprint(&metadata);
++  if (!HasUserAgentMetadataOverride(GetUAExecutionContext())) {
++    UpdateUserAgentMetadataFingerprint(&metadata);
++  }
+ 
+   ua_data->SetBrandVersionList(metadata.brand_version_list);
+   ua_data->SetMobile(metadata.mobile);
+   ua_data->SetPlatform(String::FromUTF8(metadata.platform),
+                        String::FromUTF8(metadata.platform_version));
+diff --git a/third_party/blink/renderer/core/loader/frame_fetch_context.cc b/third_party/blink/renderer/core/loader/frame_fetch_context.cc
+--- a/third_party/blink/renderer/core/loader/frame_fetch_context.cc
++++ b/third_party/blink/renderer/core/loader/frame_fetch_context.cc
+@@ -718,11 +718,15 @@ void FrameFetchContext::AddClientHintsIfNecessary(
+             holdback_ect.value())));
+   }
+ 
+   // Only send User Agent hints if the info is available
+   if (ua) {
+-    UpdateUserAgentMetadataFingerprint(&ua.value());
++    auto* web_frame = GetLocalFrameClient()->GetWebFrame();
++    auto* web_client = web_frame ? web_frame->Client() : nullptr;
++    if (!web_client || !web_client->UserAgentMetadataOverride().has_value()) {
++      UpdateUserAgentMetadataFingerprint(&ua.value());
++    }
+ 
+     // ShouldSendClientHint is called to make sure UA is controlled by
+     // Permissions Policy.
+     if (ShouldSendClientHint(*policy, resource_origin, is_1p_origin,
+                              WebClientHintsType::kUA, hints_preferences)) {
+diff --git a/content/browser/client_hints/client_hints.cc b/content/browser/client_hints/client_hints.cc
+--- a/content/browser/client_hints/client_hints.cc
++++ b/content/browser/client_hints/client_hints.cc
+@@ -681,10 +681,11 @@ void UpdateNavigationRequestClientUaHeadersImpl(
+     const network::ParsedPermissionsPolicy& container_policy,
+     const ClientHintsExtendedData& data,
+     FrameTreeNode* ftn_for_devtools_override) {
+   std::optional<blink::UserAgentMetadata> ua_metadata;
+   bool disable_due_to_custom_ua = false;
++  bool has_explicit_ua_metadata = false;
+   if (is_ua_override_on) {
+     NavigatorDelegate* nav_delegate =
+         ftn_for_web_contents_override
+             ? ftn_for_web_contents_override->navigator().GetDelegate()
+             : nullptr;
+@@ -692,10 +693,11 @@ void UpdateNavigationRequestClientUaHeadersImpl(
+                       ? nav_delegate
+                             ->GetUserAgentOverride(
+                                 ftn_for_web_contents_override->frame_tree())
+                             .ua_metadata_override
+                       : std::nullopt;
++    has_explicit_ua_metadata = ua_metadata.has_value();
+     // If a custom UA override is set, but no value is provided for UA client
+     // hints, disable them.
+     disable_due_to_custom_ua = !ua_metadata.has_value();
+   }
+ 
+@@ -703,16 +705,19 @@ void UpdateNavigationRequestClientUaHeadersImpl(
+       devtools_instrumentation::ApplyUserAgentMetadataOverrides(
+           ftn_for_devtools_override, &ua_metadata)) {
+     // Likewise, if devtools says to override client hints but provides no
+     // value, disable them. This overwrites previous decision from UI.
+     disable_due_to_custom_ua = !ua_metadata.has_value();
++    has_explicit_ua_metadata = ua_metadata.has_value();
+   }
+ 
+   if (!disable_due_to_custom_ua) {
+     if (!ua_metadata.has_value())
+       ua_metadata = delegate->GetUserAgentMetadata();
+ 
+-    UpdateUserAgentMetadataFingerprint(&ua_metadata.value());
++    if (!has_explicit_ua_metadata) {
++      UpdateUserAgentMetadataFingerprint(&ua_metadata.value());
++    }
+ 
+     // The `Sec-CH-UA` client hint is attached to all outgoing requests. This is
+     // (intentionally) different than other client hints.
+     // It's barred behind ShouldAddClientHints to make sure it's controlled by
+diff --git a/chrome/browser/resources/management/management_browser_proxy.ts b/chrome/browser/resources/management/management_browser_proxy.ts
+--- a/chrome/browser/resources/management/management_browser_proxy.ts
++++ b/chrome/browser/resources/management/management_browser_proxy.ts
+@@ -123,6 +123,10 @@ export interface ManagementBrowserProxy {
+ export interface ManagementBrowserProxy {
+   getManagedTabs(): Promise<ManagedTabState[]>;
+ 
++  configureManagedTabFingerprint(
++      id: string, userAgent: string,
++      hardwareConcurrency: number): Promise<ManagedTabState>;
++
+   createManagedTab(url?: string): Promise<ManagedTabState>;
+ 
+   activateManagedTab(id: string): Promise<boolean>;
+@@ -190,6 +194,14 @@ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
+ export class ManagementBrowserProxyImpl implements ManagementBrowserProxy {
+   getManagedTabs() {
+     return sendWithPromise('getManagedTabs');
+   }
+ 
++  configureManagedTabFingerprint(
++      id: string, userAgent: string, hardwareConcurrency: number) {
++    return sendWithPromise('configureManagedTabFingerprint', id, {
++      user_agent: userAgent,
++      hardware_concurrency: hardwareConcurrency,
++    });
++  }
++
+   createManagedTab(url?: string) {
+     return url === undefined ? sendWithPromise('createManagedTab') :
+                                sendWithPromise('createManagedTab', url);

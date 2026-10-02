@@ -1,0 +1,60 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -1028,2 +1028,56 @@
+   }
+ }
++
++.external-saas-panel {
++  background: rgba(13, 20, 28, .86);
++  border: 1px solid var(--fp-line);
++  margin-bottom: 18px;
++  padding: 20px;
++}
++
++.external-saas-toolbar {
++  display: flex;
++  gap: 9px;
++  margin-top: 3px;
++}
++
++.external-saas-toolbar input {
++  background: var(--fp-input);
++  border: 1px solid var(--fp-line-strong);
++  color: var(--fp-text);
++  flex: 1;
++  font-family: monospace;
++  font-size: 11px;
++  min-width: 0;
++  padding: 10px 11px;
++}
++
++.external-saas-toolbar input:focus {
++  border-color: var(--fp-cyan);
++  outline: none;
++}
++
++.external-saas-message {
++  color: var(--fp-danger);
++  font-family: monospace;
++  font-size: 10px;
++  margin-top: 9px;
++}
++
++.external-saas-frame {
++  background: #fff;
++  border: 1px solid var(--fp-line-strong);
++  display: block;
++  height: 680px;
++  margin-top: 16px;
++  width: 100%;
++}
++
++.external-saas-empty {
++  border: 1px dashed var(--fp-line-strong);
++  color: var(--fp-muted);
++  font-family: monospace;
++  font-size: 10px;
++  margin-top: 16px;
++  padding: 16px;
++}

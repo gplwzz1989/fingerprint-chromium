@@ -5,8 +5,8 @@
 @@ -80,4 +80,4 @@
  const char kMessageTypeSendErrorKey[] = "send_error";
  const char kSubtypeKey[] = "subtype";
--const char kSendMessageFromValue[] = "gcm@ch40me.qjz9zk";
-+[[maybe_unused]] const char kSendMessageFromValue[] = "gcm@ch40me.qjz9zk";
+-const char kSendMessageFromValue[] = "gcm@chrome.com";
++[[maybe_unused]] const char kSendMessageFromValue[] = "gcm@chrome.com";
  const int64_t kDefaultUserSerialNumber = 0LL;
 @@ -104,1 +104,1 @@
 -void ToCheckinProtoVersion(

@@ -1,0 +1,217 @@
+diff --git a/chrome/common/BUILD.gn b/chrome/common/BUILD.gn
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -59,4 +59,5 @@ buildflag_header("buildflags") {
+     "ENABLE_WEBUI_TAB_STRIP=$enable_webui_tab_strip",
+     "OPTIMIZE_WEBUI=$optimize_webui",
++    "FINGERPRINT_SAAS_ALLOWED_ORIGINS=\"$fingerprint_saas_allowed_origins\"",
+   ]
+ }
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.h b/chrome/browser/ui/webui/management/management_ui_handler.h
+--- a/chrome/browser/ui/webui/management/management_ui_handler.h
++++ b/chrome/browser/ui/webui/management/management_ui_handler.h
+@@ -126,7 +126,9 @@ class ManagementUIHandler : public content::WebUIMessageHandler,
+   void HandleGetSaasSession(const base::Value::List& args);
+   void HandleSetSaasSession(const base::Value::List& args);
+   void HandleClearSaasSession(const base::Value::List& args);
++  void HandleGetSaasBridgePolicy(const base::Value::List& args);
++  void HandleSaasBridgeRequest(const base::Value::List& args);
+   void OnManagedTabStorageSnapshot(
+       base::Value callback_id,
+       std::string tab_id,
+       chrome::ManagedTabContext::StorageSnapshot snapshot);
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -25,5 +25,6 @@
+ #include "base/metrics/histogram_functions.h"
+ #include "base/strings/escape.h"
++#include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/values.h"
+@@ -47,4 +47,5 @@
+ #include "chrome/browser/web_applications/web_app_provider.h"
+ #include "chrome/browser/web_applications/web_app_registrar.h"
+ #include "chrome/browser/web_applications/web_app_utils.h"
++#include "chrome/common/buildflags.h"
+ #include "chrome/common/pref_names.h"
+@@ -128,7 +128,25 @@ bool IsAllowedSaasBaseUrl(const std::string& value) {
+          (url.host() == "localhost" || url.host() == "127.0.0.1" ||
+           url.host() == "[::1]");
+ }
+ 
++std::vector<std::string> GetAllowedSaasOrigins() {
++  return base::SplitString(BUILDFLAG(FINGERPRINT_SAAS_ALLOWED_ORIGINS), ",",
++                           base::TRIM_WHITESPACE,
++                           base::SPLIT_WANT_NONEMPTY);
++}
++
++bool IsAllowedSaasOrigin(const std::string& value) {
++  const GURL url(value);
++  if (!url.is_valid() || url.has_username() || url.has_password() ||
++      (!url.SchemeIs("http") && !url.SchemeIs("https"))) {
++    return false;
++  }
++  if (url::Origin::Create(url).Serialize() != value) {
++    return false;
++  }
++  return base::Contains(GetAllowedSaasOrigins(), value);
++}
++
+ bool IsValidSaasSessionField(const std::string* value) {
+   return value && !value->empty() &&
+          value->size() <= kSaasSessionMaxFieldLength;
+@@ -297,6 +297,14 @@ void ManagementUIHandler::RegisterMessages() {
+       "clearSaasSession",
+       base::BindRepeating(&ManagementUIHandler::HandleClearSaasSession,
+                           base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getSaasBridgePolicy",
++      base::BindRepeating(&ManagementUIHandler::HandleGetSaasBridgePolicy,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "saasBridgeRequest",
++      base::BindRepeating(&ManagementUIHandler::HandleSaasBridgeRequest,
++                          base::Unretained(this)));
+ 
+   web_ui()->RegisterMessageCallback(
+       "getContextualManagedData",
+@@ -1168,2 +1168,137 @@ void ManagementUIHandler::HandleGetSaasSession(
++void ManagementUIHandler::HandleGetSaasBridgePolicy(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.empty()) {
++    return;
++  }
++
++  base::Value::List allowed_origins;
++  for (const std::string& origin : GetAllowedSaasOrigins()) {
++    allowed_origins.Append(origin);
++  }
++  base::Value::Dict result;
++  result.Set("version", "1.0");
++  result.Set("allowed_origins", std::move(allowed_origins));
++  ResolveJavascriptCallback(args[0], std::move(result));
++}
++
++void ManagementUIHandler::HandleSaasBridgeRequest(
++    const base::Value::List& args) {
++  AllowJavascript();
++  if (args.size() < 4 || !args[1].is_string() || !args[2].is_string() ||
++      !args[3].is_dict()) {
++    if (!args.empty()) {
++      RejectJavascriptCallback(args[0], base::Value("原生桥请求参数无效"));
++    }
++    return;
++  }
++
++  const std::string& origin = args[1].GetString();
++  if (!IsAllowedSaasOrigin(origin)) {
++    RejectJavascriptCallback(args[0], base::Value("页面来源未在编译白名单中"));
++    return;
++  }
++
++  const std::string& method = args[2].GetString();
++  const base::Value::Dict& input = args[3].GetDict();
++  if (method == "getCapabilities") {
++    base::Value::Dict capabilities;
++    capabilities.Set("tabs", true);
++    capabilities.Set("storage", true);
++    capabilities.Set("fingerprint", true);
++    capabilities.Set("files", false);
++    capabilities.Set("http", false);
++    base::Value::Dict result;
++    result.Set("version", "1.0");
++    result.Set("origin", origin);
++    result.Set("capabilities", std::move(capabilities));
++    ResolveJavascriptCallback(args[0], std::move(result));
++    return;
++  }
++
++  base::Value::List forwarded;
++  forwarded.Append(args[0].Clone());
++  if (method == "tabs.list") {
++    HandleGetManagedTabs(forwarded);
++    return;
++  }
++  if (method == "tabs.create") {
++    const std::string* url = input.FindString("url");
++    const std::string* account_id = input.FindString("accountId");
++    const std::string* proxy_rules = input.FindString("proxyRules");
++    const std::string* fingerprint_seed = input.FindString("fingerprintSeed");
++    forwarded.Append(url ? *url : "");
++    forwarded.Append(account_id ? *account_id : "");
++    forwarded.Append(proxy_rules ? *proxy_rules : "");
++    forwarded.Append(fingerprint_seed ? *fingerprint_seed : "");
++    HandleCreateManagedTab(forwarded);
++    return;
++  }
++  if (method == "tabs.activate" || method == "tabs.navigate" ||
++      method == "tabs.close" || method == "storage.getSnapshot" ||
++      method == "storage.writeSnapshot" || method == "fingerprint.get" ||
++      method == "fingerprint.set") {
++    const std::string* tab_id = input.FindString("tabId");
++    if (!tab_id || tab_id->empty()) {
++      RejectJavascriptCallback(args[0], base::Value("缺少原生 Tab 标识"));
++      return;
++    }
++    forwarded.Append(*tab_id);
++  }
++  if (method == "tabs.activate") {
++    HandleActivateManagedTab(forwarded);
++    return;
++  }
++  if (method == "tabs.navigate") {
++    const std::string* url = input.FindString("url");
++    if (!url) {
++      RejectJavascriptCallback(args[0], base::Value("缺少导航地址"));
++      return;
++    }
++    forwarded.Append(*url);
++    HandleNavigateManagedTab(forwarded);
++    return;
++  }
++  if (method == "tabs.close") {
++    HandleCloseManagedTab(forwarded);
++    return;
++  }
++  if (method == "storage.getSnapshot") {
++    HandleGetManagedTabStorageSnapshot(forwarded);
++    return;
++  }
++  if (method == "storage.writeSnapshot") {
++    const base::Value::Dict* snapshot = input.FindDict("snapshot");
++    if (!snapshot) {
++      RejectJavascriptCallback(args[0], base::Value("存储快照格式无效"));
++      return;
++    }
++    forwarded.Append(snapshot->Clone());
++    HandleWriteManagedTabStorageSnapshot(forwarded);
++    return;
++  }
++  if (method == "fingerprint.get") {
++    const std::string* tab_id = input.FindString("tabId");
++    ManagedTabContext* context =
++        tab_id ? ManagedTabContext::FindById(*tab_id) : nullptr;
++    if (!context) {
++      RejectJavascriptCallback(args[0], base::Value("原生 Tab 不存在"));
++      return;
++    }
++    ResolveJavascriptCallback(args[0], context->GetState());
++    return;
++  }
++  if (method == "fingerprint.set") {
++    const base::Value::Dict* fingerprint = input.FindDict("fingerprint");
++    if (!fingerprint) {
++      RejectJavascriptCallback(args[0], base::Value("指纹配置格式无效"));
++      return;
++    }
++    forwarded.Append(fingerprint->Clone());
++    HandleConfigureManagedTabFingerprint(forwarded);
++    return;
++  }
++  RejectJavascriptCallback(args[0], base::Value("该原生桥能力尚未实现"));
++}
+ void ManagementUIHandler::HandleGetSaasSession(
+     const base::Value::List& args) {

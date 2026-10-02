@@ -1,0 +1,187 @@
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_browser_proxy.ts
+@@ -177,4 +177,9 @@ export interface SaasLease {
+   expires_at: string;
+ }
+ 
++export interface SaasBridgePolicy {
++  version: string;
++  allowed_origins: string[];
++}
++
+ class SaasApiError extends Error {
+@@ -334,5 +334,8 @@ export interface FingerprintManagerBrowserProxy {
+   setSaasSession(session: SaasSessionState): Promise<boolean>;
+   clearSaasSession(): Promise<boolean>;
++  getSaasBridgePolicy(): Promise<SaasBridgePolicy>;
++  requestSaasBridge(
++      origin: string, method: string, args: unknown): Promise<unknown>;
+ }
+ 
+ export class FingerprintManagerBrowserProxyImpl
+@@ -741,7 +741,15 @@ export class FingerprintManagerBrowserProxyImpl
+   clearSaasSession() {
+     return sendWithPromise('clearSaasSession');
+   }
+ 
++  getSaasBridgePolicy() {
++    return sendWithPromise('getSaasBridgePolicy');
++  }
++
++  requestSaasBridge(origin: string, method: string, args: unknown) {
++    return sendWithPromise('saasBridgeRequest', origin, method, args);
++  }
++
+   static getInstance(): FingerprintManagerBrowserProxy {
+     return instance || (instance = new FingerprintManagerBrowserProxyImpl());
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -60,5 +60,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+       saasInviteToken_: {type: String},
+       saasInviteMode_: {type: Boolean},
+       saasSyncOptions_: {type: Object},
++      externalSaasFrameUrl_: {type: String},
++      externalSaasError_: {type: String},
++      saasBridgeAllowedOrigins_: {type: Array},
+     };
+   }
+@@ -100,5 +103,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     page: true,
+   };
++  protected accessor externalSaasFrameUrl_: string = '';
++  protected accessor externalSaasError_: string = '';
++  protected accessor saasBridgeAllowedOrigins_: string[] = [];
+ 
+   private browserProxy_: FingerprintManagerBrowserProxy =
+       FingerprintManagerBrowserProxyImpl.getInstance();
+@@ -112,3 +118,5 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     super.connectedCallback();
+     this.getManagedTabs_();
+     this.restoreSaasSession_();
++    window.addEventListener('message', this.onExternalSaasMessage_);
++    this.loadSaasBridgePolicy_();
+@@ -117,3 +125,79 @@ export class FingerprintManagerUiElement extends CrLitElement {
++  override disconnectedCallback() {
++    window.removeEventListener('message', this.onExternalSaasMessage_);
++    super.disconnectedCallback();
++  }
++
++  protected onOpenExternalSaas_() {
++    const input =
++        this.shadowRoot.querySelector<HTMLInputElement>('#externalSaasUrl');
++    const value = input?.value.trim() || '';
++    let url: URL;
++    try {
++      url = new URL(value);
++    } catch {
++      this.externalSaasError_ = '独立 Web 地址格式无效';
++      return;
++    }
++    if (!this.saasBridgeAllowedOrigins_.includes(url.origin)) {
++      this.externalSaasError_ =
++          '该来源未在客户端编译白名单中，请重新配置后编译';
++      return;
++    }
++    this.externalSaasError_ = '';
++    this.externalSaasFrameUrl_ = url.href;
++  }
++
++  protected onCloseExternalSaas_() {
++    this.externalSaasFrameUrl_ = '';
++    this.externalSaasError_ = '';
++  }
++
++  private async loadSaasBridgePolicy_() {
++    try {
++      const policy = await this.browserProxy_.getSaasBridgePolicy();
++      this.saasBridgeAllowedOrigins_ = policy.allowed_origins;
++    } catch {
++      this.saasBridgeAllowedOrigins_ = [];
++    }
++  }
++
++  private onExternalSaasMessage_ = (event: MessageEvent) => {
++    const frame =
++        this.shadowRoot?.querySelector<HTMLIFrameElement>('#externalSaasFrame');
++    if (!frame || event.source !== frame.contentWindow) {
++      return;
++    }
++    const message = event.data as {
++      type?: string,
++      requestId?: string,
++      method?: string,
++      args?: unknown,
++    };
++    if (!message || message.type !== 'fingerprint-saas-bridge:request' ||
++        typeof message.requestId !== 'string' ||
++        typeof message.method !== 'string') {
++      return;
++    }
++    const source = event.source as Window;
++    const respond = (payload: Record<string, unknown>) => {
++      source.postMessage({
++        type: 'fingerprint-saas-bridge:response',
++        requestId: message.requestId,
++        ...payload,
++      }, event.origin);
++    };
++    if (!this.saasBridgeAllowedOrigins_.includes(event.origin)) {
++      respond({ok: false, error: '页面来源未在编译白名单中'});
++      return;
++    }
++    this.browserProxy_.requestSaasBridge(
++        event.origin, message.method, message.args || {}).then(
++        result => respond({ok: true, result}),
++        error => respond({
++          ok: false,
++          error: error instanceof Error ? error.message : '原生桥请求失败',
++        }));
++  };
+   protected onRefresh_() {
+     this.getManagedTabs_();
+   }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -501,1 +501,38 @@ export function getHtml(this: FingerprintManagerUiElement) {
++      <section class="external-saas-panel">
++        <div class="panel-heading">
++          <div>
++            <div class="section-kicker">INDEPENDENT WEB CLIENT / 03</div>
++            <h3>独立 SaaS Web 控制台</h3>
++          </div>
++          ${this.externalSaasFrameUrl_ ? html`
++            <button class="text-button text-button-danger" type="button"
++                @click="${this.onCloseExternalSaas_}">
++              关闭 Web 控制台
++            </button>
++          ` : ''}
++        </div>
++        <div class="external-saas-toolbar">
++          <input id="externalSaasUrl" type="url"
++              .value="${this.externalSaasFrameUrl_ || 'http://127.0.0.1:8787/'}"
++              placeholder="独立 Web 地址，例如 https://saas.example.com/"
++              aria-label="独立 SaaS Web 地址">
++          <button class="tool-button tool-button-cloud" type="button"
++              @click="${this.onOpenExternalSaas_}">
++            加载独立 Web
++          </button>
++        </div>
++        <div class="external-saas-message" ?hidden="${!this.externalSaasError_}">
++          ${this.externalSaasError_}
++        </div>
++        ${this.externalSaasFrameUrl_ ? html`
++          <iframe id="externalSaasFrame" class="external-saas-frame"
++              .src="${this.externalSaasFrameUrl_}"
++              title="独立 SaaS Web 控制台"></iframe>
++        ` : html`
++          <div class="external-saas-empty">
++            输入已编译白名单中的 Web 来源后加载；普通页面不会获得原生能力。
++          </div>
++        `}
++      </section>
++
+       <section class="control-panel">

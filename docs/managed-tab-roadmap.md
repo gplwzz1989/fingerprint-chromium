@@ -10,6 +10,7 @@
 - 管理器页面隐藏 Chromium 内置用户系统，使用自有 SaaS 登录、工作区、成员和账号权限。
 - SaaS 同步能力是必选能力；Cookie、LocalStorage、SessionStorage、指纹、代理和页面地址可以分别选择。
 - 明文账号环境不写入日志、错误消息或服务端普通字段；云端只保存客户端加密快照。
+- SaaS 前端和后端作为独立 Web 项目部署；Chromium 只提供受 Origin 白名单保护的 JS 原生能力桥，不承载 SaaS 业务逻辑。
 
 ## 2. 阶段状态
 
@@ -48,7 +49,31 @@
 
 待补充：真实 PostgreSQL 环境下的初始化、登录、同步、租约和冲突集成测试。
 
-### 阶段 D：产品化和发布（未开始）
+### 阶段 D：独立 SaaS Web 项目和原生能力桥（桌面首版已完成，Android 适配进行中）
+
+- 前端独立为 `saas-web/`，后端继续独立为 `saas-server/`；登录、工作区、成员、账号目录、同步和权限逻辑不再新增到 Chromium WebUI。
+- Chromium 只提供版本化的 `window.saasBridge` JS API；桌面首版已接入 Tab、Cookie、网页存储、指纹、受限文件和原生 HTTP，业务状态仍由独立 SaaS 服务管理。
+- 通过编译时精确 Origin 白名单决定哪些 SaaS 页面可以获得桥接能力；协议、域名和端口必须完全匹配。当前白名单已接入 `build-configs/common.gn` 和管理器桥接校验。
+- 页面跳转、跨域 iframe、会话失效或能力撤销后，桥接权限立即重新校验；普通网页和普通浏览器不获得这些能力。
+- 现有 `chrome://fingerprint-manager/` 保留为过渡、调试和兼容入口；当前以受控 iframe 承载独立 Web，完成运行版验收后再隐藏或移除。
+- 桥接层只负责本地能力和平台适配，不保存 SaaS 业务状态，不实现登录、成员、计费等业务逻辑。
+
+### 阶段 E：SaaS HTTP 部署和生产环境（HTTP 首版已完成，生产集成待完成）
+
+- 独立 SaaS 前端和后端已支持通过 `SAAS_WEB_DIR` 由同一 HTTP 服务托管，保留配置化监听地址、健康检查和数据库迁移；API 预检路由已覆盖。
+- 生产高权限页面使用 HTTPS；HTTP 仅用于本地开发或受控内网，不能仅依赖 CORS 授予本地原生权限。
+- 完成白名单构建配置、反向代理部署、真实 PostgreSQL 初始化、登录、同步、租约和冲突集成测试。
+- 增加多设备并发恢复、服务端限流、审计和敏感数据不落日志测试。
+
+### 阶段 F：Android 移动客户端（契约已开始，原生适配待工具链）
+
+- 已建立 `android-bridge/` 契约目录；下一步建立独立 Android GN 输出和最小编译验证，不复用 Windows 的输出目录和工具链。
+- 复用独立 SaaS Web 前端，通过同一套 `window.saasBridge` 契约接入 Android 原生适配层。
+- 实现 Android Tab、账号隔离、指纹配置、Cookie/网页存储、Keystore 会话和应用生命周期恢复。
+- 文件能力使用 Android Storage Access Framework 和授权 URI；网络能力使用 Android 原生适配，不假设存在 Windows 文件路径。
+- 完成 APK/AAB 构建、安装升级、权限撤销、断网恢复和移动端账号隔离测试。
+
+### 阶段 G：产品化和发布（未开始）
 
 - 代理地址、认证引用和代理凭证密文分离。
 - 服务端限流、配额、数据保留和计费边界。
@@ -67,7 +92,10 @@
 
 ## 4. 当前下一步
 
-1. 准备真实 PostgreSQL 测试环境，完成 SaaS 核心流程集成测试。
-2. 完成两个账号 Tab 的运行版隔离验收，并记录 Cookie、LocalStorage、代理和指纹结果。
-3. 决定 IndexedDB、Cache Storage、Service Worker 是否进入 SaaS 同步范围；在决定前保持明确不支持状态。
-4. 完成产品化安全项后，再申请 Release 整体编译。
+1. 完成两个账号 Tab 的运行版隔离验收，并记录 Cookie、LocalStorage、代理和指纹结果。
+2. 用开发版目标编译验证桌面桥接，确认白名单页面能调用 Tab、存储和指纹，普通页面不能调用。
+3. 完成真实 PostgreSQL 集成、HTTP 部署和生产 HTTPS 边界测试。
+4. 完成文件与原生 HTTP 的权限撤销、审计、异常恢复和运行版验证；未接入的平台继续保持能力不可用。
+5. 准备 Android SDK/NDK 后完成最小 Android 构建和 `android-bridge/` 平台适配。
+6. 决定 IndexedDB、Cache Storage、Service Worker 是否进入 SaaS 同步范围；在决定前保持明确不支持状态。
+7. 完成产品化安全项后，再申请 Windows 和 Android Release 整体编译与发布回归。
