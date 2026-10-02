@@ -23,6 +23,7 @@
 - Chromium WebUI：TypeScript 静态检查通过。
 - 原生桥：`management_ui_handler.cc` 使用现有开发版编译参数完成 C++ 局部语法编译。
 - 新增 SaaS 桥接补丁可通过反向应用检查，并已加入 `patches/series`。
+- 指纹配置编辑表单已在现有指纹管理器 WebUI 中实现，包含 User-Agent、硬件并发数和指纹种子输入；尚未在包含最新源码的运行版中回归。
 - 未重新生成 GN，未启动 Release 全量编译。
 
 ## 尚未完成
@@ -30,7 +31,6 @@
 - 最新源码尚未重新链接进入可展示 SaaS 页面的新开发版二进制；当前测试版仍是旧的 Development 输出。
 - 独立 SaaS Web 在 Chromium 开发版中的白名单桥接、文件和 HTTP 运行联调。
 - `window.open`、`target=_blank`、页面跳转和会话恢复的单 Tab 运行回归。
-- 完整指纹配置编辑表单。
 - 真实 PostgreSQL、HTTPS 反向代理、多设备同步和冲突恢复测试。
 - IndexedDB、Cache Storage、Service Worker 的同步范围和一致性实现。
 - Android SDK/NDK 准备、原生实现、APK/AAB 构建和移动端回归。
@@ -46,6 +46,8 @@
 ## 已知独立问题
 
 `patches/core/ungoogled-chromium/disable-gcm.patch` 和 `patches/upstream-fixes/build-compatibility.patch` 存在历史格式问题。本阶段未自动重写它们，避免在没有基线文件和语义确认的情况下改变原有补丁行为。
+
+本次 Development 前端局部目标未进入编译：Ninja 自动检查到旧构建目录需要重新生成，D 盘 Visual Studio 2022 可以被显式发现，但本机未发现 Windows SDK，因此工具链预检失败。未因此修改 GN、安装系统盘工具或启动全量编译。
 
 ## 下一步顺序
 
