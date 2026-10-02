@@ -57,6 +57,32 @@ data class HttpResponse(
     val body: ByteArray,
 )
 
+data class SaasSnapshotEnvelope(
+    val algorithm: String,
+    val kdf: String,
+    val iterations: Int,
+    val salt: String,
+    val nonce: String,
+    val ciphertext: String,
+    val tag: String,
+)
+
+data class SnapshotEncryptOptions(
+    val accountId: String,
+    val password: String,
+    val snapshot: Map<String, Any?>,
+) {
+    override fun toString(): String = "快照加密参数（敏感内容已隐藏）"
+}
+
+data class SnapshotDecryptOptions(
+    val accountId: String,
+    val password: String,
+    val envelope: SaasSnapshotEnvelope,
+) {
+    override fun toString(): String = "快照解密参数（敏感内容已隐藏）"
+}
+
 interface SaasBridgeContract {
     suspend fun getCapabilities(): SaasBridgeDetails
 
@@ -65,6 +91,14 @@ interface SaasBridgeContract {
     val fingerprint: Fingerprint
     val files: Files
     val http: Http
+
+    // 适配器存在不代表消息通道可用；未绑定 Chromium 时能力仍为 false。
+    val crypto: Crypto? get() = null
+
+    interface Crypto {
+        suspend fun encryptSnapshot(options: SnapshotEncryptOptions): SaasSnapshotEnvelope
+        suspend fun decryptSnapshot(options: SnapshotDecryptOptions): Map<String, Any?>
+    }
 
     interface Tabs {
         suspend fun list(): List<Map<String, Any?>>

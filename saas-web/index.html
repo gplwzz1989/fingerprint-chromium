@@ -30,6 +30,9 @@
           <button class="nav-item" type="button" data-view="security">
             <span class="nav-icon">◇</span><span>设备与安全</span>
           </button>
+          <button class="nav-item" type="button" data-view="members">
+            <span class="nav-icon">⊙</span><span>成员与权限</span>
+          </button>
         </nav>
         <div class="sidebar-footer">
           <div class="bridge-mini-status" id="bridge-mini-status">
@@ -75,6 +78,7 @@
               <input class="text-input" id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" required>
               <button class="primary-button" type="submit"><span>登录控制台</span><span class="button-arrow">→</span></button>
               <div class="form-status" id="login-status" role="status" aria-live="polite"></div>
+              <button class="table-action" id="accept-invite-button" type="button">使用邀请令牌加入工作区</button>
               <div class="security-note"><span class="lock-symbol">⌁</span> 会话凭据仅保存在当前设备的受保护会话中</div>
             </form>
           </div>
@@ -195,6 +199,11 @@
             <div class="table-wrap"><table class="account-table"><thead><tr><th>设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="sessions-table-body"></tbody></table></div>
             <p class="panel-copy" id="sessions-status" role="status"></p>
           </section>
+          <section class="panel" id="members-content" hidden>
+            <div class="panel-heading"><h2>工作区成员</h2><button class="secondary-button" id="invite-member-button" type="button">邀请成员</button></div>
+            <div class="table-wrap"><table class="account-table"><thead><tr><th>成员</th><th>工作区角色</th><th>操作</th></tr></thead><tbody id="members-table-body"></tbody></table></div>
+            <p class="panel-copy admin-status" id="members-status" role="status"></p>
+          </section>
         </section>
 
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -245,9 +254,48 @@
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" type="submit" value="default">应用指纹</button></div>
       </form>
     </dialog>
+    <dialog class="modal" id="invite-modal"><form method="dialog" class="modal-card" id="invite-form">
+      <button class="modal-close" type="submit" value="cancel" formnovalidate aria-label="关闭">×</button>
+      <h2>邀请工作区成员</h2>
+      <label class="field-label" for="invite-email">成员邮箱</label><input class="text-input" id="invite-email" name="email" type="email" required>
+      <label class="field-label" for="invite-role">工作区角色</label><select class="select-input" id="invite-role" name="role"><option value="editor">编辑者</option><option value="viewer">查看者</option><option value="admin">管理员</option></select>
+      <label class="field-label" for="invite-result">邀请令牌（创建后仅显示一次）</label><textarea class="text-input" id="invite-result" rows="3" readonly></textarea>
+      <p class="panel-copy">请通过受控渠道交给受邀成员，有效期为 7 天。关闭后令牌从页面清除。</p>
+      <div class="form-status" id="invite-status" role="status"></div>
+      <div class="modal-actions"><button class="secondary-button" type="submit" value="cancel" formnovalidate>关闭</button><button class="primary-button" type="submit">创建邀请</button></div>
+    </form></dialog>
+    <dialog class="modal" id="accept-invite-modal"><form method="dialog" class="modal-card" id="accept-invite-form">
+      <button class="modal-close" type="submit" value="cancel" formnovalidate aria-label="关闭">×</button><h2>加入工作区</h2>
+      <label class="field-label" for="accept-invite-token">邀请令牌</label><input class="text-input" id="accept-invite-token" name="invite_token" required autocomplete="off">
+      <label class="field-label" for="accept-invite-name">显示名称</label><input class="text-input" id="accept-invite-name" name="display_name" maxlength="128">
+      <label class="field-label" for="accept-invite-password">密码（已有账号填写原密码）</label><input class="text-input" id="accept-invite-password" name="password" type="password" minlength="12" maxlength="256" required autocomplete="off">
+      <div class="form-status" id="accept-invite-status" role="status"></div>
+      <div class="modal-actions"><button class="secondary-button" type="submit" value="cancel" formnovalidate>取消</button><button class="primary-button" type="submit">接受邀请</button></div>
+    </form></dialog>
+    <dialog class="modal wide-modal" id="account-access-modal"><div class="modal-card">
+      <button class="modal-close" type="button" id="close-account-access" aria-label="关闭">×</button><h2 id="account-access-title">账号访问权限</h2>
+      <p class="panel-copy" id="account-access-scope"></p>
+      <form id="account-access-form"><label class="field-label" for="account-access-user">工作区成员</label><select class="select-input" id="account-access-user" name="user_id" required></select>
+        <label class="field-label" for="account-access-role">账号角色</label><select class="select-input" id="account-access-role" name="role"><option value="viewer">查看者</option><option value="editor">编辑者</option></select>
+        <div class="modal-actions"><button class="primary-button" type="submit">保存授权</button></div></form>
+      <p class="panel-copy">账号授权不会提升工作区查看者的写入权限。所有者和管理员始终拥有完整访问权限。</p>
+      <div id="account-access-list"></div><div class="form-status" id="account-access-status" role="status"></div>
+    </div></dialog>
+    <dialog class="modal wide-modal" id="audit-modal"><div class="modal-card">
+      <button class="modal-close" type="button" id="close-audit" aria-label="关闭">×</button><h2 id="audit-title">账号操作记录</h2>
+      <div id="audit-list"></div><div class="form-status" id="audit-status" role="status"></div>
+    </div></dialog>
+    <dialog class="modal wide-modal" id="snapshot-conflict-modal"><div class="modal-card">
+      <h2 id="snapshot-conflict-title">账号环境同步冲突</h2>
+      <p class="panel-copy" id="snapshot-conflict-detail"></p>
+      <p class="panel-copy">合并会保留两端数据，同一 Cookie 身份或存储键以本地为准；不同网页来源不能合并。覆盖会使用本地待同步快照替换云端内容。提交时仍会检查最新版本。</p>
+      <div class="form-status" id="snapshot-conflict-status" role="status"></div>
+      <div class="modal-actions"><button class="secondary-button" id="conflict-keep-cloud" type="button">保留云端</button><button class="secondary-button" id="conflict-merge" type="button">合并后同步</button><button class="primary-button" id="conflict-overwrite" type="button">明确覆盖云端</button></div>
+    </div></dialog>
     <script src="/bridge-contract.js"></script>
     <script src="/snapshot-sync.js"></script>
     <script src="/operations.js"></script>
+    <script src="/administration.js"></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

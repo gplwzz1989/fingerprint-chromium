@@ -69,7 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/accounts/{account_id}/leases", s.handleAcquireLease)
 	mux.HandleFunc("DELETE /api/v1/accounts/{account_id}/leases/{lease_id}", s.handleReleaseLease)
 	mux.HandleFunc("GET /api/v1/accounts/{account_id}/audit-events", s.handleListAuditEvents)
-	return s.withSecurityHeaders(s.withCORS(mux))
+	return s.withSecurityHeaders(s.withCORS(s.withRateLimit(mux)))
 }
 
 func (s *Server) handleAPIOptions(w http.ResponseWriter, _ *http.Request) {
@@ -1037,6 +1037,7 @@ type accountResponse struct {
 	Revision    int64    `json:"revision"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
+	Role        string   `json:"role,omitempty"`
 }
 
 type accountPageResponse struct {
@@ -1070,10 +1071,19 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT account_id, workspace_id::text, name, labels::text, revision,
-		       created_at, updated_at
+		SELECT accounts.account_id, accounts.workspace_id::text, accounts.name,
+		       accounts.labels::text, accounts.revision, accounts.created_at, accounts.updated_at,
+		       CASE
+		         WHEN access_member.role IN ('owner', 'admin') THEN access_member.role
+		         WHEN access_member.role = 'viewer' THEN 'viewer'
+		         ELSE COALESCE(member_assignment.role, access_member.role)
+		       END
 		FROM accounts
-		WHERE workspace_id = $1::uuid
+		JOIN workspace_members access_member
+		  ON access_member.workspace_id = accounts.workspace_id AND access_member.user_id = $2::uuid
+		LEFT JOIN account_members member_assignment
+		  ON member_assignment.account_id = accounts.account_id AND member_assignment.user_id = $2::uuid
+		WHERE accounts.workspace_id = $1::uuid
 		  AND (
 			EXISTS (
 				SELECT 1 FROM workspace_members privileged
@@ -1091,7 +1101,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 				  AND assigned.user_id = $2::uuid
 			)
 		  )
-		ORDER BY account_id
+		ORDER BY accounts.account_id
 		LIMIT $3 OFFSET $4`, workspaceID, userID, pageSize+1, offset)
 	if err != nil {
 		s.logger.Error("查询账号目录失败", "error", err.Error())
@@ -1105,7 +1115,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		var labelsJSON string
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&account.AccountID, &account.WorkspaceID, &account.Name,
-			&labelsJSON, &account.Revision, &createdAt, &updatedAt); err != nil {
+			&labelsJSON, &account.Revision, &createdAt, &updatedAt, &account.Role); err != nil {
 			s.logger.Error("读取账号目录失败", "error", err.Error())
 			writeError(w, http.StatusInternalServerError, "internal_error", "无法读取账号目录")
 			return
@@ -1541,6 +1551,7 @@ type putSnapshotRequest struct {
 	SchemaVersion int                       `json:"schema_version"`
 	DeviceID      string                    `json:"device_id"`
 	Envelope      encryptedSnapshotEnvelope `json:"envelope"`
+	Overwrite     bool                      `json:"overwrite,omitempty"`
 }
 
 type snapshotConflictResponse struct {
@@ -1718,7 +1729,7 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auditAction := "snapshot_written"
-	if forceOverwrite {
+	if forceOverwrite || request.Overwrite {
 		auditAction = "snapshot_overwritten"
 	}
 	if err := s.writeAudit(r.Context(), userID, auditAction, accountID, deviceID); err != nil {
@@ -1975,9 +1986,17 @@ func (s *Server) workspaceRole(ctx context.Context, userID, workspaceID string) 
 func (s *Server) accountAccess(ctx context.Context, userID, accountID string) (string, string, bool) {
 	var workspaceID, role string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT a.workspace_id::text, wm.role
+		SELECT a.workspace_id::text,
+		       CASE
+		         WHEN wm.role IN ('owner', 'admin') THEN wm.role
+		         WHEN wm.role = 'viewer' THEN 'viewer'
+		         ELSE COALESCE(account_assignment.role, wm.role)
+		       END
 		FROM accounts a
 		JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
+		LEFT JOIN account_members account_assignment
+		  ON account_assignment.account_id = a.account_id
+		 AND account_assignment.user_id = wm.user_id
 		WHERE a.account_id = $1 AND wm.user_id = $2::uuid
 		  AND (
 			wm.role IN ('owner', 'admin')

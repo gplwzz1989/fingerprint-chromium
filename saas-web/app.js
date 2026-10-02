@@ -6,19 +6,22 @@
   const deviceStorageKey = 'fingerprint-saas.device-id.v1';
   const state = {
     session: null,
+    sessionGeneration: 0,
     workspaces: [],
     workspaceId: '',
     accounts: [],
     bridge: null,
     currentView: 'overview',
   };
+  let refreshFlight = null;
 
   class ApiError extends Error {
-    constructor(status, message, code = '') {
+    constructor(status, message, code = '', currentRevision = null) {
       super(message || '请求失败，请稍后重试');
       this.name = 'ApiError';
       this.status = status;
       this.code = code;
+      this.currentRevision = currentRevision;
     }
   }
 
@@ -74,12 +77,17 @@
   }
 
   function writeSession(session) {
+    if (!session || !state.session || session.user?.user_id !== state.session.user?.user_id) state.sessionGeneration++;
     state.session = session;
     if (session) {
       sessionStorage.setItem(sessionStorageKey, JSON.stringify(session));
     } else {
       sessionStorage.removeItem(sessionStorageKey);
-      global.saasConsoleOperations.lock();
+      state.workspaces = []; state.accounts = []; state.workspaceId = '';
+      elements.loginForm.reset();
+      global.saasConsoleOperations.clear();
+      global.saasConsoleAdministration.clear();
+      render();
     }
   }
 
@@ -103,6 +111,8 @@
   }
 
   async function request(path, options = {}, allowRefresh = true) {
+    const userId = state.session?.user?.user_id || null;
+    const generation = state.sessionGeneration;
     const headers = new Headers(options.headers || {});
     let body = options.body;
     if (body !== undefined && body !== null && typeof body !== 'string') {
@@ -118,6 +128,7 @@
       headers,
       credentials: 'omit',
     });
+    if (state.sessionGeneration !== generation || (state.session?.user?.user_id || null) !== userId) throw new ApiError(401, '登录会话已变化，请重试');
     if (response.status === 401 && allowRefresh && state.session?.refreshToken) {
       const refreshed = await refreshSession();
       if (refreshed) return request(path, options, false);
@@ -126,34 +137,43 @@
     const payload = contentType.includes('application/json')
       ? await response.json().catch(() => null)
       : null;
+    if (state.sessionGeneration !== generation) throw new ApiError(401, '登录会话已变化，请重试');
     if (!response.ok) {
-      throw new ApiError(response.status, payload?.message || `服务返回 ${response.status}`, payload?.code || '');
+      throw new ApiError(response.status, payload?.message || `服务返回 ${response.status}`, payload?.code || '', payload?.current_revision ?? null);
     }
     return payload;
   }
 
   async function refreshSession() {
     if (!state.session?.refreshToken) return false;
+    if (refreshFlight) return refreshFlight;
+    refreshFlight = performRefreshSession(state.session);
+    try { return await refreshFlight; }
+    finally { refreshFlight = null; }
+  }
+
+  async function performRefreshSession(originalSession) {
     try {
       const response = await fetch(`${apiBase}/api/v1/sessions/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'omit',
-        body: JSON.stringify({ refresh_token: state.session.refreshToken, device_id: getDeviceId() }),
+        body: JSON.stringify({ refresh_token: originalSession.refreshToken, device_id: getDeviceId() }),
       });
       const payload = await response.json().catch(() => null);
+      if (state.session !== originalSession) return false;
       if (!response.ok || !payload?.access_token) {
-        writeSession(null);
+        if (response.status === 401) writeSession(null);
         return false;
       }
       writeSession({
         accessToken: payload.access_token,
-        refreshToken: payload.refresh_token || state.session.refreshToken,
+        refreshToken: payload.refresh_token || originalSession.refreshToken,
         user: payload.user,
       });
       return true;
     } catch (_error) {
-      writeSession(null);
+      // 暂时断网时保留刷新凭据，恢复网络后可重试，不能把网络错误当成撤销会话。
       return false;
     }
   }
@@ -173,6 +193,7 @@
       refreshToken: payload.refresh_token,
       user: payload.user,
     });
+    elements.loginForm.reset();
   }
 
   function getDeviceName() {
@@ -230,16 +251,15 @@
   }
 
   async function logout() {
+    const session = state.session;
+    writeSession(null);
     try {
-      if (state.session?.accessToken) await request('/api/v1/sessions/revoke', { method: 'POST' }, false);
+      if (session?.accessToken) await fetch(`${apiBase}/api/v1/sessions/revoke`, {
+        method: 'POST', headers: {Authorization: `Bearer ${session.accessToken}`}, credentials: 'omit',
+      });
     } catch (_error) {
       // 服务端不可达时仍然清除当前设备会话。
     }
-    writeSession(null);
-    state.workspaces = [];
-    state.accounts = [];
-    state.workspaceId = '';
-    render();
   }
 
   async function inspectBridge() {
@@ -252,8 +272,17 @@
       showToast('当前页面没有可用的浏览器原生桥，请在受支持的客户端中打开', true);
       return;
     }
+    const generation = state.sessionGeneration, workspaceId = state.workspaceId;
+    const checkAccountScope = () => {
+      if (!state.session || state.sessionGeneration !== generation || state.workspaceId !== workspaceId ||
+          account.workspace_id !== workspaceId || !state.accounts.some((value) => value.account_id === account.account_id && value.workspace_id === workspaceId)) {
+        throw new Error('登录会话、工作区或账号权限已变化，请重新操作');
+      }
+    };
     try {
+      checkAccountScope();
       const tabs = await global.saasBridgeClient.tabs.list();
+      checkAccountScope();
       const existing = tabs.find((tab) => tab.account_id === account.account_id);
       if (existing) await global.saasBridgeClient.tabs.activate(existing.id);
       else await global.saasBridgeClient.tabs.create({ accountId: account.account_id });
@@ -401,7 +430,8 @@
     document.querySelector('#overview-content').hidden = state.currentView !== 'overview';
     document.querySelector('#tabs-content').hidden = state.currentView !== 'tabs';
     document.querySelector('#security-content').hidden = state.currentView !== 'security';
-    document.querySelector('#view-heading').textContent = {overview: '账号总览', tabs: '运行中 Tab', security: '设备与安全'}[state.currentView];
+    document.querySelector('#members-content').hidden = state.currentView !== 'members';
+    document.querySelector('#view-heading').textContent = {overview: '账号总览', tabs: '运行中 Tab', security: '设备与安全', members: '成员与权限'}[state.currentView];
   }
 
   function render() {
@@ -468,10 +498,15 @@
   });
 
   elements.workspaceSelect.addEventListener('change', async (event) => {
+    global.saasConsoleOperations.clear();
+    global.saasConsoleAdministration.clear();
     state.workspaceId = event.target.value;
+    state.accounts = [];
+    render();
     sessionStorage.setItem('fingerprint-saas.workspace-id.v1', state.workspaceId);
     try {
       await loadAccounts();
+      if (state.currentView === 'members') await global.saasConsoleAdministration.loadMembers();
     } catch (error) {
       showToast(userMessage(error), true);
     }
@@ -495,15 +530,20 @@
     state.currentView = button.dataset.view;
     renderNavigation();
     global.saasConsoleOperations.loadView(state.currentView);
+    if (state.currentView === 'members') global.saasConsoleAdministration.loadMembers();
   }));
 
   global.saasConsoleOperations.configure({request, bridge: global.saasBridgeClient,
     deviceId: getDeviceId, getState: () => state, refreshAccounts: loadAccounts,
     showToast, userMessage, logout});
+  global.saasConsoleAdministration.configure({request, getState: () => state,
+    refreshAccounts: loadAccounts, showToast, userMessage});
   state.session = readSession();
   render();
   if (state.session) {
+    const generation = state.sessionGeneration;
     Promise.all([loadWorkspaces(), inspectBridge()]).catch((error) => {
+      if (state.sessionGeneration !== generation) return;
       if (error instanceof ApiError && error.status === 401) writeSession(null);
       showToast(userMessage(error), true);
       render();

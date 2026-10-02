@@ -13,6 +13,8 @@ def main():
     parser.add_argument("--out", default="build/src/out/Development")
     parser.add_argument("--define", action="append", default=[])
     parser.add_argument("--compile", action="store_true", help="只编译指定文件的目标对象，不链接")
+    parser.add_argument("--input-override", help="使用相同参数验证独立测试源文件")
+    parser.add_argument("--object-output", help="为独立测试指定对象文件输出路径")
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("该工具仅用于 Windows 上已生成的 Chromium 构建目录")
@@ -37,6 +39,15 @@ def main():
     variables.update(in_= "../../" + source)
     variables["in"] = "../../" + source
     variables["out"] = output if args.compile else "syntax-check.obj"
+    if args.input_override:
+        test_input = Path(args.input_override).resolve()
+        if not test_input.is_file():
+            parser.error("独立测试源文件不存在")
+        if args.compile and not args.object_output:
+            parser.error("编译独立测试必须指定对象文件，避免覆盖原编译输出")
+        variables["in"] = '"' + test_input.as_posix() + '"'
+    if args.object_output:
+        variables["out"] = '"' + Path(args.object_output).resolve().as_posix() + '"'
     variables.setdefault("target_out_dir", "obj/syntax-check")
     variables.setdefault("label_name", "syntax-check")
     variables.setdefault("module_deps_no_self", "")
@@ -71,7 +82,7 @@ def main():
     finally:
         ctypes.windll.kernel32.LocalFree(ctypes.cast(argv, ctypes.c_void_p))
     command_args.extend("-D" + value for value in args.define)
-    print(("单文件目标编译：" if args.compile else "局部语法编译：") + source, flush=True)
+    print(("单文件目标编译：" if args.compile else "局部语法编译：") + (args.input_override or source), flush=True)
     return subprocess.run(command_args, cwd=out).returncode
 
 

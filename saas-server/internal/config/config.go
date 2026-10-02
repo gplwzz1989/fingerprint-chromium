@@ -17,6 +17,21 @@ type Config struct {
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 	AllowedOrigins  map[string]struct{}
+	RateLimit       RateLimitConfig
+}
+
+type RateLimitConfig struct {
+	Disabled     bool
+	Window       time.Duration
+	AuthRequests int
+	APIRequests  int
+	MaxKeys      int
+}
+
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		Window: time.Minute, AuthRequests: 30, APIRequests: 300, MaxKeys: 10000,
+	}
 }
 
 func Load() (Config, error) {
@@ -38,6 +53,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	rateLimit, err := loadRateLimitConfig()
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		HTTPAddr:        valueOrDefault("SAAS_HTTP_ADDR", "127.0.0.1:8787"),
@@ -47,7 +66,43 @@ func Load() (Config, error) {
 		AccessTokenTTL:  accessTokenTTL,
 		RefreshTokenTTL: refreshTokenTTL,
 		AllowedOrigins:  parseOrigins(os.Getenv("SAAS_ALLOWED_ORIGINS")),
+		RateLimit:       rateLimit,
 	}, nil
+}
+
+func loadRateLimitConfig() (RateLimitConfig, error) {
+	cfg := DefaultRateLimitConfig()
+	if value := strings.TrimSpace(os.Getenv("SAAS_RATE_LIMIT_ENABLED")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return RateLimitConfig{}, errors.New("SAAS_RATE_LIMIT_ENABLED 配置无效")
+		}
+		cfg.Disabled = !enabled
+	}
+	window, err := durationFromEnv("SAAS_RATE_LIMIT_WINDOW", cfg.Window)
+	if err != nil || window > 24*time.Hour {
+		return RateLimitConfig{}, errors.New("SAAS_RATE_LIMIT_WINDOW 配置无效，须大于零且不超过 24 小时")
+	}
+	cfg.Window = window
+	for _, setting := range []struct {
+		name   string
+		target *int
+	}{
+		{"SAAS_RATE_LIMIT_AUTH_REQUESTS", &cfg.AuthRequests},
+		{"SAAS_RATE_LIMIT_API_REQUESTS", &cfg.APIRequests},
+		{"SAAS_RATE_LIMIT_MAX_KEYS", &cfg.MaxKeys},
+	} {
+		value := strings.TrimSpace(os.Getenv(setting.name))
+		if value == "" {
+			continue
+		}
+		number, err := strconv.Atoi(value)
+		if err != nil || number < 1 || number > 1000000 {
+			return RateLimitConfig{}, fmt.Errorf("%s 配置无效，须为 1 至 1000000 的整数", setting.name)
+		}
+		*setting.target = number
+	}
+	return cfg, nil
 }
 
 func LoadDatabaseURL() (string, error) {

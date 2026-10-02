@@ -69,7 +69,13 @@ func TestPostgresAccountSyncIntegration(t *testing.T) {
 	}
 	cfg := config.Config{JWTSecret: []byte("integration-secret-with-at-least-32-bytes"),
 		AccessTokenTTL: time.Minute, RefreshTokenTTL: time.Hour}
-	server := httptest.NewServer(NewServer(db, cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	var serverLogs bytes.Buffer
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log(serverLogs.String())
+		}
+	})
+	server := httptest.NewServer(NewServer(db, cfg, slog.New(slog.NewTextHandler(&serverLogs, nil))).Handler())
 	t.Cleanup(server.Close)
 	call := func(method, path, token string, body any, revision string) (int, []byte) {
 		var reader io.Reader
@@ -162,6 +168,10 @@ func TestPostgresAccountSyncIntegration(t *testing.T) {
 		t.Fatal("跨设备读取内容或版本不一致")
 	}
 	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "*", http.StatusOK)
+	// 明确覆盖仍采用具体版本进行条件写入，防止覆盖尚未读取的更新。
+	body.Overwrite = true
+	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "1", http.StatusConflict)
+	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "2", http.StatusOK)
 	expect("DELETE", accountPath+"/leases/"+lease.LeaseID, a.AccessToken, nil, "", http.StatusNoContent)
 	// 两台设备并发首次抢占租约：一个成功，一个返回冲突，不能返回内部错误。
 	var group sync.WaitGroup
@@ -190,4 +200,52 @@ func TestPostgresAccountSyncIntegration(t *testing.T) {
 	expect("GET", "/api/v1/sessions", a.AccessToken, nil, "", http.StatusOK)
 	expect("POST", "/api/v1/sessions/revoke", b.AccessToken, nil, "", http.StatusNoContent)
 	expect("GET", accountPath+"/snapshot", b.AccessToken, nil, "", http.StatusUnauthorized)
+
+	// 账号只读权限不能被工作区编辑权限绕过，工作区只读也不能被账号授权提升。
+	workspacePath := "/api/v1/workspaces/" + owner.WorkspaceID
+	var invite workspaceInviteResponse
+	if err := json.Unmarshal(expect("POST", workspacePath+"/invitations", a.AccessToken,
+		map[string]string{"email": "member@example.test", "role": "editor"}, "", http.StatusCreated), &invite); err != nil {
+		t.Fatal(err)
+	}
+	var accepted acceptWorkspaceInviteResponse
+	acceptBody := acceptWorkspaceInviteRequest{InviteToken: invite.InviteToken, Password: password, DisplayName: "权限测试成员"}
+	if err := json.Unmarshal(expect("POST", "/api/v1/invitations/accept", "", acceptBody, "", http.StatusCreated), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	expect("POST", "/api/v1/invitations/accept", "", acceptBody, "", http.StatusUnauthorized)
+	var member sessionResponse
+	if err := json.Unmarshal(expect("POST", "/api/v1/sessions", "", createSessionRequest{
+		Email: "member@example.test", Password: password, DeviceID: "member-device", DeviceName: "权限测试设备",
+	}, "", http.StatusOK), &member); err != nil {
+		t.Fatal(err)
+	}
+	expect("POST", workspacePath+"/accounts", a.AccessToken,
+		map[string]string{"account_id": "permissions-account", "name": "权限测试账号"}, "", http.StatusCreated)
+	permissionPath := "/api/v1/accounts/permissions-account"
+	assignmentPath := permissionPath + "/members/" + accepted.UserID
+	expect("PATCH", assignmentPath, a.AccessToken, map[string]string{"role": "viewer"}, "", http.StatusOK)
+	var memberAccounts accountPageResponse
+	if err := json.Unmarshal(expect("GET", workspacePath+"/accounts", member.AccessToken, nil, "", http.StatusOK), &memberAccounts); err != nil {
+		t.Fatal(err)
+	}
+	readOnlyListed := false
+	for _, account := range memberAccounts.Items {
+		if account.AccountID == "permissions-account" && account.Role == "viewer" { readOnlyListed = true }
+	}
+	if !readOnlyListed { t.Fatal("账号目录未返回实际只读权限") }
+	expect("GET", permissionPath+"/snapshot", member.AccessToken, nil, "", http.StatusNotFound)
+	expect("POST", permissionPath+"/leases", member.AccessToken,
+		acquireLeaseRequest{DeviceID: "member-device"}, "", http.StatusForbidden)
+	memberBody := putSnapshotRequest{SchemaVersion: 1, DeviceID: "member-device", Envelope: envelope}
+	expect("PUT", permissionPath+"/snapshot", member.AccessToken, memberBody, "0", http.StatusForbidden)
+	expect("PATCH", assignmentPath, a.AccessToken, map[string]string{"role": "editor"}, "", http.StatusOK)
+	expect("POST", permissionPath+"/leases", member.AccessToken,
+		acquireLeaseRequest{DeviceID: "member-device"}, "", http.StatusCreated)
+	expect("PATCH", workspacePath+"/members/"+accepted.UserID, a.AccessToken,
+		map[string]string{"role": "viewer"}, "", http.StatusOK)
+	expect("POST", permissionPath+"/leases", member.AccessToken,
+		acquireLeaseRequest{DeviceID: "member-device"}, "", http.StatusForbidden)
+	expect("DELETE", workspacePath+"/members/"+accepted.UserID, a.AccessToken, nil, "", http.StatusNoContent)
+	expect("GET", permissionPath+"/snapshot", member.AccessToken, nil, "", http.StatusForbidden)
 }

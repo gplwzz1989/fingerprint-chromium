@@ -1,0 +1,64 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -28,6 +28,7 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/strings/escape.h"
+@@ -305,7 +306,8 @@ std::optional<base::FilePath> ResolveSaasFilePath(
+     *error = "文件路径不能为空";
+     return std::nullopt;
+   }
+-  if (relative_path.size() > 1024 || relative_path.find('\0') !=
++  if (relative_path.size() > 32768 || !base::IsStringUTF8(relative_path) ||
++      relative_path.find('\0') !=
+                                          std::string_view::npos) {
+     *error = "文件路径无效";
+     return std::nullopt;
+@@ -313,12 +315,14 @@ std::optional<base::FilePath> ResolveSaasFilePath(
+ 
+   const base::FilePath relative =
+       base::FilePath::FromUTF8Unsafe(std::string(relative_path));
+-  if (relative.empty() || relative.IsAbsolute() || relative.ReferencesParent() ||
++  if (relative.empty() ||
++      (!relative.IsAbsolute() && relative.ReferencesParent()) ||
+       relative == base::FilePath(FILE_PATH_LITERAL("."))) {
+-    *error = "文件路径必须位于桥接专用目录内";
++    *error = "文件路径无效，相对路径不能包含上级目录引用";
+     return std::nullopt;
+   }
+-  return root.Append(relative);
++  // 白名单页面可访问系统绝对路径；相对路径继续使用专用目录以兼容现有调用。
++  return relative.IsAbsolute() ? relative : root.Append(relative);
+ }
+ 
+ base::Value::Dict ListSaasFilesOnBlockingThread(base::FilePath root,
+@@ -352,8 +356,9 @@ base::Value::Dict ListSaasFilesOnBlockingThread(base::FilePath root,
+     const std::string name = info.GetName().AsUTF8Unsafe();
+     base::Value::Dict entry;
+     entry.Set("name", name);
+-    entry.Set("path", relative_path.empty() ? name
+-                                             : relative_path + "/" + name);
++    const bool absolute = base::FilePath::FromUTF8Unsafe(relative_path).IsAbsolute();
++    entry.Set("path", absolute ? current.AsUTF8Unsafe() :
++        relative_path.empty() ? name : relative_path + "/" + name);
+     entry.Set("directory", info.IsDirectory());
+     entry.Set("size", static_cast<double>(
+                           info.IsDirectory() ? 0 : info.GetSize()));
+@@ -407,9 +412,9 @@ base::Value::Dict WriteSaasFileOnBlockingThread(
+     return MakeSaasFileResult(false, base::Value(), "文件目录创建失败");
+   }
+ 
+-  const std::string contents(
+-      reinterpret_cast<const char*>(bytes.data()), bytes.size());
+-  if (base::WriteFile(*file, contents) != static_cast<int>(contents.size())) {
++  const std::string contents(bytes.begin(), bytes.end());
++  // 先写入同目录临时文件再替换，失败时尽量保留原文件，避免先截断已有内容。
++  if (!base::ImportantFileWriter::WriteFileAtomically(*file, contents)) {
+     return MakeSaasFileResult(false, base::Value(), "文件写入失败");
+   }
+ 

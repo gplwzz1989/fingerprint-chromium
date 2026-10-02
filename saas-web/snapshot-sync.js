@@ -27,6 +27,10 @@
     for (const values of [snapshot.local_storage, snapshot.session_storage || {}]) {
       if (!Object.values(values).every((value) => typeof value === 'string')) fail('网页存储内容无效');
     }
+    if (snapshot.cookies.length > 5000 || !snapshot.cookies.every((cookie) => record(cookie) &&
+        ['name', 'value', 'domain', 'path'].every((name) => typeof cookie[name] === 'string'))) {
+      fail('Cookie 内容无效或数量超过支持范围');
+    }
     const options = optionsFor(snapshot);
     if (options.page && snapshot.storage_url) {
       let url;
@@ -66,6 +70,39 @@
     }
     validate(snapshot, accountId);
     return snapshot;
+  }
+
+  function mergeSnapshots(local, remote, accountId) {
+    validate(local, accountId); validate(remote, accountId);
+    const localOptions = optionsFor(local), remoteOptions = optionsFor(remote);
+    const options = Object.fromEntries(optionKeys.map((name) => [name, localOptions[name] || remoteOptions[name]]));
+    const localHasStorage = localOptions.local_storage || localOptions.session_storage;
+    const remoteHasStorage = remoteOptions.local_storage || remoteOptions.session_storage;
+    if (localHasStorage && remoteHasStorage && new URL(local.storage_url).origin !== new URL(remote.storage_url).origin) {
+      fail('本地与云端网页存储来源不同，不能合并；可保留云端或明确覆盖');
+    }
+    const storageUrl = localHasStorage ? local.storage_url : remoteHasStorage ? remote.storage_url :
+      localOptions.page ? local.storage_url : remote.storage_url;
+    const merged = {schema_version: 1, account_id: accountId, sync_options: options, storage_url: storageUrl};
+    const cookies = new Map();
+    // 同名 Cookie 仍按域、路径和分区身份区分，只有完全相同的身份才以本地覆盖。
+    for (const cookie of [...(remoteOptions.cookies ? remote.cookies : []), ...(localOptions.cookies ? local.cookies : [])]) {
+      const partition = cookie.partition_key;
+      const identity = JSON.stringify([cookie.name, cookie.domain, cookie.path,
+        partition?.top_level_site || '', partition?.has_cross_site_ancestor === true]);
+      cookies.set(identity, cookie);
+    }
+    merged.cookies = [...cookies.values()];
+    for (const name of ['local_storage', 'session_storage']) {
+      merged[name] = {...(remoteOptions[name] ? remote[name] || {} : {}), ...(localOptions[name] ? local[name] || {} : {})};
+    }
+    for (const [name, option] of [['fingerprint', 'fingerprint'], ['fingerprint_seed', 'fingerprint'], ['proxy_rules', 'proxy']]) {
+      const selected = localOptions[option] ? local : remote;
+      if (selected[name] !== undefined) merged[name] = selected[name];
+    }
+    if (!options.page) delete merged.storage_url;
+    validate(merged, accountId);
+    return merged;
   }
 
   function encode(bytes) {
@@ -149,7 +186,11 @@
 
   function createController({request, bridge, deviceId, getKey, getOptions, getSession = () => null}) {
     const busy = new Set();
+    const conflicts = new Map();
     const path = (id) => '/api/v1/accounts/' + encodeURIComponent(id);
+    function checkContext(key, session) {
+      if (getSession() !== session || getKey() !== key) fail('会话或快照密钥已变化，操作已停止');
+    }
     async function exclusive(id, action) {
       if (busy.has(id)) fail('该账号正在同步或恢复，请等待完成');
       busy.add(id);
@@ -160,11 +201,13 @@
       if (!Array.isArray(values)) fail('客户端返回的 Tab 列表无效');
       return values;
     }
-    async function waitForPage(tabId, url) {
+    async function waitForPage(tabId, url, key, session) {
       const expected = new URL(url).origin;
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline) {
+        checkContext(key, session);
         const tab = (await tabs()).find((value) => value.id === tabId);
+        checkContext(key, session);
         if (!tab) fail('账号 Tab 已关闭，恢复已停止');
         let origin = '';
         try { origin = new URL(tab.url).origin; } catch (_) { /* 页面正在导航。 */ }
@@ -173,32 +216,62 @@
       }
       fail('账号页面未能及时完成加载，请检查网络后重试恢复');
     }
+    async function save(account, snapshot, key, session, revision, overwrite = false) {
+      const envelope = await encrypt(key, account.account_id, snapshot);
+      checkContext(key, session);
+      const lease = await request(path(account.account_id) + '/leases', {method: 'POST', body: {device_id: deviceId()}});
+      try {
+        checkContext(key, session);
+        const saved = await request(path(account.account_id) + '/snapshot', {
+          method: 'PUT', headers: {'If-Match': String(revision)},
+          body: {schema_version: 1, device_id: deviceId(), envelope, ...(overwrite ? {overwrite: true} : {})},
+        });
+        conflicts.delete(account.account_id);
+        return saved;
+      } catch (error) {
+        if (error?.code === 'snapshot_revision_conflict' && getSession() === session && getKey() === key) conflicts.set(account.account_id, {snapshot, key, session,
+          revision: error.currentRevision});
+        throw error;
+      } finally {
+        // 租约清理失败不能掩盖已成功上传的结果；租约会由服务端自动到期。
+        try { await request(path(account.account_id) + '/leases/' + encodeURIComponent(lease.lease_id), {method: 'DELETE'}); }
+        catch (_) { /* 清理失败由短期租约到期回收。 */ }
+      }
+    }
     return Object.freeze({
+      clearConflicts() { conflicts.clear(); },
+      discardConflict(accountId) { conflicts.delete(accountId); },
+      getConflict(accountId) {
+        const value = conflicts.get(accountId);
+        return value ? {accountId, revision: value.revision} : null;
+      },
+      resolveConflict(account, strategy) {
+        return exclusive(account.account_id, async () => {
+          const pending = conflicts.get(account.account_id);
+          if (!pending) fail('待处理的冲突已清除，请重新同步');
+          if (getKey() !== pending.key || getSession() !== pending.session) fail('会话或快照密钥已变化，请重新同步');
+          if (!['merge', 'overwrite'].includes(strategy)) fail('冲突处理方式无效');
+          const response = await request(path(account.account_id) + '/snapshot');
+          if (response.account_id !== account.account_id || response.schema_version !== 1 || !Number.isSafeInteger(response.revision)) {
+            fail('云端快照标识或版本无效');
+          }
+          const remote = await decrypt(pending.key, account.account_id, response.envelope);
+          const snapshot = strategy === 'merge' ? mergeSnapshots(pending.snapshot, remote, account.account_id) : pending.snapshot;
+          // 使用刚读取的版本进行条件写入，不用通配符覆盖尚未查看的新版本。
+          return save(account, snapshot, pending.key, pending.session, response.revision, strategy === 'overwrite');
+        });
+      },
       upload(account) {
         return exclusive(account.account_id, async () => {
           const session = getSession(), key = getKey();
           if (!key) fail('请先解锁加密快照');
           const tab = (await tabs()).find((value) => value.account_id === account.account_id);
+          checkContext(key, session);
           if (!tab) fail('请先打开该账号的隔离 Tab');
           const raw = await bridge.storage.getSnapshot(tab.id);
+          checkContext(key, session);
           const snapshot = select(raw, account.account_id, getOptions());
-          const envelope = await encrypt(key, account.account_id, snapshot);
-          if (getSession() !== session || getKey() !== key) fail('会话或快照密钥已变化，同步已停止');
-          const lease = await request(path(account.account_id) + '/leases', {
-            method: 'POST', body: {device_id: deviceId()},
-          });
-          let saved;
-          try {
-            saved = await request(path(account.account_id) + '/snapshot', {
-              method: 'PUT', headers: {'If-Match': String(account.revision)},
-              body: {schema_version: 1, device_id: deviceId(), envelope},
-            });
-          } finally {
-            // 租约清理失败不能掩盖已成功上传的结果；租约会由服务端自动到期。
-            try { await request(path(account.account_id) + '/leases/' + encodeURIComponent(lease.lease_id), {method: 'DELETE'}); }
-            catch (_) { /* 清理失败由短期租约到期回收。 */ }
-          }
-          return saved;
+          return save(account, snapshot, key, session, account.revision);
         });
       },
       restore(account) {
@@ -208,9 +281,10 @@
           const response = await request(path(account.account_id) + '/snapshot');
           if (response.account_id !== account.account_id || response.schema_version !== 1) fail('云端快照标识或版本无效');
           const snapshot = await decrypt(key, account.account_id, response.envelope);
-          if (getSession() !== session || getKey() !== key) fail('会话或快照密钥已变化，恢复已停止');
+          checkContext(key, session);
           const options = optionsFor(snapshot);
           let tab = (await tabs()).find((value) => value.account_id === account.account_id);
+          checkContext(key, session);
           if (tab && ((options.proxy && tab.proxy_rules !== (snapshot.proxy_rules || '')) ||
               (options.fingerprint && tab.fingerprint_seed !== (snapshot.fingerprint_seed || '')))) {
             fail('当前 Tab 的代理或指纹种子与云端不同，请先关闭该账号 Tab 再恢复');
@@ -219,12 +293,16 @@
           if (!tab) tab = await bridge.tabs.create({accountId: account.account_id, url,
             ...(options.proxy ? {proxyRules: snapshot.proxy_rules || ''} : {}),
             ...(options.fingerprint ? {fingerprintSeed: snapshot.fingerprint_seed || ''} : {})});
+          checkContext(key, session);
           if (options.fingerprint && snapshot.fingerprint) await bridge.fingerprint.set(tab.id, snapshot.fingerprint);
+          checkContext(key, session);
           if (options.page && snapshot.storage_url) {
             if (await bridge.tabs.navigate(tab.id, url) === false) fail('无法导航到账号页面');
-            if (/^https?:/i.test(url)) await waitForPage(tab.id, url);
+            if (/^https?:/i.test(url)) await waitForPage(tab.id, url, key, session);
           }
+          checkContext(key, session);
           if (await bridge.storage.writeSnapshot(tab.id, snapshot) === false) fail('账号快照写入失败');
+          checkContext(key, session);
           await bridge.tabs.activate(tab.id);
           return {tab, revision: response.revision};
         });
@@ -232,7 +310,7 @@
     });
   }
 
-  const api = Object.freeze({defaults, passwordKey, encrypt, decrypt, select, validate, createController});
+  const api = Object.freeze({defaults, passwordKey, encrypt, decrypt, select, validate, mergeSnapshots, createController});
   global.saasSnapshotSync = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof window === 'undefined' ? globalThis : window);

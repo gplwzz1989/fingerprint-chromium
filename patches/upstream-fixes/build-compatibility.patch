@@ -1537,7 +1537,7 @@ diff --git a/v8/src/builtins/frames.tq b/v8/src/builtins/frames.tq
    const result: RawPtr = LoadPointerFromFrame(f, kStandardFrameCallerFPOffset);
    return %RawDownCast<Frame>(result);
  }
-@@ -100,7 +100,7 @@ operator '.context_or_frame_type' macro LoadContextOrFrameTypeFromFrame(
+@@ -100,8 +100,8 @@ operator '.context_or_frame_type' macro LoadContextOrFrameTypeFromFrame(
        LoadObjectFromFrame(f, kStandardFrameContextOrFrameTypeOffset));
  }
  
@@ -1593,7 +1593,7 @@ diff --git a/tools/protoc_wrapper/protoc-gen-ts_proto.bat b/tools/protoc_wrapper
 diff --git a/media/gpu/BUILD.gn b/media/gpu/BUILD.gn
 --- a/media/gpu/BUILD.gn
 +++ b/media/gpu/BUILD.gn
-@@ -85,6 +85,10 @@ component("gpu") {
+@@ -85,10 +85,10 @@ component("gpu") {
    configs += [
      "//build/config/compiler:wexit_time_destructors",
      "//build/config/compiler:wglobal_constructors",
@@ -1607,20 +1607,20 @@ diff --git a/media/gpu/BUILD.gn b/media/gpu/BUILD.gn
 diff --git a/third_party/blink/renderer/platform/fonts/font_cache.cc b/third_party/blink/renderer/platform/fonts/font_cache.cc
 --- a/third_party/blink/renderer/platform/fonts/font_cache.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
-@@ -35,6 +35,7 @@
+@@ -35,5 +35,6 @@
  #include "base/command_line.h"
  #include "base/debug/alias.h"
  #include "base/feature_list.h"
 +#include "base/no_destructor.h"
  #include "base/notreached.h"
  #include "base/strings/escape.h"
-@@ -202,7 +203,7 @@
+@@ -202,4 +203,4 @@
  
  // 判断是否为基础字体（不应被处理）
  static bool IsBasicFont(const std::string& font_family) {
 -  static const std::set<std::string> basic_fonts = {
 +  static const base::NoDestructor<std::set<std::string>> basic_fonts({
-@@ -235,7 +236,7 @@
+@@ -235,5 +236,5 @@
      "math",
  
      // 系统字体别名
@@ -1640,7 +1640,7 @@ diff --git a/third_party/blink/renderer/core/BUILD.gn b/third_party/blink/render
     "//base",
 +    "//components/ungoogled:ungoogled_switches",
     "//components/attribution_reporting",
-@@ -432,5 +432,6 @@ blink_core_sources("core") {
+@@ -432,4 +432,4 @@ blink_core_sources("core") {
     "//third_party/blink/public:image_resources_grit",
     "//third_party/blink/public:resources",
     "//third_party/blink/public/common",
@@ -1666,7 +1666,7 @@ diff --git a/third_party/blink/public/common/user_agent/user_agent_metadata.h b/
 diff --git a/components/search_engines/template_url_service.cc b/components/search_engines/template_url_service.cc
 --- a/components/search_engines/template_url_service.cc
 +++ b/components/search_engines/template_url_service.cc
-@@ -588,9 +588,9 @@ TemplateURLService::TemplateURLService(
+@@ -588,6 +588,6 @@ TemplateURLService::TemplateURLService(
      const base::RepeatingClosure& dsp_change_callback)
      : prefs_(prefs),
 -      should_autocollect_(true),
@@ -1677,14 +1677,14 @@ diff --git a/components/search_engines/template_url_service.cc b/components/sear
 diff --git a/components/assist_ranker/ranker_url_fetcher.cc b/components/assist_ranker/ranker_url_fetcher.cc
 --- a/components/assist_ranker/ranker_url_fetcher.cc
 +++ b/components/assist_ranker/ranker_url_fetcher.cc
-@@ -35,6 +35,7 @@ bool RankerURLFetcher::Request(
+@@ -35,5 +35,6 @@ bool RankerURLFetcher::Request(
      const GURL& url,
      RankerURLFetcher::Callback callback,
      network::mojom::URLLoaderFactory* url_loader_factory) {
    return false;
 +#if 0
    // This function is not supposed to be called if the previous operation is not
-@@ -88,6 +89,7 @@ bool RankerURLFetcher::Request(
+@@ -88,3 +89,4 @@ bool RankerURLFetcher::Request(
        base::Unretained(this)));
 
    return true;
@@ -1693,7 +1693,7 @@ diff --git a/components/assist_ranker/ranker_url_fetcher.cc b/components/assist_
 diff --git a/components/crash/core/app/crashpad.cc b/components/crash/core/app/crashpad.cc
 --- a/components/crash/core/app/crashpad.cc
 +++ b/components/crash/core/app/crashpad.cc
-@@ -67,1 +67,2 @@
+@@ -67,2 +67,3 @@
 -void InitializeDatabasePath(const base::FilePath& database_path) {
 +[[maybe_unused]] void InitializeDatabasePath(
 +    const base::FilePath& database_path) {
@@ -1726,12 +1726,12 @@ diff --git a/third_party/blink/renderer/modules/BUILD.gn b/third_party/blink/ren
 diff --git a/components/translate/core/browser/translate_ranker_impl.cc b/components/translate/core/browser/translate_ranker_impl.cc
 --- a/components/translate/core/browser/translate_ranker_impl.cc
 +++ b/components/translate/core/browser/translate_ranker_impl.cc
-@@ -230,6 +230,7 @@ bool TranslateRankerImpl::ShouldOfferTranslation(
+@@ -230,3 +230,4 @@ bool TranslateRankerImpl::ShouldOfferTranslation(
    return kDefaultResponse;
  
 +#if 0
    translate_event->set_ranker_request_timestamp_sec(
-@@ -266,6 +267,7 @@ bool TranslateRankerImpl::ShouldOfferTranslation(
+@@ -266,4 +267,5 @@ bool TranslateRankerImpl::ShouldOfferTranslation(
    }
  
    return result;
@@ -1740,10 +1740,10 @@ diff --git a/components/translate/core/browser/translate_ranker_impl.cc b/compon
 diff --git a/components/autofill/core/browser/foundations/autofill_manager.cc b/components/autofill/core/browser/foundations/autofill_manager.cc
 --- a/components/autofill/core/browser/foundations/autofill_manager.cc
 +++ b/components/autofill/core/browser/foundations/autofill_manager.cc
-@@ -789,2 +789,2 @@
+@@ -789,1 +789,1 @@
 -            context.autofill_predictions = std::move(model_predictions);
 +            break;
-@@ -792,2 +792,2 @@
+@@ -792,1 +792,1 @@
 -            context.password_manager_predictions = std::move(model_predictions);
 +            break;
 diff --git a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc b/components/autofill/core/browser/crowdsourcing/autofill_crowdsourcing_manager.cc
@@ -1765,7 +1765,7 @@ diff --git a/components/autofill/core/browser/crowdsourcing/autofill_crowdsourci
 diff --git a/content/browser/attribution_reporting/attribution_suitable_context.cc b/content/browser/attribution_reporting/attribution_suitable_context.cc
 --- a/content/browser/attribution_reporting/attribution_suitable_context.cc
 +++ b/content/browser/attribution_reporting/attribution_suitable_context.cc
-@@ -37,5 +37,0 @@
+@@ -37,4 +37,0 @@
 -bool UkmSourceIdAllowed(RenderFrameHostImpl* rfh) {
 -  return rfh->GetLifecycleState() !=
 -         RenderFrameHost::LifecycleState::kPrerendering;

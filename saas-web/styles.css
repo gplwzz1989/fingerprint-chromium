@@ -194,6 +194,11 @@ button { cursor: pointer; }
 .sync-options legend { color: var(--text-soft); font-size: 12px; }
 .sync-options label { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .table-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.wide-modal { width: min(720px, calc(100% - 28px)); }
+.admin-status { padding: 12px 22px; }
+.admin-row { display: flex; padding: 12px 0; flex-wrap: wrap; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+.admin-row > span { flex: 1; overflow-wrap: anywhere; }
+.admin-row .select-input { min-width: 100px; }
 #tabs-content .panel-copy, #security-content .panel-copy { padding: 0 22px 16px; }
 button:disabled { opacity: .45; cursor: wait; }
 .sync-badge { padding: 5px 8px; color: var(--cyan); background: rgba(117, 215, 208, .08); border: 1px solid rgba(117, 215, 208, .16); border-radius: 3px; font-size: 9px; }

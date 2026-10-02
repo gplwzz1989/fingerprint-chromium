@@ -50,6 +50,8 @@
 
 真实 PostgreSQL 的初始化、登录、跨设备快照读取、租约冲突、版本冲突、覆盖审计及撤销会话集成测试已通过；原生浏览器与云端的完整运行联调仍待完成。
 
+本轮已完成服务端限流：`SAAS_RATE_LIMIT_ENABLED=true`、`SAAS_RATE_LIMIT_WINDOW=1m`、`SAAS_RATE_LIMIT_AUTH_REQUESTS=30`、`SAAS_RATE_LIMIT_API_REQUESTS=300`、`SAAS_RATE_LIMIT_MAX_KEYS=10000` 为默认配置；具体范围和关闭方式见 `saas-server/README.md`。鉴权接口共享真实来源 IP 额度，其他 API 使用已验签用户或 IP，不信任任意转发头，健康检查、静态文件和预检豁免。超限返回中文 `429` 与 `Retry-After`，并发计数、容量限制及请求驱动过期回收已实现；当前为单进程固定窗口，生产负载、多实例及反向代理部署仍需验收。
+
 ### 阶段 D：独立 SaaS Web 项目和原生能力桥（桌面首版已完成，Android 适配进行中）
 
 - 前端独立为 `saas-web/`，后端继续独立为 `saas-server/`；登录、工作区、成员、账号目录、同步和权限逻辑不再新增到 Chromium WebUI。
@@ -61,26 +63,32 @@
 - 独立 Web 已实现单个/批量加密同步与恢复、同步类别选择、Tab 列表、指纹编辑和设备会话撤销；版本冲突不会自动覆盖云端数据。
 - 桥接层只负责本地能力和平台适配，不保存 SaaS 业务状态，不实现登录、成员、计费等业务逻辑。
 
+桌面首版完成指源码和局部验证；PC 新 Chrome 尚未重新链接，最新原生桥仍未在新运行版验收。Development 主 `build.ninja` 仅 558 字节，临时 driver 干跑 `chrome.dll` 列出 54340 个待执行步骤，均未执行；待办为构建图/缓存恢复及统一构建，不是 Windows SDK 缺失。
+
 ### 阶段 E：SaaS HTTP 部署和生产环境（HTTP 首版已完成，生产集成待完成）
 
 - 独立 SaaS 前端和后端已支持通过 `SAAS_WEB_DIR` 由同一 HTTP 服务托管，保留配置化监听地址、健康检查和数据库迁移；API 预检路由已覆盖。
 - 生产高权限页面使用 HTTPS；HTTP 仅用于本地开发或受控内网，不能仅依赖 CORS 授予本地原生权限。
 - 完成白名单构建配置、反向代理部署、真实 PostgreSQL 初始化、登录、同步、租约和冲突集成测试。
-- 增加多设备并发恢复、服务端限流、审计和敏感数据不落日志测试。
+- 服务端限流专项已通过超限/恢复、伪造转发头、用户与 IP 配额、无效令牌回退、豁免请求、中文错误及等待秒数、容量满保留旧计数和过期释放测试；512 协程并发额度/容量测试连续运行 20 次通过，1000 个新标识不能淘汰旧计数。
+- 限流任务的 `go test ./...`、`go vet ./...` 通过；整合后已配置独立 PostgreSQL 再次验证全包通过。竞态检测因缺少 CGO 所需 C 编译器未运行，配置包额外覆盖率采集被 Windows 拒绝执行；普通配置测试通过。
+- 继续完成多设备并发恢复、审计和敏感数据不落日志的整体运行测试。
 
-### 阶段 F：Android 移动客户端（契约已开始，原生适配待工具链）
+### 阶段 F：Android 移动客户端（契约与独立快照加密已实现，Chromium 与 APK 尚未集成）
 
 - 已建立 `android-bridge/` 契约目录；下一步建立独立 Android GN 输出和最小编译验证，不复用 Windows 的输出目录和工具链。
 - Android 启动流程和关闭过滤已接入共享默认地址，JNI 生成及补丁反向应用检查通过；完整 Java/C++ 编译及 APK 运行验收尚未完成。
+- `SnapshotCrypto`、`SnapshotJson` 与 Kotlin 适配器已完成真实 PBKDF2/AES-GCM 实现；JVM 55 项、网页与 JVM 双向互通 39 项、Kotlin 适配器 8 项通过，覆盖 Unicode、错误密码、跨账号、篡改及明文/密文容量边界。
+- 上述结果仅为独立模块验证；Chromium Android 消息通道、Origin 校验、平台能力和 APK/AAB 未集成，`capabilities.crypto` 保持 `false`，尚未完成设备运行验证。
 - 复用独立 SaaS Web 前端，通过同一套 `window.saasBridge` 契约接入 Android 原生适配层。
 - 实现 Android Tab、账号隔离、指纹配置、Cookie/网页存储、Keystore 会话和应用生命周期恢复。
 - 文件能力使用 Android Storage Access Framework 和授权 URI；网络能力使用 Android 原生适配，不假设存在 Windows 文件路径。
 - 完成 APK/AAB 构建、安装升级、权限撤销、断网恢复和移动端账号隔离测试。
 
-### 阶段 G：产品化和发布（未开始）
+### 阶段 G：产品化和发布（服务端限流已实现，其余安全项与发布待完成）
 
 - 代理地址、认证引用和代理凭证密文分离。
-- 服务端限流、配额、数据保留和计费边界。
+- 服务端限流已实现并完成上述局部测试；生产负载与多实例验证、业务配额、数据保留和计费边界仍待完成。
 - 账号环境删除、导入、导出和设备授权的完整审计。
 - 真实多设备并发恢复测试。
 - Release 配置整体编译、安装包制作、升级和回滚测试。
@@ -96,10 +104,10 @@
 
 ## 4. 当前下一步
 
-1. 完成两个账号 Tab 的运行版隔离验收，并记录 Cookie、LocalStorage、代理和指纹结果。
+1. 先恢复 Development 构建图与缓存，评估范围后统一构建并链接新 Chrome，再完成两个账号 Tab 的运行版隔离验收，记录 Cookie、LocalStorage、代理和指纹结果。
 2. 用开发版目标编译验证桌面桥接，确认白名单页面能调用 Tab、存储和指纹，普通页面不能调用。
 3. 完成真实 PostgreSQL 集成、HTTP 部署和生产 HTTPS 边界测试。
 4. 完成文件与原生 HTTP 的权限撤销、审计、异常恢复和运行版验证；未接入的平台继续保持能力不可用。
-5. 准备 Android SDK/NDK 后完成最小 Android 构建和 `android-bridge/` 平台适配。
+5. 配置 Android 独立 SDK/NDK 构建输出，完成最小构建及 Chromium 原生消息通道与平台适配，再将已验证的快照加密模块集成到 APK。
 6. 决定 IndexedDB、Cache Storage、Service Worker 是否进入 SaaS 同步范围；在决定前保持明确不支持状态。
 7. 完成产品化安全项后，再申请 Windows 和 Android Release 整体编译与发布回归。

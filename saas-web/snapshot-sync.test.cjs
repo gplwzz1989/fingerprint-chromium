@@ -77,3 +77,86 @@ test('HTTP 无 WebCrypto 环境通过原生契约加密，密钥对象不暴露�
   nativeBridge.describe = async () => ({available: false, capabilities: {}});
   await assert.rejects(client.passwordKey('native-password-test-123'), /加密能力/);
 });
+
+test('合并区分 Cookie 分区和域，保留两端键并拒绝混合来源', () => {
+  const local = fixture(), remote = fixture();
+  const cookie = {name: 'token', value: '云端测试', domain: '.example.test', path: '/'};
+  remote.cookies = [cookie, {...cookie, domain: 'other.example.test', value: '其他域'}];
+  local.cookies = [{...cookie, value: '本地测试'}, {...cookie, partition_key: {top_level_site: 'https://example.test', has_cross_site_ancestor: true}}];
+  remote.local_storage = {remote: '云端键', shared: '云端值'};
+  local.local_storage = {local: '本地键', shared: '本地值'};
+  const result = sync.mergeSnapshots(local, remote, 'test-account');
+  assert.equal(result.cookies.length, 3);
+  assert.equal(result.cookies.find((value) => value.domain === '.example.test' && !value.partition_key).value, '本地测试');
+  assert.deepEqual(result.local_storage, {remote: '云端键', shared: '本地值', local: '本地键'});
+  assert.throws(() => sync.mergeSnapshots(local, {...remote, storage_url: 'https://other.test/'}, 'test-account'), /不能合并/);
+});
+
+test('冲突覆盖必须使用刚读取的版本，云端再次更新时继续拒绝覆盖', async () => {
+  // 测试专用接口边界模拟版本竞争；快照加解密仍使用真实 WebCrypto。
+  const key = await sync.passwordKey('conflict-password-test');
+  const cloud = fixture(); cloud.local_storage.cloud = '云端键';
+  let revision = 1, envelope = await sync.encrypt(key, 'test-account', cloud), race = false;
+  const puts = [], deletes = [];
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-user', getOptions: () => sync.defaults,
+    bridge: {tabs: {list: async () => [{id: 'test-tab', account_id: 'test-account'}]},
+      storage: {getSnapshot: async () => fixture()}},
+    request: async (path, options = {}) => {
+      if (options.method === 'POST') return {lease_id: 'test-lease'};
+      if (options.method === 'DELETE') { deletes.push(path); return null; }
+      if (!options.method) return {account_id: 'test-account', schema_version: 1, revision, envelope};
+      puts.push(options);
+      if (race) { revision++; race = false; }
+      if (String(revision) !== options.headers['If-Match']) {
+        const error = new Error('测试版本冲突'); error.code = 'snapshot_revision_conflict'; error.currentRevision = revision; throw error;
+      }
+      envelope = options.body.envelope; revision++; return {revision};
+    }});
+  const account = {account_id: 'test-account', revision: 0};
+  await assert.rejects(controller.upload(account), /版本冲突/);
+  assert.equal(controller.getConflict('test-account').revision, 1);
+  race = true;
+  await assert.rejects(controller.resolveConflict(account, 'overwrite'), /版本冲突/);
+  assert.equal(puts.at(-1).headers['If-Match'], '1');
+  assert.equal(puts.at(-1).body.overwrite, true);
+  assert.equal(controller.getConflict('test-account').revision, 2);
+  assert.equal((await controller.resolveConflict(account, 'merge')).revision, 3);
+  assert.equal(puts.at(-1).headers['If-Match'], '2');
+  assert.equal(puts.at(-1).body.overwrite, undefined);
+  assert.equal((await sync.decrypt(key, 'test-account', envelope)).local_storage.cloud, '云端键');
+  assert.equal(deletes.length, 3);
+  assert.equal(controller.getConflict('test-account'), null);
+});
+
+test('获取租约期间锁定快照后停止写入，仍释放已取得的租约', async () => {
+  // 测试专用接口边界注入锁定时机，不替代生产业务；加解密使用真实 WebCrypto。
+  let key = await sync.passwordKey('lock-during-lease-test');
+  const methods = [];
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => sync.defaults,
+    bridge: {tabs: {list: async () => [{id: 'test-tab', account_id: 'test-account'}]},
+      storage: {getSnapshot: async () => fixture()}},
+    request: async (_path, options) => {
+      methods.push(options.method);
+      if (options.method === 'POST') { key = null; return {lease_id: 'test-lease'}; }
+      return null;
+    }});
+  await assert.rejects(controller.upload({account_id: 'test-account', revision: 0}), /操作已停止/);
+  assert.deepEqual(methods, ['POST', 'DELETE']);
+});
+
+test('恢复读取 Tab 期间会话变化后不能写入本地或创建新 Tab', async () => {
+  const key = await sync.passwordKey('restore-session-switch-test');
+  const envelope = await sync.encrypt(key, 'test-account', fixture());
+  let session = 'original-session', writes = 0;
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => session, getOptions: () => sync.defaults,
+    request: async () => ({account_id: 'test-account', schema_version: 1, revision: 1, envelope}),
+    bridge: {tabs: {
+      list: async () => { session = 'new-session'; return []; },
+      create: async () => { writes++; },
+    }, storage: {writeSnapshot: async () => { writes++; }}}});
+  await assert.rejects(controller.restore({account_id: 'test-account'}), /操作已停止/);
+  assert.equal(writes, 0);
+});

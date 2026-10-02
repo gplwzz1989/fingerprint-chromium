@@ -50,7 +50,7 @@
  }
  
  void GCMClientImpl::OnLoadCompleted(
-@@ -431,6 +399,7 @@ void GCMClientImpl::StartGCM() {
+@@ -431,6 +399,8 @@ void GCMClientImpl::StartGCM() {
  
  void GCMClientImpl::InitializeMCSClient() {
    DCHECK(network_connection_tracker_);
