@@ -15,7 +15,7 @@
           <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
           <div>
             <div class="brand-name">指纹云控</div>
-            <div class="brand-caption">ACCOUNT OPERATIONS</div>
+            <div class="brand-caption">多账号运营</div>
           </div>
         </div>
         <div class="sidebar-rule"></div>
@@ -36,7 +36,7 @@
             <span class="status-dot is-muted"></span>
             <span>原生桥未连接</span>
           </div>
-          <div class="sidebar-version">SAAS CONSOLE / 0.1</div>
+          <div class="sidebar-version">云控控制台 / 0.1</div>
         </div>
       </aside>
 
@@ -56,7 +56,7 @@
         <section class="page-content" id="login-view">
           <div class="login-layout">
             <div class="login-intro">
-              <div class="eyebrow accent-eyebrow">PRIVATE BROWSER CONTROL PLANE</div>
+              <div class="eyebrow accent-eyebrow">独立环境 · 统一管理</div>
               <h1>让每个账号，<br><em>拥有自己的环境。</em></h1>
               <p>统一管理隔离 Tab、账号目录与跨设备环境同步。浏览器原生能力只对已授权的 SaaS 来源开放。</p>
               <div class="intro-points">
@@ -83,8 +83,8 @@
         <section class="page-content app-view" id="app-view" hidden>
           <div class="page-heading">
             <div>
-              <div class="eyebrow accent-eyebrow">WORKSPACE OPERATIONS</div>
-              <h1>账号总览</h1>
+              <div class="eyebrow accent-eyebrow">工作区管理</div>
+              <h1 id="view-heading">账号总览</h1>
               <p>管理可访问的账号环境，并将它们交给浏览器原生 Tab 执行。</p>
             </div>
             <div class="heading-controls">
@@ -94,6 +94,27 @@
             </div>
           </div>
 
+          <div id="overview-content">
+          <section class="panel sync-panel" aria-label="环境同步设置">
+            <div class="panel-heading"><h2>加密环境同步</h2><span class="sync-badge" id="snapshot-lock-state">未解锁</span></div>
+            <form id="snapshot-unlock-form" class="inline-form">
+              <label class="field-label" for="snapshot-password">快照密码</label>
+              <input class="text-input" id="snapshot-password" type="password" autocomplete="off" minlength="12" placeholder="跨设备使用相同密码" required>
+              <button class="secondary-button" type="submit">解锁</button>
+              <button class="secondary-button" id="snapshot-lock-button" type="button">锁定</button>
+            </form>
+            <p class="panel-copy">密码只在当前页面内存中用于加密，刷新后重新解锁。旧快照使用原登录密码；团队共享账号应使用约定的快照密码。</p>
+            <fieldset class="sync-options" id="sync-options"><legend>选择同步内容（同步能力始终启用）</legend>
+              <label><input type="checkbox" name="cookies" checked> Cookie</label>
+              <label><input type="checkbox" name="local_storage" checked> 本地存储</label>
+              <label><input type="checkbox" name="session_storage" checked> 会话存储</label>
+              <label><input type="checkbox" name="fingerprint" checked> 指纹</label>
+              <label><input type="checkbox" name="proxy" checked> 代理</label>
+              <label><input type="checkbox" name="page" checked> 页面地址</label>
+            </fieldset>
+            <div class="inline-form"><button class="secondary-button" id="sync-all-button" type="button">同步已打开的账号</button><button class="secondary-button" id="restore-all-button" type="button">恢复当前工作区账号</button></div>
+            <div class="form-status" id="operation-status" role="status" aria-live="polite"></div>
+          </section>
           <div class="metric-grid">
             <article class="metric-card metric-primary">
               <div class="metric-label">可访问账号</div>
@@ -116,7 +137,7 @@
             <section class="panel account-panel">
               <div class="panel-heading">
                 <div>
-                  <div class="panel-kicker">ACCOUNT DIRECTORY</div>
+                  <div class="panel-kicker">账号目录</div>
                   <h2>账号环境</h2>
                 </div>
                 <button class="primary-small-button" id="new-account-button" type="button">添加账号 <span>＋</span></button>
@@ -138,7 +159,7 @@
             </section>
 
             <aside class="panel bridge-panel">
-              <div class="panel-kicker">NATIVE BRIDGE</div>
+              <div class="panel-kicker">本机连接</div>
               <h2>浏览器能力</h2>
               <p class="panel-copy">独立 Web 前端只通过版本化桥接调用本地能力，不在页面中复制浏览器业务逻辑。</p>
               <div class="bridge-status-block" id="bridge-status-block">
@@ -152,7 +173,7 @@
 
           <section class="panel activity-panel">
             <div class="panel-heading compact-heading">
-              <div><div class="panel-kicker">WORKFLOW</div><h2>下一步</h2></div>
+              <div><div class="panel-kicker">操作流程</div><h2>下一步</h2></div>
               <span class="sync-badge">API 已连接</span>
             </div>
             <div class="workflow-steps">
@@ -163,6 +184,17 @@
               <div class="workflow-step"><span class="step-number">03</span><div><strong>同步环境</strong><small>使用客户端加密快照</small></div></div>
             </div>
           </section>
+          </div>
+          <section class="panel" id="tabs-content" hidden>
+            <div class="panel-heading"><h2>本机运行环境</h2><button class="secondary-button" id="refresh-tabs-button" type="button">刷新 Tab</button></div>
+            <div class="table-wrap"><table class="account-table"><thead><tr><th>账号与页面</th><th>隔离状态</th><th>操作</th></tr></thead><tbody id="tabs-table-body"></tbody></table></div>
+            <p class="panel-copy" id="tabs-status" role="status"></p>
+          </section>
+          <section class="panel" id="security-content" hidden>
+            <div class="panel-heading"><h2>登录设备</h2><button class="secondary-button" id="refresh-sessions-button" type="button">刷新会话</button></div>
+            <div class="table-wrap"><table class="account-table"><thead><tr><th>设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="sessions-table-body"></tbody></table></div>
+            <p class="panel-copy" id="sessions-status" role="status"></p>
+          </section>
         </section>
 
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -171,35 +203,51 @@
 
     <dialog class="modal" id="account-modal">
       <form method="dialog" class="modal-card" id="account-form">
-        <button class="modal-close" value="cancel" type="submit" aria-label="关闭">×</button>
-        <div class="card-kicker">ACCOUNT DIRECTORY</div>
+        <button class="modal-close" value="cancel" type="submit" formnovalidate aria-label="关闭">×</button>
+        <div class="card-kicker">账号目录</div>
         <h2>添加账号环境</h2>
         <p class="card-description">账号标识会绑定本地 Tab 分区与云端快照，创建后不应随意变更。</p>
         <label class="field-label" for="account-id">稳定标识</label>
-        <input class="text-input" id="account-id" name="account_id" pattern="[A-Za-z0-9_-]+" placeholder="account-01" required>
+        <input class="text-input" id="account-id" name="account_id" pattern="[A-Za-z0-9_\-]+" placeholder="account-01" required>
         <label class="field-label" for="account-name">显示名称</label>
         <input class="text-input" id="account-name" name="name" maxlength="256" placeholder="主账号" required>
         <label class="field-label" for="account-labels">标签 <span class="optional">可选，用逗号分隔</span></label>
         <input class="text-input" id="account-labels" name="labels" placeholder="电商, 主站">
         <div class="form-status" id="account-status" role="status" aria-live="polite"></div>
-        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button class="primary-button" id="account-submit" value="default" type="submit">创建账号 <span>→</span></button></div>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" id="account-submit" value="default" type="submit">创建账号 <span>→</span></button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="workspace-modal">
       <form method="dialog" class="modal-card" id="workspace-form">
-        <button class="modal-close" value="cancel" type="submit" aria-label="关闭">×</button>
-        <div class="card-kicker">WORKSPACE</div>
+        <button class="modal-close" value="cancel" type="submit" formnovalidate aria-label="关闭">×</button>
+        <div class="card-kicker">工作区</div>
         <h2>新建工作区</h2>
         <p class="card-description">你会自动成为新工作区的所有者。</p>
         <label class="field-label" for="workspace-name">名称</label>
         <input class="text-input" id="workspace-name" name="name" maxlength="128" placeholder="增长团队" required>
         <div class="form-status" id="workspace-status" role="status" aria-live="polite"></div>
-        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit">取消</button><button class="primary-button" id="workspace-submit" value="default" type="submit">创建工作区 <span>→</span></button></div>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" id="workspace-submit" value="default" type="submit">创建工作区 <span>→</span></button></div>
       </form>
     </dialog>
 
+    <dialog class="modal" id="fingerprint-modal">
+      <form method="dialog" class="modal-card" id="fingerprint-form">
+        <button class="modal-close" value="cancel" type="submit" formnovalidate aria-label="关闭">×</button>
+        <h2>账号指纹配置</h2>
+        <input type="hidden" name="tab_id">
+        <label class="field-label" for="fingerprint-ua">用户代理字符串</label>
+        <textarea class="text-input" id="fingerprint-ua" name="user_agent" maxlength="512" rows="4"></textarea>
+        <label class="field-label" for="fingerprint-cores">硬件并发数（0 使用默认）</label>
+        <input class="text-input" id="fingerprint-cores" name="hardware_concurrency" type="number" min="0" max="64" step="1" required>
+        <p class="panel-copy">代理与指纹种子在创建环境时确定，恢复不同配置需先关闭原账号 Tab。</p>
+        <div class="form-status" id="fingerprint-status" role="status"></div>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" type="submit" value="default">应用指纹</button></div>
+      </form>
+    </dialog>
     <script src="/bridge-contract.js"></script>
+    <script src="/snapshot-sync.js"></script>
+    <script src="/operations.js"></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

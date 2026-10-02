@@ -1,0 +1,145 @@
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -14,6 +14,12 @@
+ #include <vector>
+ 
+ #include "base/base64.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/rand_util.h"
++#include "crypto/aead.h"
++#include "third_party/boringssl/src/include/openssl/evp.h"
++#include "third_party/boringssl/src/include/openssl/mem.h"
+ #include "base/check_is_test.h"
+ #include "base/containers/contains.h"
+ #include "base/feature_list.h"
+@@ -184,6 +190,9 @@ constexpr char kSaasFilesDirectory[] = "SaasFiles";
+ constexpr size_t kMaxSaasFileBytes = 64 * 1024 * 1024;
+ constexpr size_t kMaxSaasHttpResponseBytes = 16 * 1024 * 1024;
+ 
++base::Value::Dict ProcessSaasSnapshotCryptoOnBlockingThread(
++    std::string method, base::Value::Dict input);
++
+ base::Value::Dict MakeSaasFileResult(bool success,
+                                      base::Value value,
+                                      std::string error = {}) {
+@@ -197,6 +206,93 @@ base::Value::Dict MakeSaasFileResult(bool success,
+   return result;
+ }
+ 
++base::Value::Dict ProcessSaasSnapshotCryptoOnBlockingThread(
++    std::string method, base::Value::Dict input) {
++  const std::string* password = input.FindString("password");
++  const std::string* account_id = input.FindString("accountId");
++  if (!password || password->size() < 12 || password->size() > 4096 ||
++      !account_id || !ManagedTabContext::IsValidId(*account_id)) {
++    return MakeSaasFileResult(false, base::Value(), "快照密码或账号标识无效");
++  }
++  const bool encrypt = method == "crypto.encryptSnapshot";
++  std::string salt, nonce, ciphertext, tag, plaintext;
++  int iterations = 600000;
++  if (encrypt) {
++    const base::Value::Dict* snapshot = input.FindDict("snapshot");
++    if (!snapshot || snapshot->FindInt("schema_version") != 1 ||
++        !snapshot->FindString("account_id") ||
++        *snapshot->FindString("account_id") != *account_id ||
++        !base::JSONWriter::Write(*snapshot, &plaintext) ||
++        plaintext.size() > 14 * 1024 * 1024) {
++      return MakeSaasFileResult(false, base::Value(), "账号快照格式无效或内容过大");
++    }
++    salt = base::RandBytesAsString(16);
++    nonce = base::RandBytesAsString(12);
++  } else {
++    const base::Value::Dict* envelope = input.FindDict("envelope");
++    if (!envelope || !envelope->FindString("algorithm") ||
++        *envelope->FindString("algorithm") != "AES-256-GCM" ||
++        !envelope->FindString("kdf") ||
++        *envelope->FindString("kdf") != "PBKDF2-HMAC-SHA-256") {
++      return MakeSaasFileResult(false, base::Value(), "快照加密参数不受支持");
++    }
++    iterations = envelope->FindInt("iterations").value_or(0);
++    auto decode = [&](const char* name, size_t max_bytes, std::string* out) {
++      const std::string* value = envelope->FindString(name);
++      return value && value->size() <= ((max_bytes + 2) / 3) * 4 &&
++             base::Base64Decode(*value, out) && out->size() <= max_bytes;
++    };
++    if (iterations < 600000 || iterations > 2000000 ||
++        !decode("salt", 64, &salt) || salt.size() < 16 ||
++        !decode("nonce", 12, &nonce) || nonce.size() != 12 ||
++        !decode("ciphertext", 16 * 1024 * 1024, &ciphertext) ||
++        ciphertext.size() < 16 || !decode("tag", 16, &tag) || tag.size() != 16) {
++      return MakeSaasFileResult(false, base::Value(), "加密快照格式无效");
++    }
++  }
++
++  struct SnapshotKey {
++    std::string bytes = std::string(32, '\0');
++    ~SnapshotKey() { OPENSSL_cleanse(bytes.data(), bytes.size()); }
++  } key;
++  if (!PKCS5_PBKDF2_HMAC(password->data(), password->size(),
++                        reinterpret_cast<const uint8_t*>(salt.data()),
++                        salt.size(), iterations, EVP_sha256(), key.bytes.size(),
++                        reinterpret_cast<uint8_t*>(key.bytes.data()))) {
++    return MakeSaasFileResult(false, base::Value(), "快照密钥生成失败");
++  }
++  crypto::Aead aead(crypto::Aead::AES_256_GCM);
++  aead.Init(&key.bytes);
++  const std::string aad = "fingerprint-manager:v1:" + *account_id;
++  if (encrypt) {
++    if (!aead.Seal(plaintext, nonce, aad, &ciphertext) || ciphertext.size() < 16) {
++      return MakeSaasFileResult(false, base::Value(), "账号快照加密失败");
++    }
++    tag = ciphertext.substr(ciphertext.size() - 16);
++    ciphertext.resize(ciphertext.size() - 16);
++    base::Value::Dict envelope;
++    envelope.Set("algorithm", "AES-256-GCM");
++    envelope.Set("kdf", "PBKDF2-HMAC-SHA-256");
++    envelope.Set("iterations", iterations);
++    envelope.Set("salt", base::Base64Encode(salt));
++    envelope.Set("nonce", base::Base64Encode(nonce));
++    envelope.Set("ciphertext", base::Base64Encode(ciphertext));
++    envelope.Set("tag", base::Base64Encode(tag));
++    return MakeSaasFileResult(true, base::Value(std::move(envelope)));
++  }
++  ciphertext += tag;
++  if (!aead.Open(ciphertext, nonce, aad, &plaintext)) {
++    return MakeSaasFileResult(false, base::Value(), "快照解密失败，请核对快照密码与账号");
++  }
++  auto snapshot = base::JSONReader::ReadDict(plaintext, base::JSON_PARSE_RFC);
++  if (!snapshot || snapshot->FindInt("schema_version") != 1 ||
++      !snapshot->FindString("account_id") ||
++      *snapshot->FindString("account_id") != *account_id) {
++    return MakeSaasFileResult(false, base::Value(), "账号快照标识或版本无效");
++  }
++  return MakeSaasFileResult(true, base::Value(std::move(*snapshot)));
++}
++
+ std::optional<base::FilePath> ResolveSaasFilePath(
+     const base::FilePath& root,
+     std::string_view relative_path,
+@@ -1421,6 +1517,7 @@ void ManagementUIHandler::HandleSaasBridgeRequest(
+     capabilities.Set("fingerprint", true);
+     capabilities.Set("files", true);
+     capabilities.Set("http", true);
++    capabilities.Set("crypto", true);
+     base::Value::Dict result;
+     result.Set("version", "1.0");
+     result.Set("origin", origin);
+@@ -1431,6 +1528,16 @@ void ManagementUIHandler::HandleSaasBridgeRequest(
+ 
+   base::Value::List forwarded;
+   forwarded.Append(args[0].Clone());
++  if (method == "crypto.encryptSnapshot" || method == "crypto.decryptSnapshot") {
++    // 密钥派生放在后台线程；权限校验与其他原生能力共用同一入口。
++    base::ThreadPool::PostTaskAndReplyWithResult(
++        FROM_HERE, {},
++        base::BindOnce(&ProcessSaasSnapshotCryptoOnBlockingThread, method,
++                       input.Clone()),
++        base::BindOnce(&ManagementUIHandler::OnSaasFileResult,
++                       weak_factory_.GetWeakPtr(), args[0].Clone()));
++    return;
++  }
+   if (method == "tabs.list") {
+     HandleGetManagedTabs(forwarded);
+     return;

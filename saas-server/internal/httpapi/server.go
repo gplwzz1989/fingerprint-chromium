@@ -1777,6 +1777,16 @@ func (s *Server) handleAcquireLease(w http.ResponseWriter, r *http.Request) {
 	}
 	var leaseID, currentDeviceID string
 	var currentExpiry time.Time
+	// 先锁定账号，避免两个设备同时首次获取租约时触发唯一键冲突。
+	// 与快照写入保持一致的加锁顺序：账号在前，租约在后。
+	var lockedAccountID string
+	if err := tx.QueryRowContext(r.Context(),
+		`SELECT account_id FROM accounts WHERE account_id = $1 FOR UPDATE`, accountID).
+		Scan(&lockedAccountID); err != nil {
+		_ = tx.Rollback()
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法锁定账号租约")
+		return
+	}
 	rowErr := tx.QueryRowContext(r.Context(), `
 		SELECT lease_id::text, device_id, expires_at
 		FROM account_leases WHERE account_id = $1 FOR UPDATE`, accountID).

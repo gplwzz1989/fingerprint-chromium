@@ -4,6 +4,7 @@ export interface SaasBridgeCapabilities {
   fingerprint?: boolean;
   files?: boolean;
   http?: boolean;
+  crypto?: boolean;
 }
 
 export interface SaasBridgeDetails {
@@ -23,6 +24,16 @@ export interface SaasHttpResponse {
   status: number;
   headers: Record<string, string>;
   bodyBase64: string;
+}
+
+export interface SaasSnapshotEnvelope {
+  algorithm: 'AES-256-GCM';
+  kdf: 'PBKDF2-HMAC-SHA-256';
+  iterations: number;
+  salt: string;
+  nonce: string;
+  ciphertext: string;
+  tag: string;
 }
 
 export interface SaasBridge {
@@ -73,6 +84,10 @@ export interface SaasBridge {
       includeCredentials?: boolean;
     }): Promise<SaasHttpResponse>;
   };
+  crypto?: {
+    encryptSnapshot(options: {accountId: string; password: string; snapshot: unknown}): Promise<SaasSnapshotEnvelope>;
+    decryptSnapshot(options: {accountId: string; password: string; envelope: SaasSnapshotEnvelope}): Promise<unknown>;
+  };
 }
 
 export interface SaasBridgeClient {
@@ -103,6 +118,7 @@ export interface SaasBridgeClient {
   };
   files: SaasBridge['files'];
   http: SaasBridge['http'];
+  crypto: NonNullable<SaasBridge['crypto']>;
 }
 
 declare global {

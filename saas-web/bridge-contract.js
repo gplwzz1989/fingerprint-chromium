@@ -29,6 +29,7 @@
       const request = embeddedRequests.get(message.requestId);
       if (!request) return;
       embeddedRequests.delete(message.requestId);
+      global.clearTimeout(request.timeout);
       if (message.ok) {
         request.resolve(message.result);
       } else {
@@ -38,7 +39,11 @@
 
     const request = (method, args) => new Promise((resolve, reject) => {
       const requestId = `bridge-${++embeddedRequestSequence}`;
-      embeddedRequests.set(requestId, {resolve, reject});
+      const timeout = global.setTimeout(() => {
+        embeddedRequests.delete(requestId);
+        reject(new BridgeUnavailableError('原生桥响应超时，请确认已在客户端中加载控制台'));
+      }, method === 'storage.writeSnapshot' ? 60000 : 40000);
+      embeddedRequests.set(requestId, {resolve, reject, timeout});
       global.parent.postMessage({
         type: 'fingerprint-saas-bridge:request',
         requestId,
@@ -73,6 +78,10 @@
       },
       http: {
         request(options) { return request('http.request', options); },
+      },
+      crypto: {
+        encryptSnapshot(options) { return request('crypto.encryptSnapshot', options); },
+        decryptSnapshot(options) { return request('crypto.decryptSnapshot', options); },
       },
     };
     return embeddedBridge;
@@ -109,6 +118,7 @@
     ['fingerprint', '指纹配置'],
     ['files', '本地文件'],
     ['http', '原生 HTTP'],
+    ['crypto', '原生快照加密'],
   ];
 
   const client = Object.freeze({
@@ -136,7 +146,8 @@
             origin: String(details?.origin || bridge.origin || '客户端编译白名单'),
             capabilities: capabilities && typeof capabilities === 'object' ? capabilities : {},
           };
-        });
+        }).catch(() => ({available: false, version: '', origin: '', capabilities: {},
+          reason: '原生桥未连接或客户端拒绝授权'}));
       } catch (error) {
         return Promise.resolve({
           available: false,
@@ -170,6 +181,10 @@
     },
     http: {
       request(options) { return call(['http', 'request'], options || {}); },
+    },
+    crypto: {
+      encryptSnapshot(options) { return call(['crypto', 'encryptSnapshot'], options); },
+      decryptSnapshot(options) { return call(['crypto', 'decryptSnapshot'], options); },
     },
   });
 

@@ -8,6 +8,7 @@ data class SaasBridgeCapabilities(
     val fingerprint: Boolean,
     val files: Boolean,
     val http: Boolean,
+    val crypto: Boolean = false,
 )
 
 data class SaasBridgeDetails(

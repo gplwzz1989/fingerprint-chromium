@@ -1,0 +1,134 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
+@@ -18,6 +18,8 @@ import org.jni_zero.NativeMethods;
+ 
+ import org.chromium.base.ContextUtils;
+ import org.chromium.base.Token;
++import org.chromium.base.task.PostTask;
++import org.chromium.base.task.TaskTraits;
+ import org.chromium.build.annotations.NullMarked;
+ import org.chromium.build.annotations.Nullable;
+ import org.chromium.chrome.browser.WarmupManager;
+@@ -32,6 +34,7 @@ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.tab.Tab;
+ import org.chromium.chrome.browser.tab.TabId;
+ import org.chromium.chrome.browser.tab.TabLaunchType;
++import org.chromium.chrome.browser.tab.TabSelectionType;
+ import org.chromium.chrome.browser.tabwindow.TabWindowManager;
+ import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+ import org.chromium.components.content_settings.ContentSetting;
+@@ -60,6 +63,9 @@ public abstract class TabModelJniBridge implements TabModelInternal {
+     /** Native AndroidBrowserWindow pointer. */
+     private long mNativeAndroidBrowserWindow;
+ 
++    // 常驻控制台身份绑定 Tab 对象，站内跳转不会丢失关闭保护。
++    private @Nullable Tab mResidentSaasTab;
++
+     /**
+      * @param profile The profile this TabModel belongs to.
+      */
+@@ -79,6 +85,32 @@ public abstract class TabModelJniBridge implements TabModelInternal {
+         assert mNativeTabModelJniBridge == 0;
+         mNativeTabModelJniBridge =
+                 TabModelJniBridgeJni.get().init(this, mProfile, activityType, isArchivedTabModel);
++        if (activityType == ActivityType.TABBED && !isArchivedTabModel && !isIncognito()) {
++            PostTask.postTask(TaskTraits.UI_DEFAULT, this::ensureResidentSaasTab);
++        }
++    }
++
++    private void ensureResidentSaasTab() {
++        if (!isNativeInitialized()) return;
++        if (!isInitializationComplete() || isSessionRestoreInProgress()) {
++            PostTask.postDelayedTask(TaskTraits.UI_DEFAULT, this::ensureResidentSaasTab, 100);
++            return;
++        }
++        GURL startupUrl = new GURL(TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl());
++        for (int i = 0; i < getCount(); i++) {
++            Tab tab = getTabAt(i);
++            if (tab != null && Origin.create(tab.getUrl()).equals(Origin.create(startupUrl))) {
++                mResidentSaasTab = tab;
++                setIndex(i, TabSelectionType.FROM_USER);
++                return;
++            }
++        }
++        mResidentSaasTab = getTabCreator(false).createNewTab(
++                new LoadUrlParams(startupUrl.getSpec()), TabLaunchType.FROM_CHROME_UI, null);
++    }
++
++    protected boolean isResidentSaasTab(Tab tab) {
++        return tab == mResidentSaasTab;
+     }
+ 
+     /** Returns whether the native-side pointer has been initialized. */
+@@ -89,6 +121,7 @@ public abstract class TabModelJniBridge implements TabModelInternal {
+     @Override
+     @CallSuper
+     public void destroy() {
++        mResidentSaasTab = null;
+         if (isNativeInitialized()) {
+             // This will invalidate all other native references to this object in child classes.
+             TabModelJniBridgeJni.get().destroy(mNativeTabModelJniBridge);
+@@ -631,6 +664,10 @@ public abstract class TabModelJniBridge implements TabModelInternal {
+     @NativeMethods
+     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+     public interface Natives {
++        // 直接读取共享 C++ 常量；更换地址不需要重新编译 Java 页面或 JNI 接口。
++        @JniType("std::string")
++        String getFingerprintSaasStartupUrl();
++
+         long init(
+                 TabModelJniBridge self,
+                 @JniType("Profile*") Profile profile,
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelImpl.java b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelImpl.java
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelImpl.java
+@@ -735,6 +735,25 @@ public class TabModelImpl extends TabModelJniBridge {
+ 
+     @Override
+     public boolean closeTabs(TabClosureParams tabClosureParams) {
++        if (!tabClosureParams.uponExit) {
++            List<Tab> requestedTabs = tabClosureParams.isAllTabs
++                    ? new ArrayList<>(mTabs) : assumeNonNull(tabClosureParams.tabs);
++            List<Tab> closableTabs = new ArrayList<>();
++            for (Tab tab : requestedTabs) {
++                if (!isResidentSaasTab(tab)) closableTabs.add(tab);
++            }
++            if (closableTabs.size() != requestedTabs.size()) {
++                if (closableTabs.isEmpty()) return false;
++                // 所有关闭入口统一过滤控制台，保留其他账号 Tab 的正常关闭语义。
++                return closeTabs(TabClosureParams.closeTabs(closableTabs)
++                        .allowUndo(tabClosureParams.allowUndo)
++                        .hideTabGroups(tabClosureParams.hideTabGroups)
++                        .saveToTabRestoreService(tabClosureParams.saveToTabRestoreService)
++                        .tabClosingSource(tabClosureParams.tabClosingSource)
++                        .withUndoRunnable(tabClosureParams.undoRunnable)
++                        .build());
++            }
++        }
+         if (!tabClosureParams.allowUndo) {
+             // The undo stacks assumes that previous actions in the stack are undoable. If an entry
+             // is not undoable then the reversal of the operations may fail or yield an invalid
+diff --git a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -29,6 +29,7 @@
+ #include "chrome/browser/ui/android/tab_model/tab_model_observer_jni_bridge.h"
+ #include "chrome/browser/ui/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
++#include "chrome/common/fingerprint_saas_startup.h"
+ #include "chrome/browser/ui/tabs/tab_muted_utils.h"
+ #include "components/content_settings/core/browser/host_content_settings_map.h"
+ #include "components/content_settings/core/common/content_settings.h"
+@@ -62,6 +63,11 @@ using base::android::ScopedJavaLocalRef;
+ using chrome::android::ActivityType;
+ using content::WebContents;
+ 
++static std::string JNI_TabModelJniBridge_GetFingerprintSaasStartupUrl(
++    JNIEnv* env) {
++  return chrome::kFingerprintSaasStartupUrl;
++}
++
+ namespace {
+ 
+ std::vector<TabAndroid*> GetAllTabsFromHandles(

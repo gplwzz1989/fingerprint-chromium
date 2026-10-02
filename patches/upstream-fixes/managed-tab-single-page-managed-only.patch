@@ -1,0 +1,34 @@
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -63,5 +63,6 @@
+ #include "chrome/browser/lifetime/application_lifetime.h"
+ #include "chrome/browser/lifetime/browser_shutdown.h"
++#include "chrome/browser/managed_tab/managed_tab_context.h"
+ #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+ #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
+ #include "chrome/browser/policy/developer_tools_policy_handler.h"
+@@ -2141,7 +2142,8 @@ content::WebContents* Browser::AddNewContents(
+     bool* was_blocked) {
+-  if (source && disposition != WindowOpenDisposition::CURRENT_TAB &&
++  if (source && chrome::ManagedTabContext::FromWebContents(source) &&
++      disposition != WindowOpenDisposition::CURRENT_TAB &&
+       disposition != WindowOpenDisposition::SAVE_TO_DISK &&
+       disposition != WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
+     NavigateParams params(
+         this, target_url.is_empty() ? GURL("about:blank") : target_url,
+         ui::PAGE_TRANSITION_LINK);
+@@ -2156,8 +2158,11 @@ content::WebContents* Browser::AddNewContents(
+     return params.navigated_or_inserted_contents;
+   }
+-  if (!source && (disposition == WindowOpenDisposition::NEW_WINDOW ||
+-                  disposition == WindowOpenDisposition::NEW_POPUP)) {
++  if (!source && tab_strip_model()->GetActiveWebContents() &&
++      chrome::ManagedTabContext::FromWebContents(
++          tab_strip_model()->GetActiveWebContents()) &&
++      (disposition == WindowOpenDisposition::NEW_WINDOW ||
++       disposition == WindowOpenDisposition::NEW_POPUP)) {
+     return chrome::AddSelectedTabWithURL(
+         this, target_url.is_empty() ? GURL("about:blank") : target_url,
+         ui::PAGE_TRANSITION_LINK);
+   }

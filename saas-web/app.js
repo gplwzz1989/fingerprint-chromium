@@ -14,10 +14,11 @@
   };
 
   class ApiError extends Error {
-    constructor(status, message) {
+    constructor(status, message, code = '') {
       super(message || '请求失败，请稍后重试');
       this.name = 'ApiError';
       this.status = status;
+      this.code = code;
     }
   }
 
@@ -48,6 +49,7 @@
     bridgeStatusDot: document.querySelector('#bridge-status-dot'),
     bridgeStatusTitle: document.querySelector('#bridge-status-title'),
     bridgeStatusDetail: document.querySelector('#bridge-status-detail'),
+    bridgeOriginPolicy: document.querySelector('#bridge-origin-policy'),
     capabilityList: document.querySelector('#capability-list'),
     toast: document.querySelector('#toast'),
   };
@@ -77,6 +79,7 @@
       sessionStorage.setItem(sessionStorageKey, JSON.stringify(session));
     } else {
       sessionStorage.removeItem(sessionStorageKey);
+      global.saasConsoleOperations.lock();
     }
   }
 
@@ -95,7 +98,7 @@
 
   function userMessage(error) {
     if (error instanceof ApiError) return error.message;
-    if (error instanceof Error && error.message) return error.message;
+    if (error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)) return error.message;
     return '操作失败，请稍后重试';
   }
 
@@ -124,7 +127,7 @@
       ? await response.json().catch(() => null)
       : null;
     if (!response.ok) {
-      throw new ApiError(response.status, payload?.message || `服务返回 ${response.status}`);
+      throw new ApiError(response.status, payload?.message || `服务返回 ${response.status}`, payload?.code || '');
     }
     return payload;
   }
@@ -193,8 +196,20 @@
       render();
       return;
     }
-    const payload = await request(`/api/v1/workspaces/${encodeURIComponent(state.workspaceId)}/accounts?page_size=200`);
-    state.accounts = Array.isArray(payload) ? payload : (payload?.items || []);
+    const workspaceId = state.workspaceId;
+    const accounts = [], seenTokens = new Set();
+    let pageToken = '';
+    do {
+      const query = new URLSearchParams({page_size: '200'});
+      if (pageToken) query.set('page_token', pageToken);
+      const payload = await request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/accounts?${query}`);
+      accounts.push(...(Array.isArray(payload) ? payload : (payload?.items || [])));
+      pageToken = payload?.next_page_token || '';
+      if (pageToken && seenTokens.has(pageToken)) throw new ApiError(502, '账号分页响应无效，请重试');
+      if (pageToken) seenTokens.add(pageToken);
+    } while (pageToken);
+    if (state.workspaceId !== workspaceId || !state.session) return;
+    state.accounts = accounts;
     render();
   }
 
@@ -238,7 +253,10 @@
       return;
     }
     try {
-      await global.saasBridgeClient.tabs.create({ accountId: account.account_id });
+      const tabs = await global.saasBridgeClient.tabs.list();
+      const existing = tabs.find((tab) => tab.account_id === account.account_id);
+      if (existing) await global.saasBridgeClient.tabs.activate(existing.id);
+      else await global.saasBridgeClient.tabs.create({ accountId: account.account_id });
       showToast(`已请求创建账号 ${account.name} 的隔离 Tab`);
     } catch (error) {
       showToast(userMessage(error), true);
@@ -277,7 +295,8 @@
       return;
     }
     for (const workspace of state.workspaces) {
-      const option = new Option(`${workspace.name} · ${workspace.role}`, workspace.workspace_id);
+      const role = {owner: '所有者', admin: '管理员', editor: '编辑者', viewer: '查看者'}[workspace.role] || '成员';
+      const option = new Option(`${workspace.name} · ${role}`, workspace.workspace_id);
       option.selected = workspace.workspace_id === state.workspaceId;
       elements.workspaceSelect.add(option);
     }
@@ -338,6 +357,7 @@
       action.textContent = '打开隔离 Tab';
       action.addEventListener('click', () => openAccount(account));
       actionCell.append(action);
+      global.saasConsoleOperations.appendAccountActions(actionCell, account);
       row.append(nameCell, labelsCell, revisionCell, dateCell, actionCell);
       elements.accountTableBody.append(row);
     }
@@ -368,7 +388,7 @@
       const value = document.createElement('span');
       const enabled = available && capabilities[key] === true;
       value.className = `capability-state ${enabled ? 'is-ready' : ''}`;
-      value.textContent = enabled ? 'READY' : 'UNAVAILABLE';
+      value.textContent = enabled ? '可用' : '不可用';
       item.append(name, value);
       elements.capabilityList.append(item);
     }
@@ -378,6 +398,10 @@
     document.querySelectorAll('.nav-item').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.view === state.currentView);
     });
+    document.querySelector('#overview-content').hidden = state.currentView !== 'overview';
+    document.querySelector('#tabs-content').hidden = state.currentView !== 'tabs';
+    document.querySelector('#security-content').hidden = state.currentView !== 'security';
+    document.querySelector('#view-heading').textContent = {overview: '账号总览', tabs: '运行中 Tab', security: '设备与安全'}[state.currentView];
   }
 
   function render() {
@@ -470,9 +494,12 @@
   document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => {
     state.currentView = button.dataset.view;
     renderNavigation();
-    if (state.currentView !== 'overview') showToast('该工作区视图将在后续任务接入真实数据');
+    global.saasConsoleOperations.loadView(state.currentView);
   }));
 
+  global.saasConsoleOperations.configure({request, bridge: global.saasBridgeClient,
+    deviceId: getDeviceId, getState: () => state, refreshAccounts: loadAccounts,
+    showToast, userMessage, logout});
   state.session = readSession();
   render();
   if (state.session) {

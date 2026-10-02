@@ -46,9 +46,12 @@
 | `fingerprint` | 已接入 | 待接入 | 与账号 Tab 绑定的指纹配置 |
 | `files` | 已接入首版 | SAF 授权 URI | 桌面端使用浏览器配置目录下的 `SaasFiles` 专用目录，不接受绝对路径或父目录跳转 |
 | `http` | 已接入首版 | 原生网络适配 | 支持自定义方法、请求头、Base64 正文和可选会话凭据；单次响应上限 16 MiB、超时 30 秒 |
+| `crypto` | 已编码，待运行联调 | 待接入 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
 
 文件能力的桌面首版只操作浏览器配置目录中的桥接专用目录，读写在后台线程执行，单文件上限 64 MiB；原生 HTTP 只允许编译白名单来源调用，默认不携带浏览器 Cookie，调用方明确设置 `includeCredentials` 后才携带。正式开放前仍需完成权限撤销、审计和异常恢复测试；未接入的平台继续报告能力不可用，不使用模拟数据替代。
 
 ## Android 适配边界
+
+原生 `crypto.encryptSnapshot` 接收 `{accountId, password, snapshot}`，返回标准加密信封；`crypto.decryptSnapshot` 接收 `{accountId, password, envelope}`，返回验证账号和版本后的快照。两个方法沿用同一来源白名单，在后台线程派生密钥，不保存密码或快照明文，不输出原始加密库错误。未实现该能力的平台必须报告 `crypto: false`。
 
 Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。Tab 生命周期与 Activity/任务栈分离，账号数据目录由应用私有存储管理；会话密钥使用 Android Keystore，应用进程被回收后通过账号标识恢复，而不是依赖进程常驻。

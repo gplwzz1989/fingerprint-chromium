@@ -1,0 +1,258 @@
+diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
+--- a/chrome/common/chrome_switches.cc
++++ b/chrome/common/chrome_switches.cc
+@@ -3,12 +3,20 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/common/chrome_switches.h"
++#include "chrome/common/fingerprint_saas_startup.h"
+ 
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "extensions/buildflags/buildflags.h"
+ #include "printing/buildflags/buildflags.h"
+ 
++namespace chrome {
++
++// PC 和 Android 共用的 SaaS 启动地址。改地址只需重编译本文件并链接客户端。
++const char kFingerprintSaasStartupUrl[] = "http://127.0.0.1:8787/";
++
++}  // namespace chrome
++
+ namespace switches {
+ 
+ // -----------------------------------------------------------------------------
+diff --git a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+--- a/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
++++ b/chrome/browser/ui/webui/fingerprint_manager/fingerprint_manager_ui.cc
+@@ -8,6 +8,7 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/management/management_ui_handler.h"
+ #include "chrome/common/webui_url_constants.h"
++#include "chrome/common/fingerprint_saas_startup.h"
+ #include "chrome/grit/fingerprint_manager_resources.h"
+ #include "chrome/grit/fingerprint_manager_resources_map.h"
+ #include "content/public/browser/web_ui.h"
+@@ -21,6 +22,7 @@ void CreateAndAddFingerprintManagerSource(Profile* profile) {
+   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
+       profile, chrome::kChromeUIFingerprintManagerHost);
+   source->SetDefaultResource(IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
++  source->AddString("saasStartupUrl", chrome::kFingerprintSaasStartupUrl);
+   webui::SetupWebUIDataSource(
+       source, kFingerprintManagerResources,
+       IDR_FINGERPRINT_MANAGER_FINGERPRINT_MANAGER_HTML);
+diff --git a/chrome/browser/ui/webui/management/management_ui_handler.cc b/chrome/browser/ui/webui/management/management_ui_handler.cc
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -57,6 +57,7 @@
+ #include "chrome/browser/web_applications/web_app_registrar.h"
+ #include "chrome/browser/web_applications/web_app_utils.h"
+ #include "chrome/common/buildflags.h"
++#include "chrome/common/fingerprint_saas_startup.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/content_settings/core/common/content_settings_pattern.h"
+ #include "components/enterprise/browser/identifiers/profile_id_service.h"
+@@ -151,9 +152,20 @@ bool IsAllowedSaasBaseUrl(const std::string& value) {
+ }
+ 
+ std::vector<std::string> GetAllowedSaasOrigins() {
+-  return base::SplitString(BUILDFLAG(FINGERPRINT_SAAS_ALLOWED_ORIGINS), ",",
++  auto origins = base::SplitString(BUILDFLAG(FINGERPRINT_SAAS_ALLOWED_ORIGINS), ",",
+                            base::TRIM_WHITESPACE,
+                            base::SPLIT_WANT_NONEMPTY);
++  const GURL startup_url(chrome::kFingerprintSaasStartupUrl);
++  if (startup_url.is_valid() && !startup_url.has_username() &&
++      !startup_url.has_password() &&
++      (startup_url.SchemeIs("http") || startup_url.SchemeIs("https"))) {
++    // 默认控制台来源随单一地址常量更新，不要求重新生成白名单构建标志。
++    const std::string origin = url::Origin::Create(startup_url).Serialize();
++    if (!base::Contains(origins, origin)) {
++      origins.push_back(origin);
++    }
++  }
++  return origins;
+ }
+ 
+ bool IsAllowedSaasOrigin(const std::string& value) {
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.ts
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
++import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+ 
+ import type {
+   FingerprintManagerBrowserProxy,
+@@ -102,7 +103,8 @@ export class FingerprintManagerUiElement extends CrLitElement {
+     proxy: true,
+     page: true,
+   };
+-  protected accessor externalSaasFrameUrl_: string = '';
++  protected accessor externalSaasFrameUrl_: string =
++      loadTimeData.getString('saasStartupUrl');
+   protected accessor externalSaasError_: string = '';
+   protected accessor saasBridgeAllowedOrigins_: string[] = [];
+ 
+@@ -116,8 +118,6 @@ export class FingerprintManagerUiElement extends CrLitElement {
+ 
+   override connectedCallback() {
+     super.connectedCallback();
+-    this.getManagedTabs_();
+-    this.restoreSaasSession_();
+     window.addEventListener('message', this.onExternalSaasMessage_);
+     this.loadSaasBridgePolicy_();
+   }
+@@ -448,4 +448,4 @@ export class FingerprintManagerUiElement extends CrLitElement {
+-  private async restoreSaasSession_() {
++  protected async restoreSaasSession_() {
+     if (this.saasSessionRestoring_) {
+       return;
+     }
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.html.ts
+@@ -7,6 +7,14 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+ import type {FingerprintManagerUiElement} from './fingerprint_manager_ui.js';
+ 
+ export function getHtml(this: FingerprintManagerUiElement) {
++  if (this.externalSaasFrameUrl_) {
++    return html`
++      <main class="resident-saas-shell">
++        <iframe id="externalSaasFrame" class="resident-saas-frame"
++            .src="${this.externalSaasFrameUrl_}"
++            title="账号管理控制台"></iframe>
++      </main>`;
++  }
+   // clang-format off
+   return html`
+ <div class="manager-shell">
+diff --git a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+--- a/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
++++ b/chrome/browser/resources/fingerprint_manager/fingerprint_manager_ui.css
+@@ -8,6 +8,7 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
++  --resident-saas-background: #11161d;
+   --fp-bg: #0c1118;
+   --fp-surface: #131b25;
+   --fp-surface-raised: #182431;
+@@ -27,6 +28,19 @@
+   overflow: hidden;
+ }
+ 
++.resident-saas-shell {
++  position: fixed;
++  inset: 0;
++  background: var(--resident-saas-background);
++}
++
++.resident-saas-frame {
++  display: block;
++  width: 100%;
++  height: 100%;
++  border: 0;
++}
++
+ button,
+ input {
+   font: inherit;
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -3068,5 +3068,32 @@ void Browser::OnTabInsertedAt(WebContents* contents, int index) {
+ 
+   SetAsDelegate(contents, true);
+ 
++  if (is_type_normal()) {
++    // 插入结束后检查常驻控制台，覆盖首次启动和会话恢复，并避免重入 TabStrip。
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce([](base::WeakPtr<Browser> browser) {
++          if (!browser || browser->is_delete_scheduled_ ||
++              browser->tab_strip_model()->closing_all()) {
++            return;
++          }
++          TabStripModel* tabs = browser->tab_strip_model();
++          for (int i = 0; i < tabs->count(); ++i) {
++            if (tabs->GetWebContentsAt(i)->GetVisibleURL().host() ==
++                chrome::kChromeUIFingerprintManagerHost) {
++              if (!tabs->IsTabPinned(i)) {
++                tabs->SetTabPinned(i, true);
++              }
++              return;
++            }
++          }
++          content::WebContents* control = chrome::AddSelectedTabWithURL(
++              browser.get(), GURL("chrome://fingerprint-manager/"),
++              ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
++          if (control) {
++            tabs->SetTabPinned(tabs->GetIndexOfWebContents(control), true);
++          }
++        }, AsWeakPtr()));
++  }
++
+   sessions::SessionTabHelper::FromWebContents(contents)->SetWindowID(
+       session_id());
+diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -5149,6 +5149,14 @@ bool TabStripModel::PolicyAllowsTabClosing(
+     return true;
+   }
+ 
++  // 常驻控制台不能被关闭按钮、快捷键、菜单或网页 window.close 关闭。
++  // 整个应用退出时由 CloseAllTabs 正常释放，不阻断进程退出。
++  if (!closing_all_ && contents->GetVisibleURL().SchemeIs("chrome") &&
++      contents->GetVisibleURL().host() ==
++          chrome::kChromeUIFingerprintManagerHost) {
++    return false;
++  }
++
+   web_app::WebAppProvider* provider =
+       web_app::WebAppProvider::GetForWebContents(contents);
+   // Can be null if there is no tab helper or app id.
+diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_navigator.cc
+--- a/chrome/browser/ui/browser_navigator.cc
++++ b/chrome/browser/ui/browser_navigator.cc
+@@ -145,8 +145,19 @@ bool AdjustNavigateParamsForURL(NavigateParams* params) {
+   Browser* managed_browser =
+       params->browser ? params->browser->GetBrowserForMigrationOnly()
+                       : nullptr;
++  const bool is_saas_control = params->source_contents &&
++      params->source_contents->GetVisibleURL().SchemeIs("chrome") &&
++      params->source_contents->GetVisibleURL().host() ==
++          chrome::kChromeUIFingerprintManagerHost;
++  if (is_saas_control &&
++      params->disposition == WindowOpenDisposition::CURRENT_TAB &&
++      params->url != GURL("chrome://fingerprint-manager/")) {
++    // 用户输入网址不会覆盖常驻控制台，而是进入新的隔离账号 Tab。
++    params->disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  }
+   if (managed_browser && managed_browser->is_type_normal() &&
+       params->source_contents && params->is_renderer_initiated &&
++      !is_saas_control &&
+       chrome::ManagedTabContext::FromWebContents(params->source_contents) &&
+       params->disposition != WindowOpenDisposition::CURRENT_TAB &&
+       params->disposition != WindowOpenDisposition::SAVE_TO_DISK &&
+diff --git a/chrome/common/fingerprint_saas_startup.h b/chrome/common/fingerprint_saas_startup.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/common/fingerprint_saas_startup.h
+@@ -0,0 +1,15 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_COMMON_FINGERPRINT_SAAS_STARTUP_H_
++#define CHROME_COMMON_FINGERPRINT_SAAS_STARTUP_H_
++
++namespace chrome {
++
++// 默认地址只在 chrome_switches.cc 中定义；修改地址不改变头文件或构建图。
++extern const char kFingerprintSaasStartupUrl[];
++
++}  // namespace chrome
++
++#endif  // CHROME_COMMON_FINGERPRINT_SAAS_STARTUP_H_
