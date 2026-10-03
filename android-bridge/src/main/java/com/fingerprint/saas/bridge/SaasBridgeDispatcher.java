@@ -18,7 +18,11 @@ public final class SaasBridgeDispatcher {
         }
     }
 
-    public interface RequestAuthority { boolean isActive(); }
+    public interface RequestAuthority {
+        boolean isActive();
+        // 默认拒绝后台执行；平台宿主必须提供不访问界面对象的授权检查。
+        default boolean isActiveInBackground() { return false; }
+    }
 
     public static final class NativeRequestException extends IllegalArgumentException {
         private static final long serialVersionUID = 1L;
@@ -116,6 +120,7 @@ public final class SaasBridgeDispatcher {
             capabilities.put("tabs", backend != null && backend.supports("tabs"));
             capabilities.put("storage", backend != null && backend.supports("storage"));
             capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
+            capabilities.put("files", backend != null && backend.supports("files"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -123,6 +128,10 @@ public final class SaasBridgeDispatcher {
         }
         String accountId;
         char[] password;
+        if ("files.list".equals(method) || "files.read".equals(method) || "files.write".equals(method)) {
+            if (backend == null || !backend.supports("files")) throw invalid("当前客户端尚未提供文件管理能力");
+            return backend.invoke(method, args);
+        }
         if ("tabs.list".equals(method) || "tabs.create".equals(method) ||
                 "tabs.activate".equals(method) || "tabs.navigate".equals(method) || "tabs.close".equals(method)) {
             if (backend == null || !backend.supports("tabs")) throw invalid("当前客户端尚未提供标签管理能力");

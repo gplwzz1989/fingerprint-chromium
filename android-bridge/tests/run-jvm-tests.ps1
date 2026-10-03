@@ -29,7 +29,7 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $bridgeRoot 'src\main\java'),
 if ($LASTEXITCODE -ne 0) { throw 'Java 适配器编译失败' }
 & $java "-Djava.io.tmpdir=$OutputDirectory" '-Dfile.encoding=UTF-8' -cp $OutputDirectory com.fingerprint.saas.bridge.SnapshotCryptoSelfTest
 if ($LASTEXITCODE -ne 0) { throw 'JVM 自测失败' }
-foreach ($testClass in @('SaasOriginPolicySelfTest', 'SaasBridgeDispatcherSelfTest', 'SaasHttpClientSelfTest')) {
+foreach ($testClass in @('SaasOriginPolicySelfTest', 'SaasBridgeDispatcherSelfTest', 'SaasFilePolicySelfTest', 'SaasHttpClientSelfTest')) {
     & $java "-Djava.io.tmpdir=$OutputDirectory" '-Dfile.encoding=UTF-8' -cp $OutputDirectory "com.fingerprint.saas.bridge.$testClass"
     if ($LASTEXITCODE -ne 0) { throw '原生桥安全与消息路由自测失败' }
 }

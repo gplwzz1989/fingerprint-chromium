@@ -17,6 +17,7 @@ export interface SaasFileEntry {
   name: string;
   path: string;
   directory: boolean;
+  /** 文档提供方无法返回大小时为 -1。 */
   size: number;
 }
 
@@ -73,6 +74,8 @@ export interface SaasBridge {
     write(options: {path: string; dataBase64: string}): Promise<{
       path: string;
       size: number;
+      /** 安卓可恢复覆盖保留的原文件路径；新文件或其他平台可以不返回。 */
+      backupPath?: string;
     }>;
   };
   http: {

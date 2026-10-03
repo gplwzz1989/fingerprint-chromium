@@ -36,3 +36,21 @@ test('宿主发送失败不会遗留待处理请求或计时器', async () => {
   await assert.rejects(window.saasBridgeClient.tabs.list(), /没有可用的原生桥/);
   assert.equal(active, 0);
 });
+
+test('目录选择预留等待时间，文件回复保留真实备份路径', async () => {
+  const listeners = new Map();
+  let sent, delay;
+  const parent = {postMessage: (message, origin) => { sent = {message, origin}; }};
+  const window = {parent, location: {origin: 'https://saas.example.test'},
+    setTimeout: (callback, milliseconds) => { delay = milliseconds; return setTimeout(callback, milliseconds); },
+    clearTimeout, addEventListener: (name, handler) => listeners.set(name, handler)};
+  vm.runInContext(fs.readFileSync(require.resolve('./bridge-contract.js'), 'utf8'), vm.createContext({window, URL, Event}));
+  const pending = window.saasBridgeClient.files.write({path: '账号/数据.json', dataBase64: ''});
+  assert.equal(delay, 150000);
+  assert.equal(sent.origin, 'chrome://fingerprint-manager');
+  assert.equal(sent.message.method, 'files.write');
+  const reply = {path: '账号/数据.json', size: 0, backupPath: '账号/.fingerprint-backup-边界测试'};
+  listeners.get('message')({source: parent, origin: sent.origin,
+    data: {type: 'fingerprint-saas-bridge:response', requestId: sent.message.requestId, ok: true, result: reply}});
+  assert.deepEqual(JSON.parse(JSON.stringify(await pending)), reply);
+});

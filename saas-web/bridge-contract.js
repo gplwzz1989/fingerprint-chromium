@@ -53,7 +53,7 @@
       const timeout = global.setTimeout(() => {
         pending.delete(requestId);
         reject(new BridgeUnavailableError('原生桥响应超时，请稍后重试'));
-      }, method === 'storage.writeSnapshot' ? 60000 : 40000);
+      }, method.startsWith('files.') ? 150000 : method === 'storage.writeSnapshot' ? 60000 : 40000);
       pending.set(requestId, {resolve, reject, timeout});
       try { port.postMessage(JSON.stringify({type: 'fingerprint-saas-bridge:request', requestId, method, args})); }
       catch (_) {
@@ -118,7 +118,7 @@
       const timeout = global.setTimeout(() => {
         embeddedRequests.delete(requestId);
         reject(new BridgeUnavailableError('原生桥响应超时，请确认已在客户端中加载控制台'));
-      }, method === 'storage.writeSnapshot' ? 60000 : 40000);
+      }, method.startsWith('files.') ? 150000 : method === 'storage.writeSnapshot' ? 60000 : 40000);
       embeddedRequests.set(requestId, {resolve, reject, timeout});
       try {
         global.parent.postMessage({

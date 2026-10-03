@@ -5,6 +5,7 @@ import com.fingerprint.saas.bridge.SaasOriginPolicy;
 
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
+import org.chromium.base.ContextUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -42,6 +43,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private final SaasOriginPolicy mPolicy;
     private final SaasBridgeDispatcher mDispatcher;
     private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+    private final SaasSafFiles mFiles;
     private final AtomicLong mGeneration = new AtomicLong();
     private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(
             2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), task -> {
@@ -64,6 +66,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
         mPolicy = new SaasOriginPolicy(allowedOrigins, startupUrl);
         mDispatcher = new SaasBridgeDispatcher(mPolicy);
         mNativeBackend = nativeBackend;
+        mFiles = new SaasSafFiles(tab, ContextUtils.getApplicationContext());
         mWorker.allowCoreThreadTimeOut(true);
         tab.addObserver(this);
         bindWebContents();
@@ -79,6 +82,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
         if (mDestroyed) return;
         mDestroyed = true;
         revoke();
+        mFiles.close();
         mWorker.shutdownNow();
         if (mObserver != null) { mObserver.observe(null); mObserver = null; }
         mTab.removeObserver(this);
@@ -188,9 +192,10 @@ public final class SaasBridgeHost extends EmptyTabObserver {
             try {
                 if (mGeneration.get() != mWorkGeneration) return;
                 String response = mDispatcher.dispatch(mMessage, mOrigin,
-                        mNativeBackend == null ? null : new SaasBridgeDispatcher.NativeBackend() {
+                        new SaasBridgeDispatcher.NativeBackend() {
                             @Override public boolean supports(String capability) {
-                                return mNativeBackend != null && mNativeBackend.supports(capability);
+                                return "files".equals(capability) ||
+                                        (mNativeBackend != null && mNativeBackend.supports(capability));
                             }
                             @Override public Object invoke(String method, Map<String, Object> args) {
                                 return invokeOnUiThread(method, args);
@@ -213,12 +218,18 @@ public final class SaasBridgeHost extends EmptyTabObserver {
 
         private Object invokeOnUiThread(String method, Map<String, Object> args) {
             CompletableFuture<Object> result = new CompletableFuture<>();
-            long timeoutSeconds = method.startsWith("storage.") ? 35 : 15;
+            long timeoutSeconds = method.startsWith("files.") ? 120 : method.startsWith("storage.") ? 35 : 15;
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
-            SaasBridgeDispatcher.RequestAuthority authority = () -> !result.isDone() &&
-                    System.nanoTime() < deadline && !mDestroyed &&
-                    mGeneration.get() == mWorkGeneration && mPort == mWorkPort &&
-                    !mWorkPort.isClosed() && mOrigin.equals(trustedOrigin(mContents));
+            SaasBridgeDispatcher.RequestAuthority authority = new SaasBridgeDispatcher.RequestAuthority() {
+                @Override public boolean isActiveInBackground() {
+                    // 后台不访问 Tab、WebContents 或消息端口；主框架变更由代次立即撤销。
+                    return !result.isDone() && System.nanoTime() < deadline && mGeneration.get() == mWorkGeneration;
+                }
+                @Override public boolean isActive() {
+                    return isActiveInBackground() && !mDestroyed && mPort == mWorkPort &&
+                            !mWorkPort.isClosed() && mOrigin.equals(trustedOrigin(mContents));
+                }
+            };
             PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
                 if (result.isDone()) return;
                 try {
@@ -228,8 +239,13 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                         result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，标签操作已停止"));
                         return;
                     }
-                    if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
-                    mNativeBackend.invokeAsync(method, args, authority).whenComplete((value, error) -> {
+                    CompletableFuture<Object> operation;
+                    if (method.startsWith("files.")) operation = mFiles.invoke(method, args, mOrigin, authority);
+                    else {
+                        if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
+                        operation = mNativeBackend.invokeAsync(method, args, authority);
+                    }
+                    operation.whenComplete((value, error) -> {
                         if (error != null) result.completeExceptionally(error);
                         else result.complete(value);
                     });
@@ -242,10 +258,10 @@ public final class SaasBridgeHost extends EmptyTabObserver {
             catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 result.cancel(false);
-                throw new SaasBridgeDispatcher.NativeRequestException("标签操作已取消");
+                throw new SaasBridgeDispatcher.NativeRequestException("原生操作已取消");
             } catch (TimeoutException error) {
                 result.cancel(false);
-                throw new SaasBridgeDispatcher.NativeRequestException("标签操作等待超时，请重试");
+                throw new SaasBridgeDispatcher.NativeRequestException("原生操作等待超时，请重试");
             } catch (ExecutionException error) {
                 if (error.getCause() instanceof SaasBridgeDispatcher.NativeRequestException) {
                     throw (SaasBridgeDispatcher.NativeRequestException) error.getCause();
@@ -257,6 +273,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
 
     private void revoke() {
         mGeneration.incrementAndGet();
+        mFiles.revoke();
         Runnable queued;
         while ((queued = mWorker.getQueue().poll()) != null) ((BridgeWork) queued).release();
         if (mPort != null) {

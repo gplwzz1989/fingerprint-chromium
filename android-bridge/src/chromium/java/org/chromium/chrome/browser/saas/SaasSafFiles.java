@@ -1,0 +1,374 @@
+package org.chromium.chrome.browser.saas;
+
+import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.UriPermission;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.DocumentsContract;
+
+import com.fingerprint.saas.bridge.SaasBridgeDispatcher;
+import com.fingerprint.saas.bridge.SaasFilePolicy;
+
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.ui.base.WindowAndroid;
+
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+/** 系统目录选择器提供授权；真实文件访问只在该来源所选树内执行。 */
+public final class SaasSafFiles {
+    private static final String PREFIX = ".fingerprint-";
+    private static final int READ = Intent.FLAG_GRANT_READ_URI_PERMISSION;
+    private static final int WRITE = Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+    private static final String[] COLUMNS = {
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE,
+        DocumentsContract.Document.COLUMN_SIZE,
+        DocumentsContract.Document.COLUMN_FLAGS
+    };
+    private final Tab tab;
+    private final ContentResolver resolver;
+    private final SharedPreferences preferences;
+    // 串行修改避免同一授权树上的本客户端覆盖操作互相干扰；队列保持有界。
+    private final ThreadPoolExecutor worker = new ThreadPoolExecutor(
+            1, 1, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(2));
+    private volatile boolean closed;
+    private CompletableFuture<Object> picker;
+
+    public SaasSafFiles(Tab tab, Context context) {
+        this.tab = tab;
+        resolver = context.getContentResolver();
+        preferences = context.getSharedPreferences("saas_authorized_directories", Context.MODE_PRIVATE);
+        worker.allowCoreThreadTimeOut(true);
+    }
+
+    /** 仅由消息宿主在界面线程调用；来源来自实际主框架，不读取网页参数。 */
+    public CompletableFuture<Object> invoke(String method, Map<String, Object> args, String origin,
+            SaasBridgeDispatcher.RequestAuthority authority) {
+        CompletableFuture<Object> result = new CompletableFuture<>();
+        if (closed || !authority.isActive()) throw SaasFilePolicy.error("页面授权已失效，文件操作已停止");
+        if (!method.equals("files.list") && !method.equals("files.read") && !method.equals("files.write")) {
+            throw SaasFilePolicy.error("不支持该文件操作");
+        }
+        String path = SaasFilePolicy.path(args, method.equals("files.list"));
+        if (method.equals("files.write") && path.substring(path.lastIndexOf('/') + 1).startsWith(PREFIX)) {
+            throw SaasFilePolicy.error("不能覆盖系统保留的备份或待恢复文件");
+        }
+        String key = originKey(origin);
+        Uri tree = grantedTree(key, method.equals("files.write"));
+        if (tree != null) {
+            schedule(result, method, args, path, tree, authority);
+            return result;
+        }
+        if (picker != null && !picker.isDone()) throw SaasFilePolicy.error("目录授权正在进行，请完成后重试");
+        WindowAndroid window = tab.getWindowAndroid();
+        if (window == null) throw SaasFilePolicy.error("当前窗口无法选择目录，请稍后重试");
+        picker = result;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(READ | WRITE | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        boolean shown;
+        try { shown = window.showIntent(intent, (code, data) -> {
+            if (picker != result) return;
+            picker = null;
+            try {
+                if (closed || result.isDone() || !authority.isActive()) throw SaasFilePolicy.error("页面授权已失效，目录授权已停止");
+                if (code != Activity.RESULT_OK || data == null || data.getData() == null) throw SaasFilePolicy.error("已取消目录授权");
+                Uri selected = data.getData();
+                int flags = data.getFlags() & (READ | WRITE);
+                if (!"content".equals(selected.getScheme()) || !DocumentsContract.isTreeUri(selected) ||
+                        (flags & READ) == 0 || (data.getFlags() & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) == 0) {
+                    throw SaasFilePolicy.error("所选目录不支持持久访问，请重新选择");
+                }
+                resolver.takePersistableUriPermission(selected, flags);
+                if (!preferences.edit().putString(key, selected.toString()).commit()) throw SaasFilePolicy.error("无法保存目录授权，请重试");
+                Uri granted = grantedTree(key, method.equals("files.write"));
+                if (granted == null) throw SaasFilePolicy.error("所选目录未授予所需的读写权限");
+                schedule(result, method, args, path, granted, authority);
+            } catch (SaasBridgeDispatcher.NativeRequestException error) { result.completeExceptionally(error); }
+            catch (Exception error) { result.completeExceptionally(SaasFilePolicy.error("无法获取目录授权，请重新选择目录")); }
+        }, null); }
+        catch (RuntimeException error) {
+            picker = null;
+            result.completeExceptionally(SaasFilePolicy.error("无法打开系统目录选择器"));
+            return result;
+        }
+        if (!shown) { picker = null; result.completeExceptionally(SaasFilePolicy.error("无法打开系统目录选择器")); }
+        return result;
+    }
+
+    public void revoke() {
+        if (picker != null) { picker.completeExceptionally(SaasFilePolicy.error("页面授权已失效，目录授权已停止")); picker = null; }
+        Runnable task;
+        while ((task = worker.getQueue().poll()) != null) ((FileWork) task).cancel();
+    }
+
+    public void close() { closed = true; revoke(); worker.shutdownNow(); }
+
+    private void schedule(CompletableFuture<Object> result, String method, Map<String, Object> args,
+            String path, Uri tree, SaasBridgeDispatcher.RequestAuthority authority) {
+        try { worker.execute(new FileWork(result, method, args, path, tree, authority)); }
+        catch (RejectedExecutionException error) { result.completeExceptionally(SaasFilePolicy.error("文件操作繁忙，请稍后重试")); }
+    }
+
+    private final class FileWork implements Runnable {
+        final CompletableFuture<Object> result;
+        final String method, path;
+        final Map<String, Object> args;
+        final Uri tree;
+        final SaasBridgeDispatcher.RequestAuthority authority;
+        long nextPermissionCheck;
+        FileWork(CompletableFuture<Object> result, String method, Map<String, Object> args, String path,
+                Uri tree, SaasBridgeDispatcher.RequestAuthority authority) {
+            this.result = result; this.method = method; this.args = args; this.path = path;
+            this.tree = tree; this.authority = authority;
+        }
+        void cancel() { result.completeExceptionally(SaasFilePolicy.error("文件操作已取消")); }
+        void check() {
+            if (closed || result.isDone()) throw SaasFilePolicy.error("文件操作已停止");
+            SaasFilePolicy.check(authority);
+            // 打开的文件描述符可能在系统撤权后继续有效；后台持续核对持久授权。
+            long now = System.nanoTime();
+            if (now >= nextPermissionCheck) {
+                if (!hasGrant(tree, method.equals("files.write"))) throw SaasFilePolicy.error("目录授权已撤销，请重新选择目录");
+                nextPermissionCheck = now + TimeUnit.MILLISECONDS.toNanos(100);
+            }
+        }
+        SaasBridgeDispatcher.RequestAuthority streamAuthority() {
+            return new SaasBridgeDispatcher.RequestAuthority() {
+                public boolean isActive() { return false; }
+                public boolean isActiveInBackground() { check(); return true; }
+            };
+        }
+        @Override public void run() {
+            try {
+                check();
+                Uri root = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+                Object value;
+                if (method.equals("files.list")) {
+                    Entry folder = resolve(root, path);
+                    if (!folder.directory) throw SaasFilePolicy.error("所选路径不是目录");
+                    List<Map<String, Object>> items = new ArrayList<>();
+                    for (Entry entry : children(folder.uri)) {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("name", entry.name); item.put("path", path.isEmpty() ? entry.name : path + "/" + entry.name);
+                        item.put("directory", entry.directory); item.put("size", entry.size);
+                        items.add(item);
+                    }
+                    value = items;
+                } else if (method.equals("files.read")) {
+                    Entry entry = resolve(root, path);
+                    if (entry.directory || entry.virtual) throw SaasFilePolicy.error("所选路径不是可直接读取的文件");
+                    if (entry.size > SaasFilePolicy.MAX_FILE_BYTES) throw SaasFilePolicy.error("文件超过 16 MiB 读取限制");
+                    byte[] bytes;
+                    try (InputStream input = resolver.openInputStream(entry.uri)) { bytes = SaasFilePolicy.read(input, streamAuthority()); }
+                    try {
+                        check();
+                        Map<String, Object> reply = reply(bytes.length);
+                        reply.put("dataBase64", Base64.getEncoder().encodeToString(bytes)); value = reply;
+                    } finally { Arrays.fill(bytes, (byte) 0); }
+                } else { value = write(root); }
+                check(); result.complete(value);
+            } catch (SaasBridgeDispatcher.NativeRequestException error) { result.completeExceptionally(error); }
+            catch (Exception error) { result.completeExceptionally(SaasFilePolicy.error("文件操作失败，请检查目录权限和可用空间；原文件不会被直接截断")); }
+        }
+        Map<String, Object> reply(long size) {
+            Map<String, Object> value = new LinkedHashMap<>(); value.put("path", path); value.put("size", size); return value;
+        }
+        Entry resolve(Uri root, String relative) throws Exception {
+            Entry current = metadata(root);
+            if (!relative.isEmpty()) for (String name : relative.split("/")) {
+                check();
+                if (!current.directory) throw SaasFilePolicy.error("文件路径中的上级不是目录");
+                Entry next = find(current.uri, name);
+                if (next == null) throw SaasFilePolicy.error("授权目录内未找到指定路径");
+                current = next;
+            }
+            return current;
+        }
+        Entry find(Uri parent, String name) throws Exception {
+            Entry found = null;
+            for (Entry child : children(parent)) if (child.name.equals(name)) {
+                if (found != null) throw SaasFilePolicy.error("目录中存在同名条目，无法安全定位文件");
+                found = child;
+            }
+            return found;
+        }
+        List<Entry> children(Uri parent) throws Exception {
+            check();
+            Uri query = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(parent));
+            List<Entry> entries = new ArrayList<>();
+            try (Cursor cursor = resolver.query(query, COLUMNS, null, null, null)) {
+                if (cursor == null) throw SaasFilePolicy.error("无法读取授权目录");
+                while (cursor.moveToNext()) {
+                    check();
+                    if (entries.size() >= SaasFilePolicy.MAX_ENTRIES) throw SaasFilePolicy.error("目录超过 1000 个条目，请选择更小的目录");
+                    Uri uri = DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(0));
+                    ensureChild(parent, uri);
+                    entries.add(new Entry(uri, cursor));
+                }
+            }
+            return entries;
+        }
+        Entry metadata(Uri uri) throws Exception {
+            check();
+            try (Cursor cursor = resolver.query(uri, COLUMNS, null, null, null)) {
+                if (cursor == null || !cursor.moveToFirst()) throw SaasFilePolicy.error("无法读取文件信息");
+                if (!DocumentsContract.getDocumentId(uri).equals(cursor.getString(0))) throw SaasFilePolicy.error("文件提供方返回了不一致的条目");
+                return new Entry(uri, cursor);
+            }
+        }
+        void ensureChild(Uri parent, Uri child) throws Exception {
+            check();
+            if (!tree.getAuthority().equals(child.getAuthority()) || !DocumentsContract.isChildDocument(resolver, parent, child)) {
+                throw SaasFilePolicy.error("文件提供方无法确认路径位于授权目录内");
+            }
+        }
+        Entry rename(Uri parent, Entry entry, String name) throws Exception {
+            check();
+            if (!hasGrant(tree, true)) throw SaasFilePolicy.error("目录写入授权已撤销");
+            Uri renamed = DocumentsContract.renameDocument(resolver, entry.uri, name);
+            if (renamed == null) throw SaasFilePolicy.error("文件提供方未完成安全重命名");
+            ensureChild(parent, renamed);
+            Entry value = metadata(renamed);
+            if (!name.equals(value.name)) throw SaasFilePolicy.error("文件提供方更改了目标名称，请检查待恢复文件");
+            return value;
+        }
+        Object write(Uri root) throws Exception {
+            byte[] bytes = SaasFilePolicy.decodeData(args.get("dataBase64"));
+            Entry backup = null;
+            Entry parent = null;
+            boolean backupAttempted = false;
+            String name = path.substring(path.lastIndexOf('/') + 1);
+            String parentPath = path.lastIndexOf('/') < 0 ? "" : path.substring(0, path.lastIndexOf('/'));
+            try {
+                check(); parent = resolve(root, parentPath);
+                if (!parent.directory || (parent.flags & DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE) == 0) throw SaasFilePolicy.error("所选目录不支持创建文件");
+                Entry original = find(parent.uri, name);
+                if (original != null && (original.directory || original.virtual ||
+                        (original.flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0)) {
+                    throw SaasFilePolicy.error("文件提供方不支持可恢复覆盖，原文件保持不变");
+                }
+                String pendingName = PREFIX + "pending-" + UUID.randomUUID();
+                check();
+                if (!hasGrant(tree, true)) throw SaasFilePolicy.error("目录写入授权已撤销");
+                Uri pendingUri = DocumentsContract.createDocument(resolver, parent.uri,
+                        original == null ? "application/octet-stream" : original.mime, pendingName);
+                if (pendingUri == null) throw SaasFilePolicy.error("无法创建待写入文件，原文件保持不变");
+                ensureChild(parent.uri, pendingUri);
+                Entry pending = metadata(pendingUri);
+                if (!pendingName.equals(pending.name) || pending.directory || pending.virtual ||
+                        (pending.flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0) {
+                    throw SaasFilePolicy.error("文件提供方不支持安全写入，待恢复文件已保留");
+                }
+                check();
+                // 只写刚创建的独立文件，绝不打开原文件进行截断，也不永久删除备份。
+                try (OutputStream stream = resolver.openOutputStream(pending.uri, "w")) {
+                    if (stream == null) throw SaasFilePolicy.error("无法打开待写入文件");
+                    for (int offset = 0; offset < bytes.length;) {
+                        check(); int count = Math.min(16384, bytes.length - offset);
+                        stream.write(bytes, offset, count); offset += count;
+                    }
+                    check(); stream.flush();
+                }
+                check();
+                // 在移动原文件之前读取实际写入内容，不能用请求字节数冒充写入成功。
+                byte[] written;
+                try (InputStream input = resolver.openInputStream(pending.uri)) { written = SaasFilePolicy.read(input, streamAuthority()); }
+                try {
+                    if (!Arrays.equals(bytes, written)) throw SaasFilePolicy.error("文件内容校验失败，原文件保持不变，待恢复文件已保留");
+                } finally { Arrays.fill(written, (byte) 0); }
+                check();
+                Entry actual = find(parent.uri, name);
+                if ((original == null && actual != null) || (original != null &&
+                        (actual == null || !original.uri.equals(actual.uri)))) throw SaasFilePolicy.error("目标文件已发生变化，待恢复文件已保留");
+                if (original != null) {
+                    backupAttempted = true;
+                    backup = rename(parent.uri, original, PREFIX + "backup-" + UUID.randomUUID());
+                }
+                rename(parent.uri, pending, name);
+                Map<String, Object> value = reply(bytes.length);
+                if (backup != null) value.put("backupPath", parentPath.isEmpty() ? backup.name : parentPath + "/" + backup.name);
+                return value;
+            } catch (Exception error) {
+                if (backup != null && parent != null) {
+                    // 回滚仅恢复本次已经移走的原文件；页面撤销也不妨碍恢复原名称。
+                    try {
+                        Uri query = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(parent.uri));
+                        boolean occupied = false;
+                        try (Cursor cursor = resolver.query(query, COLUMNS, null, null, null)) {
+                            if (cursor == null) throw SaasFilePolicy.error("无法检查恢复目标");
+                            int inspected = 0;
+                            while (cursor.moveToNext()) {
+                                if (++inspected > SaasFilePolicy.MAX_ENTRIES) throw SaasFilePolicy.error("恢复目录超过检查范围");
+                                if (name.equals(cursor.getString(1))) { occupied = true; break; }
+                            }
+                        }
+                        if (!occupied) DocumentsContract.renameDocument(resolver, backup.uri, name);
+                    } catch (Exception recovery) { /* 原始内容仍保留在备份条目，不能永久删除。 */ }
+                    throw SaasFilePolicy.error("覆盖未完成，请检查原文件、.fingerprint-backup- 备份及待恢复文件");
+                }
+                if (backupAttempted) throw SaasFilePolicy.error("覆盖结果未确认，请检查原文件、.fingerprint-backup- 备份及待恢复文件");
+                throw error;
+            } finally { Arrays.fill(bytes, (byte) 0); }
+        }
+    }
+
+    private static final class Entry {
+        final Uri uri;
+        final String name;
+        final String mime;
+        final boolean directory, virtual;
+        final long size;
+        final int flags;
+        Entry(Uri uri, Cursor cursor) {
+            this.uri = uri; name = SaasFilePolicy.path(cursor.getString(1), false);
+            if (name.contains("/")) throw SaasFilePolicy.error("文件提供方返回了无效的条目名称");
+            mime = cursor.getString(2);
+            if (mime == null || mime.isEmpty()) throw SaasFilePolicy.error("文件提供方未返回文件类型");
+            directory = DocumentsContract.Document.MIME_TYPE_DIR.equals(mime);
+            size = cursor.isNull(3) ? -1 : cursor.getLong(3); flags = cursor.getInt(4);
+            virtual = (flags & DocumentsContract.Document.FLAG_VIRTUAL_DOCUMENT) != 0;
+        }
+    }
+
+    private Uri grantedTree(String key, boolean write) {
+        String saved = preferences.getString(key, null);
+        if (saved == null) return null;
+        Uri uri = Uri.parse(saved);
+        if (!"content".equals(uri.getScheme()) || !DocumentsContract.isTreeUri(uri)) return null;
+        return hasGrant(uri, write) ? uri : null;
+    }
+
+    private boolean hasGrant(Uri uri, boolean write) {
+        for (UriPermission grant : resolver.getPersistedUriPermissions()) {
+            if (uri.equals(grant.getUri()) && grant.isReadPermission() && (!write || grant.isWritePermission())) return true;
+        }
+        return false;
+    }
+
+    private static String originKey(String origin) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(origin.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (Exception error) { throw SaasFilePolicy.error("无法识别页面目录授权"); }
+    }
+}

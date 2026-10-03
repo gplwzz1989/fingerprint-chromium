@@ -6,7 +6,7 @@
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
 - `SnapshotCrypto.java`、`SnapshotJson.java` 与 `JvmSnapshotCryptoAdapter.kt`：可独立编译的真实快照加密模块，使用 Java 标准 JCA/JCE，无新增运行时依赖。
-- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹操作；尚未完成完整 Android Java/C++ 编译和设备验收。未绑定平台实现时仅声明 `crypto=true`，绑定 TabModel 后增加 `tabs/storage/fingerprint=true`，其余能力为 `false`；不能将源码挂接当作已安装可用的 Android 浏览器。
+- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹操作；宿主绑定真实 SAF 适配器后增加 `files=true`，目录访问仍需系统授权，HTTP 仍不可用。独立路由未绑定平台时仅声明 `crypto=true`；尚未完成完整 Android Java/C++ 编译和设备验收，不能将源码挂接当作已安装可用的 Android 浏览器。
 - `SaasOriginPolicy.java` 使用可信宿主提供的完整 Origin 白名单，默认 URL 不在模块内硬编码；Android JNI 从现有 C++ 常量和编译参数读取配置，默认来源随该常量更新。
 - 文件能力必须使用 Storage Access Framework 返回的授权 URI；禁止把 Windows 路径模型带入 Android。
 - 会话密钥使用 Android Keystore；应用生命周期恢复必须覆盖进程被系统回收、断网和权限撤销。
@@ -37,7 +37,7 @@
 
 新消息宿主已编码校验真实来源、请求类型及消息大小，路由 `crypto.encryptSnapshot` 与 `crypto.decryptSnapshot`，拒绝非整数或越界 `iterations`；使用有界后台执行器，不在 Android 主线程派生密钥。Kotlin 适配器的 `suspend` 方法本身不切换线程。页面登录和工作区权限仍由独立 SaaS 校验，不把业务逻辑复制进 Chromium。
 
-本模块已接入原生 Tab/存储源码，但尚未完成平台验收；SAF 文件、Keystore 会话、完整 SDK/NDK 构建和 APK 尚未提供。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。
+本模块已接入原生 Tab/存储和 SAF 文件源码，但尚未完成平台验收；Keystore 会话、完整 SDK/NDK 构建和 APK 尚未提供。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。
 
 ## 独立验证
 
@@ -77,13 +77,23 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 正常使用链路已在 `managed-tab-android-tab-operations.patch` 接入 `tabs.list/create/activate/navigate/close`。使用真实 TabModel、TabCreator 和 TabRemover，在 UI 线程重新校验消息端口、文档代次、真实主框架 Origin 与等待期限；控制台和普通标签不能作为账号目标，冻结/归档环境参与重复账号检查。创建先建立固定分区并核对 WebContents 所有者，再加载网页；创建失败清理实际所有者，不退回普通标签。
 
-平台实现成功绑定时提供 `tabs/storage/fingerprint/crypto`；未绑定的独立路由仍只提供 `crypto`。`files/http` 尚未接入，保持不可用。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
+平台实现成功绑定时提供 `tabs/storage/fingerprint/crypto`；宿主同时绑定 SAF 适配器后提供 `files`，但并不预授予目录访问权限，`http` 尚未接入。未绑定的独立路由仍只提供 `crypto`。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
 
 本轮独立复测 474 项通过，包含 33 项消息路由测试；其中 13 项仅为分发边界探针，不模拟 Android 标签。三个平台 Java 文件解析、两个 JNI 生成、环境/状态 JSON 局部 C++ 检查和新补丁反向检查通过。未完成 Android 类型检查、完整编译或设备运行；原生参数测试对象/链接成功但加载入口错误仍未解决，不计为运行通过。
 
 验证边界：实际原生参数函数测试源码保存在 `tests/account-environment-validation.cc`，可复用 `utils/check_cpp_syntax.py` 的现有编译参数。头文件、共享浏览器代码和测试源码语法检查通过；测试对象编译和链接通过，但测试程序启动被系统拒绝，不能宣称参数运行测试或 Android 分区运行验收通过。新增 JNI 生成和源码补丁反向检查通过；没有全量构建或修改系统策略。
 
 ## 完整构建限制
+
+### 授权目录文件进展
+
+`SaasSafFiles.java` 接入真实系统目录选择器、ContentResolver 和 DocumentsContract；按真实页面 Origin 独立记录树 URI，必须持有相应的持久读写授权。网页只提交树内相对路径，不能提交绝对路径或任意 URI；每级子项都由提供方确认父子关系，不能确认或出现同名歧义时拒绝访问。
+
+`files.list/read/write` 已编码，单文件上限 16 MiB，目录最多 1000 项，未知大小为 -1。首次调用没有有效目录授权时打开系统选择器；宿主等待最多 120 秒，网页等待 150 秒。单后台线程、两个等待任务，后台授权检查不访问界面对象；导航代次、超时、应用销毁和系统持久授权撤销会停止后续操作，已经发出的系统调用不能强制撤回。
+
+覆盖时先创建 `.fingerprint-pending-` 独立文件，写完并读取校验真实内容，再将原文件改名为 `.fingerprint-backup-`，最后恢复目标名称；返回可选 `backupPath`，不删除原始内容、备份或失败的临时文件。提供方不支持重命名时明确拒绝安全覆盖。失败时尽量恢复原名称，无法确认时返回中文错误并保留文件；该流程不是跨提供方原子事务，用户可通过授权目录自行恢复。备份/临时保留名称不能通过写入 API 覆盖。
+
+专项复测：文件策略 51 项、消息路由 71 项，JVM/协议共 563 项通过；网页 14 项通过。两个宿主 Java 文件通过语法解析，不代表 Android 类型检查或 SAF 提供方实际行为通过；Android 目录选择、权限撤销、重命名失败、跨来源映射和恢复仍需设备验收。仅修改安卓源文件清单并检查格式，不执行 GN 重生成或 Windows 全量编译。
 
 ### 存储专项进展
 

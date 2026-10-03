@@ -20,7 +20,7 @@
 - HTTP 页面加密兼容：无 WebCrypto 时调用受同一白名单保护的原生 PBKDF2/AES-GCM 接口；密码只存于当前页面内存，仍需运行版联调。
 - Android 平台无关桥接契约，后续使用 Android Storage Access Framework、Keystore 和原生网络适配。
 - Android 独立快照加密模块：`SnapshotCrypto`、`SnapshotJson` 和 Kotlin 适配器已实现真实 PBKDF2/AES-GCM，与网页信封互通；平台接口默认不获得页面授权，具体消息宿主挂接状态见下一项。
-- 已补充 Android 消息端口宿主、精确来源策略、后台加密路由和 JNI 配置挂接源码；独立路由仅提供 `crypto`，成功绑定 TabModel 后增加 `tabs/storage/fingerprint`，其余能力仍为 `false`。页面指纹覆盖不代表 Worker 一致性已完成；没有生成或安装新 APK，不能把已编码挂接当作 Android 浏览器已可运行。
+- 已补充 Android 消息端口宿主、精确来源策略、后台加密路由和 JNI 配置挂接源码；独立路由仅提供 `crypto`，成功绑定 TabModel 后增加 `tabs/storage/fingerprint`，宿主绑定 SAF 适配后增加 `files`，目录仍需系统授权，`http` 尚未接入。页面指纹覆盖不代表 Worker 一致性已完成；没有生成或安装新 APK，不能把已编码挂接当作 Android 浏览器已可运行。
 - 后续单代理阶段已编码安卓固定账号分区工厂、按 BrowserContext 保存的本地配置、代理/指纹种子平台钩子、JNI 创建入口、禁止共享复制与 Java 单页导航保护。正常 Tab 的列表/创建/切换/导航/关闭已接入真实模型与创建器源码；绑定平台实现时声明 `tabs`，未绑定仍不可用，尚无完整 Android 编译或设备验收。
 - 桌面 iframe 请求固定发往原生宿主来源并校验回复 Origin；HTTP 服务增加 `frame-ancestors`，避免第三方嵌入页面伪装原生桥。
 - 构建模式、同步边界、桥接消息、部署方式和测试结果文档。
@@ -38,6 +38,7 @@
 - 存储专项的 JVM/协议 489 项、实际 C++ 生成脚本的 23 项边界测试和网页 12 项通过；原生引擎/桌面局部语法检查、JNI 生成与 Java 源码解析通过。脚本存储对象为明确的测试探针，不替代真实平台；完整 Android 类型检查、CookieManager/renderer IPC 和设备读写尚未验收。没有 GN 重生成、全量编译或新 APK。
 - 后续指纹阶段：安卓 `fingerprint.get/set`、创建配置、UA/UA-CH 及页面硬件覆盖已编码接入；普通冻结状态版本 2 保存 UA/硬件值并读取版本 1 的默认值。快照包含实际配置并在写入前核对；创建/导航显式选择 UA 覆盖，恢复先建空白环境，不自动重放页面 POST。Worker 一致性、实际请求头和平台效果仍未验收。
 - 指纹专项：纯配置校验 37 项、原生状态头 59 项、JVM/协议 499 项及网页 13 项通过；元数据测试编译/链接成功，但入口加载错误导致运行未通过。环境/存储及共享浏览器文件局部 C++ 检查、JNI 生成、Java 解析和补丁反向检查通过。完整 Java 类型检查、Android 编译、设备效果及新 APK 尚未完成，未执行 GN 或全量编译。
+- SAF 专项：真实目录树授权与按来源映射、相对路径逐级确认、文件读写、实际内容读回校验和保留备份覆盖已编码。文件策略 51 项、消息路由 71 项，JVM/协议共 563 项和网页 14 项通过；两个宿主文件仅通过 Java 语法解析，提供方关系/重命名与系统撤权尚未设备验证。仅新增 Android 源文件清单项，未执行 GN 或全量编译；备份和失败临时文件不永久删除。
 - `saas-web`：Node JavaScript 语法检查通过。
 - Chromium WebUI：TypeScript 静态检查通过。
 - 独立 Web 加密同步：真实 PBKDF2/AES-GCM 往返、账号绑定、错误密码拒绝、同步类别过滤及旧 WebUI 信封兼容测试通过。
@@ -61,7 +62,7 @@
 - `window.open`、`target=_blank`、页面跳转和会话恢复的单 Tab 运行回归。
 - HTTPS 反向代理及客户端多设备同步、冲突恢复运行测试；服务端 PostgreSQL 集成验证已通过。
 - IndexedDB、Cache Storage、Service Worker 的同步范围和一致性实现。
-- Android 独立 SDK/NDK 构建输出、已编码消息宿主和 JNI 的完整 Java/C++ 编译、Tab/存储/指纹/SAF 文件/原生 HTTP/Keystore 接入、APK/AAB 和设备回归；已完成的 JVM 与端口互通不代表这些平台项完成。
+- Android 独立 SDK/NDK 构建输出、已编码消息宿主和 JNI 的完整 Java/C++ 编译、Worker 指纹一致性、原生 HTTP/Keystore 接入、SAF 提供方及权限验证、APK/AAB 和设备回归；已完成的 JVM 与端口互通不代表这些平台项完成。
 - Development 构建图与缓存恢复、统一构建和重新链接；PC 新 Chrome 尚未链接，单文件编译、局部语法检查和干跑不能作为新运行版验收。
 - Release 全量编译、发布目录、安装升级和整体回归测试。
 

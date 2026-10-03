@@ -44,7 +44,7 @@
 | `tabs` | 已接入 | 已编码，待 APK 验收 | 单父窗口内的原生 Tab |
 | `storage` | 已接入 | 已编码，待 APK 验收 | Cookie、LocalStorage、SessionStorage 快照 |
 | `fingerprint` | 已接入 | 页面配置已编码，Worker/设备待验收 | 与账号 Tab 绑定的指纹配置 |
-| `files` | 已接入绝对路径 | SAF 授权 URI | 桌面端支持系统绝对路径；相对路径仍以 `SaasFiles` 为根，不能引用上级目录 |
+| `files` | 已接入绝对路径 | SAF 已编码，待设备验收 | 桌面相对路径以 `SaasFiles` 为根；安卓相对路径以该来源的用户授权目录为根 |
 | `http` | 已接入首版 | 原生网络适配 | 支持自定义方法、请求头、Base64 正文和可选会话凭据；单次响应上限 16 MiB、超时 30 秒 |
 | `crypto` | 已编码，待运行联调 | 端口宿主已编码，待 APK 验证 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
 
@@ -58,7 +58,11 @@ Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。T
 
 Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，以精确目标 Origin 把端口交给真实主框架；来源读取 `RenderFrameHost.getLastCommittedOrigin()`，不信任消息自报地址。初始化和后续消息均为 JSON 字符串。网页客户端仅接受来自固定原生来源、`source=null` 的可信初始化事件；这层网页检查不代替原生来源授权。
 
-端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加 `tabs/storage/fingerprint`，`files/http` 继续为 false；尚未完成 Android 平台运行验收。
+端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加 `tabs/storage/fingerprint`，宿主绑定 SAF 文件适配后增加 `files`，`http` 仍为 false；尚未完成 Android 平台运行验收。
+
+安卓文件 API 使用系统 SAF 树授权，按完整 Origin 保存目录映射；`path` 是目录内相对路径，`files.list({})` 读取授权根目录。首次没有有效目录授权时打开系统选择器，不允许网页提供 URI、绝对路径或上级路径。每级条目由提供方确认父子关系，同名歧义、无法确认关系、虚拟文件直接读写均拒绝；不能绕过 Android 存储权限。
+
+安卓文件内容为 Base64，单文件上限 16 MiB；目录最多 1000 个条目，不静默截断，未知大小为 -1。覆盖必须先独立写入并读回校验，再保留原文件备份后重命名；`files.write` 可额外返回 `backupPath`。无安全重命名能力则拒绝覆盖；不删除备份或失败临时文件，也不承诺提供方原子事务。导航、超时及持久授权撤销停止后续操作，不能撤回已经发出的提供方调用。宿主等待 120 秒，网页等待 150 秒，以容纳系统选择器；实际 Android 生命周期和权限边界仍待设备验证。
 
 安卓存储请求使用非阻塞 UI 发起与异步 JNI 完成；原生操作上限 30 秒，宿主等待 35 秒。输入/输出 JSON 上限 14 MiB，Cookie 最多 5000 条，每类网页存储最多 10000 键、UTF-8 总量 10 MiB、键 1024 字节、值 1 MiB。同账号操作不交叉执行，Profile 内最多 8 个未释放操作；超时释放大数据，但未结束的 IPC 仍占操作额度。
 

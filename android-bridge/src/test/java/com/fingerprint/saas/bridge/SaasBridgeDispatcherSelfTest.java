@@ -66,6 +66,7 @@ public final class SaasBridgeDispatcherSelfTest {
         check(Boolean.FALSE.equals(deepResponse.get("ok")) && ((String) deepResponse.get("error")).contains("支持范围"), "过深响应未包装为安全错误");
         testNativeRouting(dispatcher);
         testFingerprintRouting(dispatcher);
+        testFileRouting(dispatcher);
         System.out.println("原生消息路由自测通过：" + assertions + " 项");
     }
 
@@ -181,6 +182,29 @@ public final class SaasBridgeDispatcherSelfTest {
         char[] large = new char[70000]; Arrays.fill(large, '测');
         Map<String, Object> big = new LinkedHashMap<>(); big.put("value", new String(large));
         check(SaasBridgeDispatcher.decodeNativeReply(SaasBridgeDispatcher.encodeNativePayload(big)).equals(big), "存储响应误用小状态的 64 KiB 限制");
+    }
+    /** 只验证文件白名单分发，不用探针替代系统目录授权和真实文件读写。 */
+    private static void testFileRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "files".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> request = decode("{\"type\":\"fingerprint-saas-bridge:request\",\"requestId\":\"files-1\",\"args\":{\"path\":\"账号/数据.json\"}}");
+        for (String method : new String[] {"files.list", "files.read", "files.write"}) {
+            request.put("method", method);
+            String message = SaasBridgeDispatcher.encodeNativePayload(request);
+            check(Boolean.TRUE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")), "文件方法未路由");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN)).get("ok")), "未绑定仍执行文件方法");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "文件方法绕过来源校验");
+        }
+        check(calls[0] == 3, "拒绝的文件请求进入平台层");
+        request.put("method", "files.delete");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("ok")) && calls[0] == 3, "未授权删除进入平台层");
+        request.put("method", "getCapabilities");
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("files")) && Boolean.FALSE.equals(flags.get("tabs")), "文件能力未按实际绑定声明");
+        check(!((SaasBridgeDispatcher.RequestAuthority) () -> true).isActiveInBackground(), "默认授权允许后台访问界面对象");
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
     private static void check(boolean value, String message) { assertions++; if (!value) throw new AssertionError(message); }
