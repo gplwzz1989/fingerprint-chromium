@@ -1,0 +1,150 @@
+--- a/third_party/blink/renderer/core/workers/worker_settings.h
++++ b/third_party/blink/renderer/core/workers/worker_settings.h
+@@ -43,6 +43,14 @@
+     return generic_font_family_settings_;
+   }
+ 
++  // 从创建者捕获有效硬件指纹，嵌套 Worker 保留同一份配置快照。
++  unsigned GetFingerprintHardwareConcurrency() const {
++    return fingerprint_hardware_concurrency_;
++  }
++  void SetFingerprintHardwareConcurrency(unsigned value) {
++    fingerprint_hardware_concurrency_ = value > 0 && value <= 64 ? value : 0;
++  }
++
+  private:
+   void CopyFlagValuesFromSettings(Settings*);
+ 
+@@ -54,6 +62,7 @@
+   bool strict_mixed_content_checking_ = false;
+   bool allow_running_of_insecure_content_ = false;
+   bool strictly_block_blockable_mixed_content_ = false;
++  unsigned fingerprint_hardware_concurrency_ = 0;
+ 
+   GenericFontFamilySettings generic_font_family_settings_;
+ };
+--- a/third_party/blink/renderer/core/workers/worker_settings.cc
++++ b/third_party/blink/renderer/core/workers/worker_settings.cc
+@@ -40,6 +40,8 @@
+       old_settings->strictly_block_blockable_mixed_content_;
+   new_settings->generic_font_family_settings_ =
+       old_settings->generic_font_family_settings_;
++  new_settings->fingerprint_hardware_concurrency_ =
++      old_settings->fingerprint_hardware_concurrency_;
+   return new_settings;
+ }
+ 
+--- a/third_party/blink/renderer/core/workers/dedicated_worker.cc
++++ b/third_party/blink/renderer/core/workers/dedicated_worker.cc
+@@ -8,6 +8,8 @@
+ #include <utility>
+ 
+ #include "base/feature_list.h"
++#include "base/command_line.h"
++#include "components/ungoogled/ungoogled_switches.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/task/single_thread_task_runner.h"
+@@ -35,6 +37,7 @@
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
+ #include "third_party/blink/renderer/core/frame/local_frame_client.h"
++#include "third_party/blink/renderer/core/frame/navigator.h"
+ #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
+ #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+ #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
+@@ -555,6 +558,12 @@
+     auto* frame = window->GetFrame();
+     parent_devtools_token = frame->GetDevToolsFrameToken();
+     settings = std::make_unique<WorkerSettings>(frame->GetSettings());
++    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++            switches::kFingerprint)) {
++      // 使用页面实际值，不能用另一个 Tab 的进程默认值替代页面覆盖。
++      settings->SetFingerprintHardwareConcurrency(
++          window->navigator()->hardwareConcurrency());
++    }
+     agent_group_scheduler_compositor_task_runner =
+         execution_context->GetScheduler()
+             ->ToFrameScheduler()
+--- a/third_party/blink/renderer/core/execution_context/navigator_base.cc
++++ b/third_party/blink/renderer/core/execution_context/navigator_base.cc
+@@ -20,6 +20,7 @@
+ #include "third_party/blink/renderer/core/page/chrome_client.h"
+ #include "third_party/blink/renderer/core/page/page.h"
+ #include "third_party/blink/renderer/core/probe/core_probes.h"
++#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
+ #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+ 
+ #if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_WIN)
+@@ -65,9 +66,18 @@
+ 
+ std::optional<unsigned> GetManagedHardwareConcurrency(
+     ExecutionContext* execution_context) {
+-  if (!execution_context || !execution_context->IsWindow()) {
++  if (!execution_context) {
+     return std::nullopt;
+   }
++
++  if (execution_context->IsWorkerGlobalScope()) {
++    auto* settings = To<WorkerGlobalScope>(execution_context)->GetWorkerSettings();
++    const unsigned configured_value =
++        settings ? settings->GetFingerprintHardwareConcurrency() : 0;
++    if (configured_value > 0 && configured_value <= 64) return configured_value;
++    return std::nullopt;
++  }
++  if (!execution_context->IsWindow()) return std::nullopt;
+ 
+   auto* window = To<LocalDOMWindow>(execution_context);
+   if (!window->GetFrame() || !window->GetFrame()->GetPage()) {
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -158,7 +158,8 @@
+     if (account->SetFingerprint(*fields, &error)) {
+       auto state = account->GetState();
+       auto after = account->GetPersistentState();
+-      state.Set("requires_reload", before.user_agent != after.user_agent);
++      state.Set("requires_reload", before.user_agent != after.user_agent ||
++          before.hardware_concurrency != after.hardware_concurrency);
+       reply.Set("ok", true); reply.Set("result", std::move(state));
+       return base::WriteJson(reply).value_or("");
+     }
+--- a/chrome/browser/ui/webui/management/management_ui_handler.cc
++++ b/chrome/browser/ui/webui/management/management_ui_handler.cc
+@@ -1188,13 +1188,22 @@
+   const int hardware_concurrency = hardware_concurrency_value->GetInt();
+ 
+   ManagedTabContext* context = ManagedTabContext::FindById(args[1].GetString());
+-  if (!context || !context->SetFingerprintUserAgent(*user_agent) ||
++  if (!context) {
++    RejectJavascriptCallback(args[0], base::Value("账号环境不存在"));
++    return;
++  }
++  const bool requires_reload =
++      context->fingerprint_user_agent_override().ua_string_override != *user_agent ||
++      context->fingerprint_hardware_concurrency() != hardware_concurrency;
++  if (!context->SetFingerprintUserAgent(*user_agent) ||
+       !context->SetFingerprintHardwareConcurrency(hardware_concurrency)) {
+     RejectJavascriptCallback(args[0], base::Value("无法应用指纹配置"));
+     return;
+   }
+ 
+-  ResolveJavascriptCallback(args[0], context->GetState());
++  auto after = context->GetState();
++  after.Set("requires_reload", requires_reload);
++  ResolveJavascriptCallback(args[0], std::move(after));
+ }
+ 
+ void ManagementUIHandler::HandleActivateManagedTab(
+--- a/chrome/browser/ui/android/tab_model/saas_account_environment.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_environment.h
+@@ -166,7 +166,9 @@
+     state.Set("user_agent", saved.user_agent);
+     state.Set("hardware_concurrency", saved.hardware_concurrency);
+     // 这是浏览器维护的覆盖配置，不是运行中的全部 Worker 已生效证明。
+-    state.Set("hardware_override_scope", "page_frames");
++    state.Set("hardware_override_scope", "page_frames_and_dedicated_worker_snapshots");
++    state.Set("dedicated_worker_hardware_configured", true);
++    state.Set("worker_configuration_lifecycle", "creation_snapshot");
+     state.Set("worker_fingerprint_verified", false);
+     return state;
+   }

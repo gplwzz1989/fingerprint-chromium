@@ -211,3 +211,4 @@ upstream-fixes/managed-tab-android-saf-files.patch
 upstream-fixes/managed-tab-android-native-http.patch
 upstream-fixes/managed-tab-android-saf-file-extension.patch
 upstream-fixes/managed-tab-android-secure-storage.patch
+upstream-fixes/managed-tab-dedicated-worker-hardware.patch

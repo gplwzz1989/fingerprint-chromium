@@ -81,7 +81,9 @@ Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，�
 
 安卓 `fingerprint.set` 支持 `user_agent` 与 `hardware_concurrency` 的部分更新，拒绝未知字段；UA 为至多 512 字节可打印 ASCII，空字符串清除覆盖，硬件值为 0～64 整数，0 表示恢复种子驱动的页面行为。种子/代理由创建环境确定，不能当作在线字段假装切换。存储操作未释放时拒绝指纹修改。
 
-自定义 Chromium UA 的 CH 元数据仅从字符串提取，未知架构/型号留空；非 Chromium UA 使用 UA-only 覆盖，不混入本机默认 CH。更改 UA 返回 `requires_reload`，不自动重放页面 POST；下一次受控导航显式应用覆盖。配置状态的 `hardware_override_scope=page_frames`、`worker_fingerprint_verified=false` 明确说明当前不承诺全部 Worker 的一致性；配置回读不是页面/HTTP 运行验证。
+自定义 Chromium UA 的 CH 元数据仅从字符串提取，未知架构/型号留空；非 Chromium UA 使用 UA-only 覆盖，不混入本机默认 CH。更改 UA 或硬件值返回 `requires_reload`，不自动重放页面 POST；下一次受控导航显式应用覆盖。配置状态的 `worker_fingerprint_verified=false` 明确说明当前不承诺全部 Worker 的一致性；配置回读不是页面/HTTP 运行验证。
+
+后续 Dedicated Worker 编码将 `hardware_override_scope` 扩展为 `page_frames_and_dedicated_worker_snapshots`：窗口创建专用 Worker 时捕获当时的有效硬件值，嵌套 Worker 复制该快照；现有 Worker 保持创建时配置，不在修改页面配置时被静默改变。PC/Android 更改 UA 或硬件值均返回 `requires_reload`，前端提示重载而不自动重放 POST。`dedicated_worker_hardware_configured=true` 表示传递通道已编码，`worker_fingerprint_verified=false` 仍保留；SharedWorker、ServiceWorker、网络 UA-CH 和全部 Worker 效果未完成，不能据此宣称整体一致。
 
 网页存储按原文档弱引用与隔离世界私有标记保护，保留 `__proto__` 等真实键；配额失败尝试回滚两类网页存储，回滚失败明确报错。Cookie 使用原生规范化校验并保留 host-only/域 Cookie 与可序列化分区键；不可安全导出的分区键拒绝导出。Cookie 与网页存储不是整体原子事务，取消或失败时可能已有部分写入，不保证撤回已发出的 IPC。
 

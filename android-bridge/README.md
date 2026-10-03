@@ -123,6 +123,8 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 ### 指纹专项进展
 
+后续 Worker 第一阶段：Blink 的 WorkerSettings 保存创建者有效硬件值，Dedicated Worker 从页面捕获，嵌套 Worker 复制快照；NavigatorBase 优先读取该快照。PC 与 Android 在修改 UA/硬件值后返回重载提示，已有 Worker 保持原配置，SharedWorker/ServiceWorker 和网络 UA-CH 全链路仍未完成。相关三个 Blink 文件、桌面管理器和环境头局部检查通过；实际快照行为测试对象/链接成功，但组件入口 `0xC0000139` 导致 19 项未运行，不计为通过。整体验收保持暂缓。
+
 `saas_fingerprint_config.h` 与 `saas_user_agent_metadata.h` 提供真实参数校验和数据驱动的 UA-CH 构建；`managed-tab-android-fingerprint.patch` 挂接 get/set、创建配置、控制台导航和普通冻结保存。只修改本地能力层，不承载 SaaS 业务。空 UA/硬件 0 清除相应覆盖，字段校验失败不提交半份配置；同步忙时拒绝修改。
 
 纯配置测试 37 项、原生状态头测试 59 项、JVM/协议 499 项、网页 13 项通过；UA 元数据测试编译和链接成功但运行遇到组件入口加载错误，未计通过。共享浏览器/环境/存储局部 C++ 检查、JNI 生成和 Java 解析通过。页面 UA、HTTP 请求头、Worker 一致性和 APK 仍待真实运行验收；未修改 Blink、GN 或启动全量构建。

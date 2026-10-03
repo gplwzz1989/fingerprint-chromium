@@ -226,10 +226,11 @@
       try {
         if (!fingerprintTarget || form.elements.tab_id.value !== fingerprintTarget.tab.id) throw new Error('请重新打开账号指纹配置');
         checkTabScope(fingerprintTarget.original, fingerprintTarget.tab);
-        await context.bridge.fingerprint.set(form.elements.tab_id.value, {
+        const result = await context.bridge.fingerprint.set(form.elements.tab_id.value, {
           user_agent: form.elements.user_agent.value, hardware_concurrency: Number(form.elements.hardware_concurrency.value),
         });
         find('fingerprint-modal').close(); await loadTabs();
+        if (result?.requires_reload) context.showToast('指纹配置已保存，需要重新加载账号页面');
       } catch (error) { find('fingerprint-status').textContent = context.userMessage(error); }
     });
     global.addEventListener('pagehide', lock);

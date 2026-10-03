@@ -166,7 +166,9 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     state.Set("user_agent", saved.user_agent);
     state.Set("hardware_concurrency", saved.hardware_concurrency);
     // 这是浏览器维护的覆盖配置，不是运行中的全部 Worker 已生效证明。
-    state.Set("hardware_override_scope", "page_frames");
+    state.Set("hardware_override_scope", "page_frames_and_dedicated_worker_snapshots");
+    state.Set("dedicated_worker_hardware_configured", true);
+    state.Set("worker_configuration_lifecycle", "creation_snapshot");
     state.Set("worker_fingerprint_verified", false);
     return state;
   }
