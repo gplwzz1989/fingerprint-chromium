@@ -17,6 +17,15 @@
       const item = document.createElement('li'); item.textContent = failure; result.append(item);
     }
   }
+  function leaseNotice(account, error) {
+    if (!['lease_conflict', 'lease_required'].includes(error?.code)) return;
+    const notice = find('lease-notice');
+    if (!notice) return;
+    notice.hidden = false;
+    notice.textContent = error.code === 'lease_conflict'
+      ? `${account.name} 正在被其他设备编辑，请等待租约释放后重试。`
+      : `${account.name} 的编辑租约已失效，请重新发起同步或恢复。`;
+  }
   function scopeToken() {
     const state = context.getState();
     return state.session ? `${state.sessionGeneration}:${state.workspaceId}` : null;
@@ -66,6 +75,7 @@
     let result;
     try { result = await controller[restore ? 'restore' : 'upload'](account); }
     catch (error) {
+      leaseNotice(account, error);
       if (!restore && controller.getConflict(account.account_id)) showConflict(account);
       throw error;
     }
@@ -127,6 +137,7 @@
         status(`正在处理 ${success + failures.length + 1}/${accounts.length}：${account.name}`);
         try { await controller[restore ? 'restore' : 'upload'](account); success++; batchProgress(success + failures.length, accounts.length, failures); }
         catch (error) {
+          leaseNotice(account, error);
           failures.push(`${account.name}：${context.userMessage(error)}`);
           batchProgress(success + failures.length, accounts.length, failures);
           if (!restore && controller.getConflict(account.account_id)) break;
