@@ -43,6 +43,8 @@ fingerprint-saas
 
 局部验证：`node --test saas-web/snapshot-sync.test.cjs`，共 9 项。测试使用真实 WebCrypto 验证加密往返、账号绑定、错误密码、旧信封兼容、合并冲突和锁定/会话切换停止写入；HTTP 回退与版本竞争只在测试隔离上下文中验证接口边界。
 
+页面状态契约：`node --test saas-web/ui-state.test.cjs`，共 3 项，检查真实加载/详情/运行状态、批量租约分类、进度条无障碍属性、成员授权错误入口和设备安全摘要挂点，不注入账号、成员、设备或原生桥假数据。
+
 桌面 iframe 仅与 `chrome://fingerprint-manager` 宿主通信；`node --test saas-web/bridge-contract.test.cjs` 验证固定目标来源、拒绝伪造父来源和失败清理。Android 客户端新增原生消息端口传输，初始化为 JSON 字符串，收到撤销或页面离开时拒绝未完成请求；真实端口／网页／JVM 互通测试位于 `android-bridge/tests/port-interop.cjs`，不代表 APK 运行验收。
 
 - 原生桥必须由 Chromium 客户端按完整 Origin（协议、主机、端口）校验后注入；`SAAS_ALLOWED_ORIGINS` 只控制 API 的跨源访问，不能代替客户端桥接授权。
