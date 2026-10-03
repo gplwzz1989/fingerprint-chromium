@@ -1,0 +1,84 @@
+--- a/content/public/browser/content_browser_client.h
++++ b/content/public/browser/content_browser_client.h
+@@ -2652,6 +2652,11 @@ class CONTENT_EXPORT ContentBrowserClient {
+   // Returns user agent metadata. Content may cache this value.
+   virtual blink::UserAgentMetadata GetUserAgentMetadata();
+ 
++  // Returns an account-level User-Agent override for a managed storage
++  // partition, when the embedder has one.
++  virtual std::optional<blink::UserAgentOverride>
++  GetManagedTabUserAgentOverride(const StoragePartitionConfig& config);
++
+   // Returns a 256x256 transparent background image of the product logo, i.e.
+   // the browser icon, if available.
+   virtual std::optional<gfx::ImageSkia> GetProductLogo();
+
+--- a/content/public/browser/content_browser_client.cc
++++ b/content/public/browser/content_browser_client.cc
+@@ -1470,6 +1470,12 @@ blink::UserAgentMetadata ContentBrowserClient::GetUserAgentMetadata() {
+   return blink::UserAgentMetadata();
+ }
+ 
++std::optional<blink::UserAgentOverride>
++ContentBrowserClient::GetManagedTabUserAgentOverride(
++    const StoragePartitionConfig& config) {
++  return std::nullopt;
++}
++
+ std::optional<gfx::ImageSkia> ContentBrowserClient::GetProductLogo() {
+   return std::nullopt;
+ }
+
+--- a/chrome/browser/chrome_content_browser_client.h
++++ b/chrome/browser/chrome_content_browser_client.h
+@@ -322,6 +322,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
+       blink::RendererPreferences* out_prefs) override;
+   int GetWorkerFingerprintHardwareConcurrency(
+       const content::StoragePartitionConfig& config) override;
++  std::optional<blink::UserAgentOverride> GetManagedTabUserAgentOverride(
++      const content::StoragePartitionConfig& config) override;
+   content::AllowServiceWorkerResult AllowServiceWorker(
+       const GURL& scope,
+       const net::SiteForCookies& site_for_cookies,
+
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -3104,6 +3104,18 @@ int ChromeContentBrowserClient::GetWorkerFingerprintHardwareConcurrency(
+   return 0;
+ }
+ 
++std::optional<blink::UserAgentOverride>
++ChromeContentBrowserClient::GetManagedTabUserAgentOverride(
++    const content::StoragePartitionConfig& config) {
++  for (ManagedTabContext* tab : ManagedTabContext::GetAll()) {
++    if (tab->storage_partition_config() == config) {
++      const auto& override = tab->fingerprint_user_agent_override();
++      if (!override.ua_string_override.empty()) return override;
++    }
++  }
++  return std::nullopt;
++}
++
+ content::AllowServiceWorkerResult
+ ChromeContentBrowserClient::AllowServiceWorker(
+     const GURL& scope,
+
+--- a/content/browser/service_worker/service_worker_version.cc
++++ b/content/browser/service_worker/service_worker_version.cc
+@@ -2448,6 +2448,14 @@ void ServiceWorkerVersion::StartWorkerInternal() {
+   params->fingerprint_hardware_concurrency =
+       browser_client->GetWorkerFingerprintHardwareConcurrency(
+           context_->wrapper()->storage_partition()->GetConfig());
++  if (auto user_agent_override =
++          browser_client->GetManagedTabUserAgentOverride(
++              context_->wrapper()->storage_partition()->GetConfig())) {
++    params->user_agent = user_agent_override->ua_string_override;
++    if (user_agent_override->ua_metadata_override) {
++      params->ua_metadata = *user_agent_override->ua_metadata_override;
++    }
++  }
+   params->is_installed = IsInstalled(status_);
+   params->script_url_to_skip_throttling = updated_script_url_;
+   params->main_script_load_params = std::move(main_script_load_params_);
+
+
