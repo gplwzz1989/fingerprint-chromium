@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/workspaces/{workspace_id}/accounts", s.handleListAccounts)
 	mux.HandleFunc("POST /api/v1/workspaces/{workspace_id}/accounts", s.handleCreateAccount)
 	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}", s.handleUpdateAccount)
+	mux.HandleFunc("DELETE /api/v1/accounts/{account_id}", s.handleDeleteAccount)
 	mux.HandleFunc("GET /api/v1/accounts/{account_id}/members", s.handleListAccountMembers)
 	mux.HandleFunc("PATCH /api/v1/accounts/{account_id}/members/{user_id}", s.handleUpdateAccountMember)
 	mux.HandleFunc("DELETE /api/v1/accounts/{account_id}/members/{user_id}", s.handleRemoveAccountMember)
@@ -1307,6 +1308,73 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("写入账号更新审计失败", "error", err.Error())
 	}
 	writeJSON(w, http.StatusOK, account)
+}
+
+func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _, deviceID, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	accountID := r.PathValue("account_id")
+	if !validAccountID(accountID) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "账号标识无效")
+		return
+	}
+	_, role, ok := s.accountAccess(r.Context(), userID, accountID)
+	if !ok || !canManageAccountMembers(role) {
+		writeError(w, http.StatusForbidden, "forbidden", "只有工作区所有者或管理员可以删除账号")
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		s.logger.Error("开始删除账号事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法删除账号")
+		return
+	}
+	defer tx.Rollback()
+	var leaseDeviceID string
+	var leaseExpiresAt time.Time
+	leaseErr := tx.QueryRowContext(r.Context(), `
+		SELECT device_id, expires_at FROM account_leases
+		WHERE account_id = $1 FOR UPDATE`, accountID).Scan(&leaseDeviceID, &leaseExpiresAt)
+	if leaseErr != nil && leaseErr != sql.ErrNoRows {
+		s.logger.Error("检查账号删除租约失败", "error", leaseErr.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法检查账号占用状态")
+		return
+	}
+	if leaseErr == nil && leaseExpiresAt.After(time.Now()) {
+		writeError(w, http.StatusConflict, "lease_conflict", "该账号正在被设备编辑，请等待租约释放后再删除")
+		return
+	}
+	var deletedID string
+	if err := tx.QueryRowContext(r.Context(), `
+		DELETE FROM accounts WHERE account_id = $1 RETURNING account_id`, accountID).Scan(&deletedID); err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "not_found", "账号不存在")
+			return
+		}
+		s.logger.Error("删除账号失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法删除账号")
+		return
+	}
+	eventID, err := newUUID()
+	if err != nil {
+		s.logger.Error("生成删除账号审计标识失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "账号删除未完成")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO audit_events (event_id, user_id, account_id, action, device_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'account_deleted', $4)`, eventID, userID, deletedID, deviceID); err != nil {
+		s.logger.Error("写入删除账号审计失败", "error", err.Error())
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交删除账号事务失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "账号删除未完成")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"account_id": deletedID, "deleted": true})
 }
 
 type updateAccountMemberRequest struct {

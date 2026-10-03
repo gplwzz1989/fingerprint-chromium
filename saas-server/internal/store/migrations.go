@@ -99,6 +99,7 @@ var migrations = []string{
      ON account_members (user_id, account_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS users_lower_email_idx
      ON users (lower(email))`,
+	`ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_account_id_fkey`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

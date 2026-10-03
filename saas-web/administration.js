@@ -149,7 +149,7 @@
     const original = scope();
     const values = await context.request(accountPath(account.account_id) + '/audit-events');
     checkScope(original);
-    const names = {account_created: '创建账号', account_updated: '更新账号资料', snapshot_read: '读取环境快照',
+    const names = {account_created: '创建账号', account_updated: '更新账号资料', account_deleted: '删除账号', snapshot_read: '读取环境快照',
       snapshot_written: '同步环境快照', snapshot_overwritten: '明确覆盖云端快照', lease_acquired: '获取编辑租约',
       lease_released: '释放编辑租约', account_member_role_updated: '更新账号授权', account_member_removed: '移除账号授权'};
     find('audit-title').textContent = `${account.name} · 操作记录`;
@@ -161,6 +161,16 @@
     }
     find('audit-status').textContent = values.length ? '显示最近的账号操作记录，最多 200 条' : '暂无账号操作记录';
     find('audit-modal').showModal();
+  }
+  async function removeAccount(account) {
+    const original = scope();
+    if (!isManager(original) || account.workspace_id !== original.workspaceId) throw new Error('没有删除该账号的权限');
+    if (!global.confirm(`删除账号“${account.name}”？该账号的云端快照、授权和租约都会被永久删除。`)) return;
+    checkScope(original);
+    await context.request(accountPath(account.account_id), {method: 'DELETE'});
+    checkScope(original);
+    await context.refreshAccounts();
+    context.showToast(`账号 ${account.name} 已删除`);
   }
   function configure(value) {
     context = value;
@@ -236,7 +246,10 @@
       cell.append(button('记录', () => openAudit(account), 'operation-status'));
       const state = context.getState();
       const current = state.workspaces.find((item) => item.workspace_id === state.workspaceId);
-      if (current && isManager(current)) cell.append(button('权限', () => openAccountAccess(account), 'operation-status'));
+      if (current && isManager(current)) {
+        cell.append(button('权限', () => openAccountAccess(account), 'operation-status'));
+        cell.append(button('删除', () => removeAccount(account), 'operation-status'));
+      }
     },
   };
 })(window);

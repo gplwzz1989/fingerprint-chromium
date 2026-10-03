@@ -36,6 +36,7 @@ test('成员和设备页面暴露加载忙状态及真实错误文案入口', ()
   }
   assert.match(administration, /成员列表格式无效/);
   assert.match(administration, /账号授权数据格式无效/);
+  assert.match(administration, /删除账号/);
   assert.match(operations, /security-protection-state/);
   assert.match(operations, /refresh-sessions-button.*disabled = true/);
 });
