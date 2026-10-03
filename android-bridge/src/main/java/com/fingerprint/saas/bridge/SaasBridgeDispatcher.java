@@ -115,6 +115,7 @@ public final class SaasBridgeDispatcher {
             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
             capabilities.put("tabs", backend != null && backend.supports("tabs"));
             capabilities.put("storage", backend != null && backend.supports("storage"));
+            capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -129,6 +130,10 @@ public final class SaasBridgeDispatcher {
         }
         if ("storage.getSnapshot".equals(method) || "storage.writeSnapshot".equals(method)) {
             if (backend == null || !backend.supports("storage")) throw invalid("当前客户端尚未提供存储管理能力");
+            return backend.invoke(method, args);
+        }
+        if ("fingerprint.get".equals(method) || "fingerprint.set".equals(method)) {
+            if (backend == null || !backend.supports("fingerprint")) throw invalid("当前客户端尚未提供指纹配置能力");
             return backend.invoke(method, args);
         }
         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {

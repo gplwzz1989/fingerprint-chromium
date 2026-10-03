@@ -206,3 +206,4 @@ upstream-fixes/managed-tab-android-account-environment.patch
 upstream-fixes/managed-tab-android-account-state.patch
 upstream-fixes/managed-tab-android-tab-operations.patch
 upstream-fixes/managed-tab-android-storage.patch
+upstream-fixes/managed-tab-android-fingerprint.patch

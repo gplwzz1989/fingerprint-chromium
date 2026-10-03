@@ -22,6 +22,7 @@ data class TabCreateOptions(
     val accountId: String? = null,
     val proxyRules: String? = null,
     val fingerprintSeed: String? = null,
+    val fingerprint: Map<String, Any?>? = null,
 )
 
 data class SaasFileEntry(

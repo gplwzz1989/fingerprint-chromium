@@ -33,6 +33,11 @@ class SaasAccountStorage final : public content::WebContentsObserver,
   using Authority = base::RepeatingCallback<bool()>;
   using Completion = base::OnceCallback<void(base::Value::Dict)>;
 
+  static bool IsBusy(content::WebContents* contents) {
+    auto* lock = contents ? static_cast<LockData*>(contents->GetUserData(&kLockKey)) : nullptr;
+    return lock && lock->lock->busy;
+  }
+
   static void Read(content::WebContents* contents, const base::Value::Dict& options,
                    Authority authority,
                    Completion callback) {
@@ -251,6 +256,7 @@ class SaasAccountStorage final : public content::WebContentsObserver,
     snapshot_.Set("storage_url", storage_url_.spec());
     snapshot_.Set("proxy_rules", account_.proxy_rules);
     snapshot_.Set("fingerprint_seed", account_.fingerprint_seed);
+    snapshot_.Set("fingerprint", SaasFingerprintConfig{account_.user_agent, account_.hardware_concurrency}.ToValue());
     snapshot_.Set("cookies", std::move(serialized));
     if (local_ || session_) {
       Execute(SaasStorageReadScript(token_, storage_url_.spec(), local_, session_),
@@ -277,7 +283,7 @@ class SaasAccountStorage final : public content::WebContentsObserver,
     options.Set("cookies", cookies_); options.Set("local_storage", local_);
     options.Set("session_storage", session_); options.Set("proxy", true);
     options.Set("page", needs_page_);
-    options.Set("fingerprint", false);
+    options.Set("fingerprint", true);
     snapshot_.Set("sync_options", std::move(options));
     Finish(true, {}, base::Value(std::move(snapshot_)));
   }
@@ -325,7 +331,15 @@ class SaasAccountStorage final : public content::WebContentsObserver,
       if (snapshot.contains("fingerprint_seed") && (!seed || *seed != account_.fingerprint_seed)) {
         return fail("快照指纹种子与当前账号环境不一致");
       }
-      if (snapshot.contains("fingerprint")) return fail("当前安卓客户端尚未支持完整指纹快照写入");
+      if (snapshot.contains("fingerprint")) {
+        const auto* fields = snapshot.FindDict("fingerprint");
+        if (!fields || fields->FindString("user_agent") == nullptr ||
+            fields->FindInt("hardware_concurrency") == std::nullopt) return fail("快照指纹配置格式无效");
+        SaasFingerprintConfig parsed;
+        if (!SaasFingerprintConfig::Update(*fields, {}, &parsed, error)) return false;
+        if (parsed.user_agent != account_.user_agent ||
+            parsed.hardware_concurrency != account_.hardware_concurrency) return fail("快照指纹与当前账号环境不一致，请先应用指纹配置");
+      }
     }
     if (local_ || session_) {
       const auto* url = snapshot.FindString("storage_url");

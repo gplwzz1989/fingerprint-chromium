@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/pickle.h"
+#include "chrome/browser/ui/android/tab_model/saas_fingerprint_config.h"
 
 namespace chrome::android {
 
@@ -15,12 +16,14 @@ namespace chrome::android {
 // 零条导航前缀让旧解析器受控拒绝，避免负数数量触发巨量内存申请。
 struct SaasAccountState {
   static constexpr int kMarker = -0x53414153;
-  static constexpr int kVersion = 1;
+  static constexpr int kVersion = 2;
   static constexpr int kMaxEntries = 10000;
 
   std::string account_id;
   std::string proxy_rules;
   std::string fingerprint_seed;
+  std::string user_agent = {};
+  int hardware_concurrency = 0;
 
   static bool IsValidAccountId(std::string_view value) {
     if (value.empty() || value.size() > 128) return false;
@@ -43,6 +46,7 @@ struct SaasAccountState {
 
   bool IsValid() const {
     return IsValidAccountId(account_id) && IsValidSeed(fingerprint_seed) &&
+           SaasFingerprintConfig{user_agent, hardware_concurrency}.IsValid() &&
            proxy_rules.size() <= 2048 &&
            proxy_rules.find_first_of(";,=@\r\n\0", 0, 7) == std::string::npos;
   }
@@ -61,6 +65,8 @@ struct SaasAccountState {
       pickle->WriteString(state->account_id);
       pickle->WriteString(state->proxy_rules);
       pickle->WriteString(state->fingerprint_seed);
+      pickle->WriteString(state->user_agent);
+      pickle->WriteInt(state->hardware_concurrency);
     }
     pickle->WriteInt(entry_count);
     pickle->WriteInt(current_entry_index);
@@ -78,14 +84,21 @@ struct SaasAccountState {
       int marker, version;
       std::string_view account, proxy, seed;
       if (*off_the_record || !iter->ReadInt(&marker) || marker != kMarker ||
-          !iter->ReadInt(&version) || version != kVersion ||
+          !iter->ReadInt(&version) || (version != 1 && version != kVersion) ||
           !iter->ReadStringPiece(&account) || !IsValidAccountId(account) ||
           !iter->ReadStringPiece(&proxy) || proxy.size() > 2048 ||
           proxy.find_first_of(";,=@\r\n\0", 0, 7) != std::string_view::npos ||
-          !iter->ReadStringPiece(&seed) || !IsValidSeed(seed) ||
-          !iter->ReadInt(&count)) return false;
+          !iter->ReadStringPiece(&seed) || !IsValidSeed(seed)) return false;
       // 先验证切片长度再分配，损坏的状态不能触发无界字符串分配。
       parsed = SaasAccountState{std::string(account), std::string(proxy), std::string(seed)};
+      if (version == kVersion) {
+        std::string_view agent;
+        int hardware;
+        if (!iter->ReadStringPiece(&agent) || !SaasFingerprintConfig::IsValidUserAgent(agent) ||
+            !iter->ReadInt(&hardware) || hardware < 0 || hardware > 64) return false;
+        parsed->user_agent = std::string(agent); parsed->hardware_concurrency = hardware;
+      }
+      if (!iter->ReadInt(&count)) return false;
     }
     if (count < 1 || count > kMaxEntries ||
         !iter->ReadInt(current_entry_index) || *current_entry_index < 0 ||

@@ -65,6 +65,7 @@ public final class SaasBridgeDispatcherSelfTest {
         Map<String, Object> deepResponse = invoke(dispatcher, "crypto.decryptSnapshot", decrypt, ORIGIN);
         check(Boolean.FALSE.equals(deepResponse.get("ok")) && ((String) deepResponse.get("error")).contains("支持范围"), "过深响应未包装为安全错误");
         testNativeRouting(dispatcher);
+        testFingerprintRouting(dispatcher);
         System.out.println("原生消息路由自测通过：" + assertions + " 项");
     }
 
@@ -74,6 +75,30 @@ public final class SaasBridgeDispatcherSelfTest {
         return decode(dispatcher.dispatch(new String(SnapshotJson.encode(request, SaasBridgeDispatcher.MAX_MESSAGE_BYTES), StandardCharsets.UTF_8), origin));
     }
     private static Map<String, Object> decode(String value) { return SnapshotJson.decode(value.getBytes(StandardCharsets.UTF_8)); }
+
+    /** 只核对路由授权，不以测试探针代替真实指纹效果。 */
+    private static void testFingerprintRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "fingerprint".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> request = decode("{\"type\":\"fingerprint-saas-bridge:request\",\"requestId\":\"fp-1\",\"args\":{\"tabId\":\"account-01\"}}");
+        for (String method : new String[] {"fingerprint.get", "fingerprint.set"}) {
+            request.put("method", method);
+            String message = SaasBridgeDispatcher.encodeNativePayload(request);
+            check(Boolean.TRUE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")), "指纹方法未路由");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN)).get("ok")), "未绑定仍执行指纹方法");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "指纹方法绕过来源校验");
+        }
+        check(calls[0] == 2, "拒绝请求到达指纹平台层");
+        request.put("method", "fingerprint.replaceProfile");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("ok")), "未知指纹方法被执行");
+        check(calls[0] == 2, "未知指纹方法进入平台层");
+        request.put("method", "getCapabilities");
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("fingerprint")) && Boolean.FALSE.equals(flags.get("files")), "指纹能力与文件能力混淆");
+    }
 
     /** 仅验证路由边界的探针，不模拟 Android 标签或替代真实平台验收。 */
     private static void testNativeRouting(SaasBridgeDispatcher dispatcher) {

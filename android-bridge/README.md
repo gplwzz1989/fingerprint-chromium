@@ -6,7 +6,7 @@
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
 - `SnapshotCrypto.java`、`SnapshotJson.java` 与 `JvmSnapshotCryptoAdapter.kt`：可独立编译的真实快照加密模块，使用 Java 标准 JCA/JCE，无新增运行时依赖。
-- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储操作；尚未完成完整 Android Java/C++ 编译和设备验收。未绑定平台实现时仅声明 `crypto=true`，绑定 TabModel 后增加 `tabs/storage=true`，其余能力为 `false`；不能将源码挂接当作已安装可用的 Android 浏览器。
+- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹操作；尚未完成完整 Android Java/C++ 编译和设备验收。未绑定平台实现时仅声明 `crypto=true`，绑定 TabModel 后增加 `tabs/storage/fingerprint=true`，其余能力为 `false`；不能将源码挂接当作已安装可用的 Android 浏览器。
 - `SaasOriginPolicy.java` 使用可信宿主提供的完整 Origin 白名单，默认 URL 不在模块内硬编码；Android JNI 从现有 C++ 常量和编译参数读取配置，默认来源随该常量更新。
 - 文件能力必须使用 Storage Access Framework 返回的授权 URI；禁止把 Windows 路径模型带入 Android。
 - 会话密钥使用 Android Keystore；应用生命周期恢复必须覆盖进程被系统回收、断网和权限撤销。
@@ -77,7 +77,7 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 正常使用链路已在 `managed-tab-android-tab-operations.patch` 接入 `tabs.list/create/activate/navigate/close`。使用真实 TabModel、TabCreator 和 TabRemover，在 UI 线程重新校验消息端口、文档代次、真实主框架 Origin 与等待期限；控制台和普通标签不能作为账号目标，冻结/归档环境参与重复账号检查。创建先建立固定分区并核对 WebContents 所有者，再加载网页；创建失败清理实际所有者，不退回普通标签。
 
-平台实现成功绑定时提供 `tabs/storage/crypto`；未绑定的独立路由仍只提供 `crypto`。`fingerprint/files/http` 尚未接入，保持不可用。普通冻结读取使用必需状态头和真实分区元数据；异常关闭自动恢复按用户指定的低优先级暂缓，不继续扩大该专项。
+平台实现成功绑定时提供 `tabs/storage/fingerprint/crypto`；未绑定的独立路由仍只提供 `crypto`。`files/http` 尚未接入，保持不可用。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
 
 本轮独立复测 474 项通过，包含 33 项消息路由测试；其中 13 项仅为分发边界探针，不模拟 Android 标签。三个平台 Java 文件解析、两个 JNI 生成、环境/状态 JSON 局部 C++ 检查和新补丁反向检查通过。未完成 Android 类型检查、完整编译或设备运行；原生参数测试对象/链接成功但加载入口错误仍未解决，不计为运行通过。
 
@@ -89,7 +89,13 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 `src/chromium/native/saas_account_storage.h` 和 `saas_web_storage_scripts.h` 与 `managed-tab-android-storage.patch` 保存真实存储实现及挂接。Cookie 使用实际账号固定分区的 CookieManager，不访问 Profile 默认分区；网页存储只在 Chrome 内部隔离世界读取/写入，跨文档和来源变化时停止。Cookie-only 不需要访问 LocalStorage 或加载网站；快照读写尊重选中类别。
 
-异步 JNI 不阻塞 UI，持续核对控制台授权；操作 30 秒超时、宿主等待 35 秒，同账号串行，Profile 内最多 8 个未释放操作。网页写入失败尝试回滚原数据；后续 Cookie 写入失败可能已产生局部修改，不报告原子成功。当前完整指纹快照明确拒绝，不能据存储接入宣称指纹接口完成。
+异步 JNI 不阻塞 UI，持续核对控制台授权；操作 30 秒超时、宿主等待 35 秒，同账号串行，Profile 内最多 8 个未释放操作。网页写入失败尝试回滚原数据；后续 Cookie 写入失败可能已产生局部修改，不报告原子成功。指纹快照核对已应用的配置，不能据存储接入宣称 Worker 或整机指纹效果完成。
+
+### 指纹专项进展
+
+`saas_fingerprint_config.h` 与 `saas_user_agent_metadata.h` 提供真实参数校验和数据驱动的 UA-CH 构建；`managed-tab-android-fingerprint.patch` 挂接 get/set、创建配置、控制台导航和普通冻结保存。只修改本地能力层，不承载 SaaS 业务。空 UA/硬件 0 清除相应覆盖，字段校验失败不提交半份配置；同步忙时拒绝修改。
+
+纯配置测试 37 项、原生状态头测试 59 项、JVM/协议 499 项、网页 13 项通过；UA 元数据测试编译和链接成功但运行遇到组件入口加载错误，未计通过。共享浏览器/环境/存储局部 C++ 检查、JNI 生成和 Java 解析通过。页面 UA、HTTP 请求头、Worker 一致性和 APK 仍待真实运行验收；未修改 Blink、GN 或启动全量构建。
 
 JVM/协议复测 489 项通过；`tests/storage-script-source.cc` 编译和链接实际原生脚本生成器，`tests/storage-script-selftest.cjs` 使用明确的存储探针验证 23 项边界，包括保留键、类别过滤、文档标记、配额失败和回滚；不模拟原生 CookieManager 或 Android 设备。网页 12 项、JNI 生成、Java 解析、原生引擎和桌面修复局部 C++ 检查通过；尚无 Android 类型检查、完整 IPC 或设备验收。
 

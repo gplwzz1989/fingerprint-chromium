@@ -43,7 +43,7 @@
 | --- | --- | --- | --- |
 | `tabs` | 已接入 | 已编码，待 APK 验收 | 单父窗口内的原生 Tab |
 | `storage` | 已接入 | 已编码，待 APK 验收 | Cookie、LocalStorage、SessionStorage 快照 |
-| `fingerprint` | 已接入 | 待接入 | 与账号 Tab 绑定的指纹配置 |
+| `fingerprint` | 已接入 | 页面配置已编码，Worker/设备待验收 | 与账号 Tab 绑定的指纹配置 |
 | `files` | 已接入绝对路径 | SAF 授权 URI | 桌面端支持系统绝对路径；相对路径仍以 `SaasFiles` 为根，不能引用上级目录 |
 | `http` | 已接入首版 | 原生网络适配 | 支持自定义方法、请求头、Base64 正文和可选会话凭据；单次响应上限 16 MiB、超时 30 秒 |
 | `crypto` | 已编码，待运行联调 | 端口宿主已编码，待 APK 验证 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
@@ -58,11 +58,15 @@ Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。T
 
 Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，以精确目标 Origin 把端口交给真实主框架；来源读取 `RenderFrameHost.getLastCommittedOrigin()`，不信任消息自报地址。初始化和后续消息均为 JSON 字符串。网页客户端仅接受来自固定原生来源、`source=null` 的可信初始化事件；这层网页检查不代替原生来源授权。
 
-端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加五个 `tabs` 操作和两个 `storage` 操作，`fingerprint/files/http` 继续为 false；尚未完成 Android 平台运行验收。
+端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加 `tabs/storage/fingerprint`，`files/http` 继续为 false；尚未完成 Android 平台运行验收。
 
 安卓存储请求使用非阻塞 UI 发起与异步 JNI 完成；原生操作上限 30 秒，宿主等待 35 秒。输入/输出 JSON 上限 14 MiB，Cookie 最多 5000 条，每类网页存储最多 10000 键、UTF-8 总量 10 MiB、键 1024 字节、值 1 MiB。同账号操作不交叉执行，Profile 内最多 8 个未释放操作；超时释放大数据，但未结束的 IPC 仍占操作额度。
 
-`getSnapshot` 可携带 `cookies/local_storage/session_storage` 布尔选项；未选类别不读取。`writeSnapshot` 按快照 `sync_options` 处理，未选类别不清空。网页存储要求已加载的同来源 HTTP/HTTPS 文档；Cookie-only 可在空白账号环境操作。完整指纹快照暂明确拒绝，不伪装应用成功。
+`getSnapshot` 可携带 `cookies/local_storage/session_storage` 布尔选项；未选类别不读取。`writeSnapshot` 按快照 `sync_options` 处理，未选类别不清空。网页存储要求已加载的同来源 HTTP/HTTPS 文档；Cookie-only 可在空白账号环境操作。指纹快照须先通过 `fingerprint.set` 应用，写入存储时核对 UA、硬件并发数和种子，不能悄悄忽略不匹配配置。
+
+安卓 `fingerprint.set` 支持 `user_agent` 与 `hardware_concurrency` 的部分更新，拒绝未知字段；UA 为至多 512 字节可打印 ASCII，空字符串清除覆盖，硬件值为 0～64 整数，0 表示恢复种子驱动的页面行为。种子/代理由创建环境确定，不能当作在线字段假装切换。存储操作未释放时拒绝指纹修改。
+
+自定义 Chromium UA 的 CH 元数据仅从字符串提取，未知架构/型号留空；非 Chromium UA 使用 UA-only 覆盖，不混入本机默认 CH。更改 UA 返回 `requires_reload`，不自动重放页面 POST；下一次受控导航显式应用覆盖。配置状态的 `hardware_override_scope=page_frames`、`worker_fingerprint_verified=false` 明确说明当前不承诺全部 Worker 的一致性；配置回读不是页面/HTTP 运行验证。
 
 网页存储按原文档弱引用与隔离世界私有标记保护，保留 `__proto__` 等真实键；配额失败尝试回滚两类网页存储，回滚失败明确报错。Cookie 使用原生规范化校验并保留 host-only/域 Cookie 与可序列化分区键；不可安全导出的分区键拒绝导出。Cookie 与网页存储不是整体原子事务，取消或失败时可能已有部分写入，不保证撤回已发出的 IPC。
 

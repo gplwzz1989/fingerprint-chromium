@@ -1,0 +1,652 @@
+--- a/chrome/browser/ui/android/tab_model/saas_fingerprint_config.h
++++ b/chrome/browser/ui/android/tab_model/saas_fingerprint_config.h
+@@ -0,0 +1,61 @@
++#ifndef CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_FINGERPRINT_CONFIG_H_
++#define CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_FINGERPRINT_CONFIG_H_
++
++#include <string>
++#include <string_view>
++#include <utility>
++#include "base/values.h"
++
++namespace chrome::android {
++
++struct SaasFingerprintConfig {
++  std::string user_agent;
++  int hardware_concurrency = 0;
++
++  static bool IsValidUserAgent(std::string_view value) {
++    if (value.size() > 512) return false;
++    for (unsigned char c : value) if (c < 0x20 || c > 0x7e) return false;
++    return true;
++  }
++
++  bool IsValid() const {
++    return IsValidUserAgent(user_agent) && hardware_concurrency >= 0 &&
++           hardware_concurrency <= 64;
++  }
++
++  base::Value::Dict ToValue() const {
++    base::Value::Dict value;
++    value.Set("user_agent", user_agent);
++    value.Set("hardware_concurrency", hardware_concurrency);
++    return value;
++  }
++
++  // 先完整校验再修改；空 UA 和 0 分别表示清除自定义 UA、恢复种子驱动的页面硬件值。
++  static bool Update(const base::Value::Dict& input, const SaasFingerprintConfig& current,
++                     SaasFingerprintConfig* output, std::string* error) {
++    const auto fail = [&](const char* message) { if (error) *error = message; return false; };
++    if (input.empty()) return fail("请提供需要修改的指纹配置");
++    SaasFingerprintConfig next = current;
++    for (auto entry : input) {
++      if (entry.first == "user_agent") {
++        if (!entry.second.is_string() || !IsValidUserAgent(entry.second.GetString())) {
++          return fail("User-Agent 必须是 512 字节以内、不含控制字符的英文请求头");
++        }
++        next.user_agent = entry.second.GetString();
++      } else if (entry.first == "hardware_concurrency") {
++        if (!entry.second.is_int() || entry.second.GetInt() < 0 || entry.second.GetInt() > 64) {
++          return fail("硬件并发数必须是 0 到 64 的整数");
++        }
++        next.hardware_concurrency = entry.second.GetInt();
++      } else {
++        return fail("包含不支持的指纹字段；指纹种子和代理请在创建账号环境时设置");
++      }
++    }
++    if (!next.IsValid()) return fail("指纹配置无效");
++    *output = std::move(next);
++    return true;
++  }
++};
++
++}  // namespace chrome::android
++#endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_FINGERPRINT_CONFIG_H_
+--- a/chrome/browser/ui/android/tab_model/saas_user_agent_metadata.h
++++ b/chrome/browser/ui/android/tab_model/saas_user_agent_metadata.h
+@@ -0,0 +1,93 @@
++#ifndef CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_USER_AGENT_METADATA_H_
++#define CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_USER_AGENT_METADATA_H_
++
++#include <optional>
++#include <algorithm>
++#include <string>
++#include <string_view>
++#include <utility>
++#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
++
++namespace chrome::android {
++
++inline std::optional<std::string> SaasUserAgentToken(
++    const std::string& agent, std::string_view token) {
++  size_t start = agent.find(token);
++  if (start == std::string::npos) return std::nullopt;
++  start += token.size();
++  size_t end = agent.find_first_of(" ;)", start);
++  std::string value = agent.substr(start, end == std::string::npos ? end : end - start);
++  return value.empty() ? std::nullopt : std::make_optional(std::move(value));
++}
++
++inline bool SaasUserAgentVersion(std::string_view value) {
++  if (value.empty() || value.size() > 32 || value.front() == '.' || value.back() == '.') return false;
++  bool dot = false;
++  for (unsigned char c : value) {
++    if (c == '.') { if (dot) return false; dot = true; }
++    else { if (c < '0' || c > '9') return false; dot = false; }
++  }
++  return true;
++}
++
++// 元数据仅从配置字符串提取；未知架构/型号留空，不把本机真实设备信息混入自定义 UA。
++// 非 Chromium UA 无可确认的 CH 元数据，调用方使用 UA-only 覆盖以抑制默认 CH 泄露。
++inline std::optional<blink::UserAgentMetadata> SaasUserAgentMetadata(const std::string& agent) {
++  auto chrome = SaasUserAgentToken(agent, "Chrome/");
++  if (!chrome || !SaasUserAgentVersion(*chrome)) return std::nullopt;
++  blink::UserAgentMetadata meta;
++  meta.full_version = *chrome;
++  std::string major = chrome->substr(0, chrome->find('.'));
++  meta.brand_version_list.emplace_back("Chromium", major);
++  meta.brand_full_version_list.emplace_back("Chromium", *chrome);
++  const char* brand = "Google Chrome";
++  std::string version = *chrome;
++  for (const auto& product : {std::pair{"Edg/", "Microsoft Edge"}, std::pair{"OPR/", "Opera"},
++                              std::pair{"Vivaldi/", "Vivaldi"}}) {
++    if (auto token = SaasUserAgentToken(agent, product.first); token && SaasUserAgentVersion(*token)) {
++      brand = product.second; version = *token; break;
++    }
++  }
++  meta.brand_version_list.emplace_back(brand, version.substr(0, version.find('.')));
++  meta.brand_full_version_list.emplace_back(brand, version);
++  meta.mobile = agent.find("Mobile") != std::string::npos;
++  if (agent.find("Android") != std::string::npos) {
++    meta.platform = "Android";
++    meta.platform_version = SaasUserAgentToken(agent, "Android ").value_or("");
++    size_t start = agent.find("Android ");
++    size_t model = agent.find(';', start);
++    size_t end = agent.find(')', start);
++    if (model != std::string::npos && end != std::string::npos && model < end) {
++      size_t build = agent.find(" Build/", model);
++      size_t limit = std::min(end, build);
++      size_t last_separator = agent.rfind(';', limit);
++      std::string name = agent.substr(last_separator + 1, limit - last_separator - 1);
++      size_t first = name.find_first_not_of(' '), last = name.find_last_not_of(' ');
++      // 多段且没有 Build 标记时无法确认设备字段，不能把语言或 WebView 标记当型号。
++      if (first != std::string::npos && (build < end || last_separator == model)) {
++        meta.model = name.substr(first, last - first + 1);
++      }
++    }
++  } else if (agent.find("Windows NT ") != std::string::npos) {
++    meta.platform = "Windows"; meta.platform_version = SaasUserAgentToken(agent, "Windows NT ").value_or("");
++  } else if (agent.find("Mac OS X ") != std::string::npos) {
++    meta.platform = "macOS"; meta.platform_version = SaasUserAgentToken(agent, "Mac OS X ").value_or("");
++    for (char& c : meta.platform_version) if (c == '_') c = '.';
++  } else if (agent.find("Linux") != std::string::npos) {
++    meta.platform = "Linux";
++  }
++  if (agent.find("arm64") != std::string::npos || agent.find("aarch64") != std::string::npos) {
++    meta.architecture = "arm"; meta.bitness = "64";
++  } else if (agent.find("Win64") != std::string::npos || agent.find("x86_64") != std::string::npos ||
++             agent.find("x64") != std::string::npos) {
++    meta.architecture = "x86"; meta.bitness = "64";
++  } else if (agent.find("i686") != std::string::npos || agent.find("x86;") != std::string::npos) {
++    meta.architecture = "x86"; meta.bitness = "32";
++  }
++  meta.form_factors.push_back(meta.mobile ? blink::kMobileFormFactor :
++      meta.platform == "Android" ? blink::kTabletFormFactor : blink::kDesktopFormFactor);
++  return meta;
++}
++
++}  // namespace chrome::android
++#endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_USER_AGENT_METADATA_H_
+--- a/chrome/browser/ui/android/tab_model/saas_account_state.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_state.h
+@@ -8,6 +8,7 @@
+ #include <utility>
+ 
+ #include "base/pickle.h"
++#include "chrome/browser/ui/android/tab_model/saas_fingerprint_config.h"
+ 
+ namespace chrome::android {
+ 
+@@ -15,12 +16,14 @@
+ // 零条导航前缀让旧解析器受控拒绝，避免负数数量触发巨量内存申请。
+ struct SaasAccountState {
+   static constexpr int kMarker = -0x53414153;
+-  static constexpr int kVersion = 1;
++  static constexpr int kVersion = 2;
+   static constexpr int kMaxEntries = 10000;
+ 
+   std::string account_id;
+   std::string proxy_rules;
+   std::string fingerprint_seed;
++  std::string user_agent = {};
++  int hardware_concurrency = 0;
+ 
+   static bool IsValidAccountId(std::string_view value) {
+     if (value.empty() || value.size() > 128) return false;
+@@ -43,6 +46,7 @@
+ 
+   bool IsValid() const {
+     return IsValidAccountId(account_id) && IsValidSeed(fingerprint_seed) &&
++           SaasFingerprintConfig{user_agent, hardware_concurrency}.IsValid() &&
+            proxy_rules.size() <= 2048 &&
+            proxy_rules.find_first_of(";,=@\r\n\0", 0, 7) == std::string::npos;
+   }
+@@ -61,6 +65,8 @@
+       pickle->WriteString(state->account_id);
+       pickle->WriteString(state->proxy_rules);
+       pickle->WriteString(state->fingerprint_seed);
++      pickle->WriteString(state->user_agent);
++      pickle->WriteInt(state->hardware_concurrency);
+     }
+     pickle->WriteInt(entry_count);
+     pickle->WriteInt(current_entry_index);
+@@ -78,14 +84,21 @@
+       int marker, version;
+       std::string_view account, proxy, seed;
+       if (*off_the_record || !iter->ReadInt(&marker) || marker != kMarker ||
+-          !iter->ReadInt(&version) || version != kVersion ||
++          !iter->ReadInt(&version) || (version != 1 && version != kVersion) ||
+           !iter->ReadStringPiece(&account) || !IsValidAccountId(account) ||
+           !iter->ReadStringPiece(&proxy) || proxy.size() > 2048 ||
+           proxy.find_first_of(";,=@\r\n\0", 0, 7) != std::string_view::npos ||
+-          !iter->ReadStringPiece(&seed) || !IsValidSeed(seed) ||
+-          !iter->ReadInt(&count)) return false;
++          !iter->ReadStringPiece(&seed) || !IsValidSeed(seed)) return false;
+       // 先验证切片长度再分配，损坏的状态不能触发无界字符串分配。
+       parsed = SaasAccountState{std::string(account), std::string(proxy), std::string(seed)};
++      if (version == kVersion) {
++        std::string_view agent;
++        int hardware;
++        if (!iter->ReadStringPiece(&agent) || !SaasFingerprintConfig::IsValidUserAgent(agent) ||
++            !iter->ReadInt(&hardware) || hardware < 0 || hardware > 64) return false;
++        parsed->user_agent = std::string(agent); parsed->hardware_concurrency = hardware;
++      }
++      if (!iter->ReadInt(&count)) return false;
+     }
+     if (count < 1 || count > kMaxEntries ||
+         !iter->ReadInt(current_entry_index) || *current_entry_index < 0 ||
+--- a/chrome/browser/ui/android/tab_model/saas_account_environment.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_environment.h
+@@ -13,6 +13,10 @@
+ #include "base/values.h"
+ #include "chrome/common/chrome_switches.h"
+ #include "chrome/browser/ui/android/tab_model/saas_account_state.h"
++#include "chrome/browser/ui/android/tab_model/saas_user_agent_metadata.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
++#include "content/public/browser/navigation_handle.h"
+ #include "components/ungoogled/ungoogled_switches.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/site_instance.h"
+@@ -21,6 +25,7 @@
+ #include "content/public/browser/web_contents_observer.h"
+ #include "net/proxy_resolution/proxy_config.h"
+ #include "services/network/public/mojom/network_context.mojom.h"
++#include "third_party/blink/public/common/web_preferences/web_preferences.h"
+ 
+ namespace chrome::android {
+ 
+@@ -56,11 +61,12 @@
+       const std::string& fingerprint_seed,
+       std::string* error,
+       bool initially_hidden = true,
+-      bool no_renderer = false) {
++      bool no_renderer = false,
++      const SaasFingerprintConfig& fingerprint = {}) {
+     net::ProxyConfig::ProxyRules proxy;
+     if (!browser_context || browser_context->IsOffTheRecord() ||
+         !IsValidAccountId(account_id) || !ParseProxy(proxy_rules, &proxy) ||
+-        (!fingerprint_seed.empty() && !IsValidSeed(fingerprint_seed))) {
++        (!fingerprint_seed.empty() && !IsValidSeed(fingerprint_seed)) || !fingerprint.IsValid()) {
+       SetError(error, "账号标识、代理或指纹参数无效，不能创建隔离环境");
+       return nullptr;
+     }
+@@ -80,8 +86,9 @@
+         return nullptr;
+       }
+     } else {
+-      existing = registry.entries.emplace(account_id, Entry{proxy_rules, seed, {}}).first;
+-    }
++      existing = registry.entries.emplace(account_id, Entry{proxy_rules, seed, {}, fingerprint}).first;
++    }
++    existing->second.fingerprint = fingerprint;
+     const auto config = content::StoragePartitionConfig::Create(
+         browser_context, kPartitionDomain, account_id, false);
+     content::WebContents::CreateParams params(browser_context);
+@@ -98,9 +105,10 @@
+     }
+     // 即使创建中途失败也保留该分区的配置约束，避免复用已经缓存的不同网络设置。
+     auto environment = std::unique_ptr<SaasAccountEnvironment>(
+-        new SaasAccountEnvironment(contents.get(), account_id, proxy_rules, seed));
++        new SaasAccountEnvironment(contents.get(), account_id, proxy_rules, seed, fingerprint));
+     existing->second.live = environment->weak_factory_.GetWeakPtr();
+     contents->SetUserData(&kEnvironmentKey, std::move(environment));
++    FromWebContents(contents.get())->ApplyFingerprint();
+     return contents;
+   }
+ 
+@@ -155,11 +163,37 @@
+     state.Set("storage_partition_persistent", true);
+     state.Set("proxy_rules", saved.proxy_rules);
+     state.Set("fingerprint_seed", saved.fingerprint_seed);
++    state.Set("user_agent", saved.user_agent);
++    state.Set("hardware_concurrency", saved.hardware_concurrency);
++    // 这是浏览器维护的覆盖配置，不是运行中的全部 Worker 已生效证明。
++    state.Set("hardware_override_scope", "page_frames");
++    state.Set("worker_fingerprint_verified", false);
+     return state;
+   }
+ 
+   SaasAccountState GetPersistentState() const {
+-    return {account_id_, proxy_rules_, fingerprint_seed_};
++    return {account_id_, proxy_rules_, fingerprint_seed_,
++            fingerprint_.user_agent, fingerprint_.hardware_concurrency};
++  }
++
++  bool SetFingerprint(const base::Value::Dict& input, std::string* error) {
++    SaasFingerprintConfig next;
++    if (!SaasFingerprintConfig::Update(input, fingerprint_, &next, error)) return false;
++    fingerprint_ = std::move(next);
++    GetRegistry(web_contents()->GetBrowserContext()).entries.at(account_id_).fingerprint = fingerprint_;
++    ApplyFingerprint();
++    return true;
++  }
++
++  void ApplyFingerprint() {
++    if (!web_contents()) return;
++    auto override = blink::UserAgentOverride::UserAgentOnly(fingerprint_.user_agent);
++    if (!fingerprint_.user_agent.empty()) override.ua_metadata_override = SaasUserAgentMetadata(fingerprint_.user_agent);
++    if (auto* entry = web_contents()->GetController().GetLastCommittedEntry()) {
++      entry->SetIsOverridingUserAgent(!fingerprint_.user_agent.empty());
++    }
++    web_contents()->SetUserAgentOverride(override, false);
++    ApplyHardware();
+   }
+ 
+  private:
+@@ -167,6 +201,7 @@
+     std::string proxy;
+     std::string seed;
+     base::WeakPtr<SaasAccountEnvironment> live;
++    SaasFingerprintConfig fingerprint;
+   };
+   struct Registry final : base::SupportsUserData::Data {
+     std::map<std::string, Entry> entries;
+@@ -193,13 +228,29 @@
+     if (error) *error = value;
+   }
+   SaasAccountEnvironment(content::WebContents* contents, std::string account_id,
+-                         std::string proxy, std::string seed)
++                         std::string proxy, std::string seed, SaasFingerprintConfig fingerprint)
+       : content::WebContentsObserver(contents), account_id_(std::move(account_id)),
+-        proxy_rules_(std::move(proxy)), fingerprint_seed_(std::move(seed)) {}
++        proxy_rules_(std::move(proxy)), fingerprint_seed_(std::move(seed)),
++        fingerprint_(std::move(fingerprint)) {}
++
++  void ApplyHardware() {
++    if (!web_contents()) return;
++    auto preferences = web_contents()->GetOrCreateWebPreferences();
++    preferences.number_of_cpu_cores = fingerprint_.hardware_concurrency;
++    web_contents()->SetWebPreferences(preferences);
++  }
++  void RenderViewReady() override { ApplyHardware(); }
++  void ReadyToCommitNavigation(content::NavigationHandle* handle) override {
++    if (handle->IsInPrimaryMainFrame()) ApplyHardware();
++  }
++  void DidFinishNavigation(content::NavigationHandle* handle) override {
++    if (handle->IsInPrimaryMainFrame() && handle->HasCommitted()) ApplyHardware();
++  }
+ 
+   inline static const char kEnvironmentKey[] = "fingerprint.android.account.environment";
+   inline static const char kRegistryKey[] = "fingerprint.android.account.registry";
+   const std::string account_id_, proxy_rules_, fingerprint_seed_;
++  SaasFingerprintConfig fingerprint_;
+   base::WeakPtrFactory<SaasAccountEnvironment> weak_factory_{this};
+ };
+ 
+--- a/chrome/browser/ui/android/tab_model/saas_account_storage.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_storage.h
+@@ -32,6 +32,11 @@
+  public:
+   using Authority = base::RepeatingCallback<bool()>;
+   using Completion = base::OnceCallback<void(base::Value::Dict)>;
++
++  static bool IsBusy(content::WebContents* contents) {
++    auto* lock = contents ? static_cast<LockData*>(contents->GetUserData(&kLockKey)) : nullptr;
++    return lock && lock->lock->busy;
++  }
+ 
+   static void Read(content::WebContents* contents, const base::Value::Dict& options,
+                    Authority authority,
+@@ -251,6 +256,7 @@
+     snapshot_.Set("storage_url", storage_url_.spec());
+     snapshot_.Set("proxy_rules", account_.proxy_rules);
+     snapshot_.Set("fingerprint_seed", account_.fingerprint_seed);
++    snapshot_.Set("fingerprint", SaasFingerprintConfig{account_.user_agent, account_.hardware_concurrency}.ToValue());
+     snapshot_.Set("cookies", std::move(serialized));
+     if (local_ || session_) {
+       Execute(SaasStorageReadScript(token_, storage_url_.spec(), local_, session_),
+@@ -277,7 +283,7 @@
+     options.Set("cookies", cookies_); options.Set("local_storage", local_);
+     options.Set("session_storage", session_); options.Set("proxy", true);
+     options.Set("page", needs_page_);
+-    options.Set("fingerprint", false);
++    options.Set("fingerprint", true);
+     snapshot_.Set("sync_options", std::move(options));
+     Finish(true, {}, base::Value(std::move(snapshot_)));
+   }
+@@ -325,7 +331,15 @@
+       if (snapshot.contains("fingerprint_seed") && (!seed || *seed != account_.fingerprint_seed)) {
+         return fail("快照指纹种子与当前账号环境不一致");
+       }
+-      if (snapshot.contains("fingerprint")) return fail("当前安卓客户端尚未支持完整指纹快照写入");
++      if (snapshot.contains("fingerprint")) {
++        const auto* fields = snapshot.FindDict("fingerprint");
++        if (!fields || fields->FindString("user_agent") == nullptr ||
++            fields->FindInt("hardware_concurrency") == std::nullopt) return fail("快照指纹配置格式无效");
++        SaasFingerprintConfig parsed;
++        if (!SaasFingerprintConfig::Update(*fields, {}, &parsed, error)) return false;
++        if (parsed.user_agent != account_.user_agent ||
++            parsed.hardware_concurrency != account_.hardware_concurrency) return fail("快照指纹与当前账号环境不一致，请先应用指纹配置");
++      }
+     }
+     if (local_ || session_) {
+       const auto* url = snapshot.FindString("storage_url");
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
+@@ -115,6 +115,7 @@
+             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
+             capabilities.put("tabs", backend != null && backend.supports("tabs"));
+             capabilities.put("storage", backend != null && backend.supports("storage"));
++            capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
+             capabilities.put("crypto", true);
+             Map<String, Object> details = new LinkedHashMap<>();
+             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
+@@ -129,6 +130,10 @@
+         }
+         if ("storage.getSnapshot".equals(method) || "storage.writeSnapshot".equals(method)) {
+             if (backend == null || !backend.supports("storage")) throw invalid("当前客户端尚未提供存储管理能力");
++            return backend.invoke(method, args);
++        }
++        if ("fingerprint.get".equals(method) || "fingerprint.set".equals(method)) {
++            if (backend == null || !backend.supports("fingerprint")) throw invalid("当前客户端尚未提供指纹配置能力");
+             return backend.invoke(method, args);
+         }
+         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -87,8 +87,18 @@
+ static ScopedJavaLocalRef<jobject>
+ JNI_TabModelJniBridge_CreateSaasAccountWebContents(
+     JNIEnv* env, Profile* profile, const std::string& account_id,
+-    const std::string& proxy_rules, const std::string& fingerprint_seed) {
++    const std::string& proxy_rules, const std::string& fingerprint_seed,
++    const std::string& fingerprint_json) {
+   if (!profile || profile->IsOffTheRecord()) return ScopedJavaLocalRef<jobject>();
++  chrome::android::SaasFingerprintConfig fingerprint;
++  std::string error;
++  if (!fingerprint_json.empty()) {
++    auto fields = fingerprint_json.size() <= 4096 ?
++        base::JSONReader::ReadDict(fingerprint_json, base::JSON_PARSE_RFC) : std::nullopt;
++    if (!fields || !chrome::android::SaasFingerprintConfig::Update(*fields, {}, &fingerprint, &error)) {
++      return ScopedJavaLocalRef<jobject>();
++    }
++  }
+   // 冻结 Tab 没有活跃 WebContents，也必须阻止跨模型重复占用同一账号分区。
+   for (const auto& model : TabModelList::models()) {
+     if (model->GetProfile() != profile) continue;
+@@ -106,9 +116,8 @@
+       return ScopedJavaLocalRef<jobject>();
+     }
+   }
+-  std::string error;
+   auto contents = chrome::android::SaasAccountEnvironment::Create(
+-      profile, account_id, proxy_rules, fingerprint_seed, &error);
++      profile, account_id, proxy_rules, fingerprint_seed, &error, true, false, fingerprint);
+   if (!contents) return ScopedJavaLocalRef<jobject>();
+   auto java_contents = contents->GetJavaWebContents();
+   if (java_contents.is_null()) return ScopedJavaLocalRef<jobject>();
+@@ -123,6 +132,38 @@
+   return contents && contents->GetSiteInstance()->GetStoragePartitionConfig()
+                          .partition_domain() ==
+                          chrome::android::SaasAccountEnvironment::kPartitionDomain;
++}
++
++static bool JNI_TabModelJniBridge_PrepareSaasAccountNavigation(
++    JNIEnv* env, const JavaParamRef<jobject>& java_contents) {
++  auto* contents = WebContents::FromJavaWebContents(java_contents);
++  auto* account = chrome::android::SaasAccountEnvironment::FromWebContents(contents);
++  if (!account) return false;
++  account->ApplyFingerprint();
++  return !account->GetPersistentState().user_agent.empty();
++}
++
++static std::string JNI_TabModelJniBridge_SetSaasFingerprint(
++    JNIEnv* env, const JavaParamRef<jobject>& java_contents, const std::string& json) {
++  auto* contents = WebContents::FromJavaWebContents(java_contents);
++  auto* account = chrome::android::SaasAccountEnvironment::FromWebContents(contents);
++  std::string error;
++  auto fields = json.size() <= 4096 ? base::JSONReader::ReadDict(json, base::JSON_PARSE_RFC) : std::nullopt;
++  base::Value::Dict reply;
++  if (!account || !fields) error = "隔离账号环境或指纹参数无效";
++  else if (chrome::android::SaasAccountStorage::IsBusy(contents)) error = "该账号正在同步存储，请完成后再修改指纹";
++  else {
++    auto before = account->GetPersistentState();
++    if (account->SetFingerprint(*fields, &error)) {
++      auto state = account->GetState();
++      auto after = account->GetPersistentState();
++      state.Set("requires_reload", before.user_agent != after.user_agent);
++      reply.Set("ok", true); reply.Set("result", std::move(state));
++      return base::WriteJson(reply).value_or("");
++    }
++  }
++  reply.Set("ok", false); reply.Set("error", std::move(error));
++  return base::WriteJson(reply).value_or("");
+ }
+ 
+ static void JNI_TabModelJniBridge_StartSaasStorageRequest(
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
+@@ -48,6 +48,7 @@
+ import org.chromium.components.embedder_support.util.UrlConstants;
+ import org.chromium.content_public.browser.LoadUrlParams;
+ import org.chromium.content_public.browser.WebContents;
++import org.chromium.content_public.browser.navigation_controller.UserAgentOverrideOption;
+ import org.chromium.content_public.common.ResourceRequestBody;
+ import org.chromium.ui.mojom.WindowOpenDisposition;
+ import org.chromium.url.GURL;
+@@ -130,16 +131,16 @@
+                     TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl(),
+                     new SaasBridgeDispatcher.NativeBackend() {
+                         @Override public boolean supports(String capability) {
+-                            return "tabs".equals(capability) || "storage".equals(capability);
++                            return "tabs".equals(capability) || "storage".equals(capability) || "fingerprint".equals(capability);
+                         }
+                         @Override public Object invoke(String method, Map<String, Object> args) {
+-                            return invokeSaasTabs(method, args);
++                            return invokeSaasNative(method, args);
+                         }
+                         @Override public CompletableFuture<Object> invokeAsync(
+                                 String method, Map<String, Object> args,
+                                 SaasBridgeDispatcher.RequestAuthority authority) {
+                             if (method.startsWith("storage.")) return invokeSaasStorage(method, args, authority);
+-                            return CompletableFuture.completedFuture(invokeSaasTabs(method, args));
++                            return CompletableFuture.completedFuture(invokeSaasNative(method, args));
+                         }
+                     });
+         } catch (IllegalArgumentException error) {
+@@ -226,9 +227,12 @@
+                 throw new SaasBridgeDispatcher.NativeRequestException("账号标识格式无效");
+             }
+             GURL url = saasNavigationUrl(saasString(args, "url", 8192, true));
++            Object fingerprint = args.get("fingerprint");
++            if (fingerprint != null && !(fingerprint instanceof Map)) throw new SaasBridgeDispatcher.NativeRequestException("指纹配置格式无效");
+             WebContents contents = TabModelJniBridgeJni.get().createSaasAccountWebContents(
+                     mProfile, accountId, saasString(args, "proxyRules", 2048, true),
+-                    saasString(args, "fingerprintSeed", 10, true));
++                    saasString(args, "fingerprintSeed", 10, true),
++                    fingerprint == null ? "" : SaasBridgeDispatcher.encodeNativePayload(fingerprint));
+             if (contents == null) throw new SaasBridgeDispatcher.NativeRequestException("账号环境创建失败，请检查重复标签、代理和指纹配置");
+             Tab created = null;
+             try {
+@@ -239,7 +243,7 @@
+                 if (created.getWebContents() != contents || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
+                     throw new SaasBridgeDispatcher.NativeRequestException("隔离标签校验失败，操作已停止");
+                 }
+-                if (created.loadUrl(new LoadUrlParams(url)).tabLoadStatus == Tab.TabLoadStatus.PAGE_LOAD_FAILED) {
++                if (loadSaasAccountUrl(created, new LoadUrlParams(url)).tabLoadStatus == Tab.TabLoadStatus.PAGE_LOAD_FAILED) {
+                     throw new SaasBridgeDispatcher.NativeRequestException("账号页面导航未被接受");
+                 }
+                 Map<String, Object> state = readSaasAccountState(created);
+@@ -293,9 +297,53 @@
+             if (contents == null || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
+                 throw new SaasBridgeDispatcher.NativeRequestException("隔离账号环境未就绪，导航已停止");
+             }
+-            return target.loadUrl(new LoadUrlParams(url)).tabLoadStatus != Tab.TabLoadStatus.PAGE_LOAD_FAILED;
++            return loadSaasAccountUrl(target, new LoadUrlParams(url)).tabLoadStatus != Tab.TabLoadStatus.PAGE_LOAD_FAILED;
+         }
+         throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供该标签操作");
++    }
++
++    private Object invokeSaasNative(String method, Map<String, Object> args) {
++        return method.startsWith("fingerprint.") ? invokeSaasFingerprint(method, args) : invokeSaasTabs(method, args);
++    }
++
++    private Tab.LoadUrlResult loadSaasAccountUrl(Tab tab, LoadUrlParams params) {
++        WebContents contents = tab.getWebContents();
++        if (contents == null || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
++            throw new SaasBridgeDispatcher.NativeRequestException("隔离账号环境未就绪，导航已停止");
++        }
++        boolean override = TabModelJniBridgeJni.get().prepareSaasAccountNavigation(contents);
++        params.setOverrideUserAgent(override ? UserAgentOverrideOption.TRUE : UserAgentOverrideOption.FALSE);
++        return tab.loadUrl(params);
++    }
++
++    private Object invokeSaasFingerprint(String method, Map<String, Object> args) {
++        if (!ThreadUtils.runningOnUiThread() || !isNativeInitialized() || isIncognito() ||
++                !isInitializationComplete() || isSessionRestoreInProgress()) {
++            throw new SaasBridgeDispatcher.NativeRequestException("指纹环境尚未准备好，请重试");
++        }
++        String id = saasString(args, "tabId", 128, false);
++        for (int i=0; i<getCount(); i++) {
++            Tab tab = getTabAt(i);
++            if (tab == null || tab.isClosing() || isResidentSaasTab(tab)) continue;
++            Map<String, Object> state = readSaasAccountState(tab);
++            if (state == null || !id.equals(state.get("id"))) continue;
++            if ("fingerprint.get".equals(method)) return state;
++            if (!"fingerprint.set".equals(method)) break;
++            if (tab.isFrozen()) tab.loadIfNeeded(TabLoadIfNeededCaller.OTHER);
++            WebContents contents = tab.getWebContents();
++            if (contents == null || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) break;
++            Object fields = args.get("fingerprint");
++            if (!(fields instanceof Map)) throw new SaasBridgeDispatcher.NativeRequestException("指纹配置格式无效");
++            Map<String, Object> reply = SaasBridgeDispatcher.decodeNativeReply(
++                    TabModelJniBridgeJni.get().setSaasFingerprint(contents, SaasBridgeDispatcher.encodeNativePayload(fields)));
++            if (!Boolean.TRUE.equals(reply.get("ok"))) {
++                Object message = reply.get("error");
++                throw new SaasBridgeDispatcher.NativeRequestException(
++                        message instanceof String ? (String) message : "指纹配置未能应用");
++            }
++            return reply.get("result");
++        }
++        throw new SaasBridgeDispatcher.NativeRequestException("隔离账号指纹环境不存在或不可用");
+     }
+ 
+     private static final class SaasStorageRequest {
+@@ -602,7 +650,7 @@
+                 params.setIsRendererInitiated(isRendererInitiated);
+                 params.setVerbatimHeaders(extraHeaders);
+                 params.setPostData(postData);
+-                parent.loadUrl(params);
++                loadSaasAccountUrl(parent, params);
+             }
+             return;
+         }
+@@ -945,7 +993,13 @@
+                 @JniType("Profile*") Profile profile,
+                 @JniType("std::string") String accountId,
+                 @JniType("std::string") String proxyRules,
+-                @JniType("std::string") String fingerprintSeed);
++                @JniType("std::string") String fingerprintSeed,
++                @JniType("std::string") String fingerprint);
++
++        boolean prepareSaasAccountNavigation(WebContents contents);
++
++        @JniType("std::string")
++        String setSaasFingerprint(WebContents contents, @JniType("std::string") String fingerprint);
+ 
+         boolean isSaasAccountWebContents(WebContents contents);
+ 
+--- a/chrome/browser/tab/web_contents_state.cc
++++ b/chrome/browser/tab/web_contents_state.cc
+@@ -391,7 +391,8 @@
+     std::string error;
+     web_contents = SaasAccountEnvironment::Create(
+         browser_context, account_state->account_id, account_state->proxy_rules,
+-        account_state->fingerprint_seed, &error, initially_hidden, no_renderer);
++        account_state->fingerprint_seed, &error, initially_hidden, no_renderer,
++        {account_state->user_agent, account_state->hardware_concurrency});
+     // 固定分区创建失败时不能回退到普通 WebContents。
+     if (!web_contents) return nullptr;
+   } else {

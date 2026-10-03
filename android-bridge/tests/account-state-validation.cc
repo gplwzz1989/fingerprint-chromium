@@ -37,6 +37,10 @@ base::Pickle MakeRaw(const SaasAccountState& state, int version = 1,
   pickle.WriteString(state.account_id);
   pickle.WriteString(state.proxy_rules);
   pickle.WriteString(state.fingerprint_seed);
+  if (version == SaasAccountState::kVersion) {
+    pickle.WriteString(state.user_agent);
+    pickle.WriteInt(state.hardware_concurrency);
+  }
   pickle.WriteInt(count);
   pickle.WriteInt(index);
   WriteTail(&pickle, 1);
@@ -52,7 +56,8 @@ bool Read(const base::Pickle& pickle, std::optional<SaasAccountState>* state,
 }  // namespace
 
 int main() {
-  const SaasAccountState original{"account-01", "socks5://127.0.0.1:1080", "4294967295"};
+  const SaasAccountState original{"account-01", "socks5://127.0.0.1:1080", "4294967295",
+                                "Mozilla/5.0 Chrome/144.0.0.0", 7};
   std::optional<SaasAccountState> state;
   int count = 0, index = -1;
   base::Pickle pickle;
@@ -62,6 +67,8 @@ int main() {
   Verify(state && state->account_id == original.account_id &&
          state->proxy_rules == original.proxy_rules &&
          state->fingerprint_seed == original.fingerprint_seed &&
+         state->user_agent == original.user_agent &&
+         state->hardware_concurrency == original.hardware_concurrency &&
          count == 2 && index == 1, true);
   base::PickleIterator legacy_iter(pickle);
   bool legacy_off_the_record = true;
@@ -99,7 +106,18 @@ int main() {
     Verify(Read(MakeRaw(invalid), &state, &count, &index), false);
   }
   Verify(Read(MakeRaw(original, 0), &state, &count, &index), false);
-  Verify(Read(MakeRaw(original, 2), &state, &count, &index), false);
+  Verify(Read(MakeRaw(original, 2), &state, &count, &index), true);
+  Verify(Read(MakeRaw(original, 3), &state, &count, &index), false);
+  Verify(Read(MakeRaw(original, 1), &state, &count, &index), true);
+  Verify(state && state->user_agent.empty() && state->hardware_concurrency == 0, true);
+  for (int hardware : {-1, 65}) {
+    auto invalid = original; invalid.hardware_concurrency = hardware;
+    Verify(Read(MakeRaw(invalid, 2), &state, &count, &index), false);
+  }
+  for (const auto& agent : std::vector<std::string>{"bad\r\nUA", "中文UA", std::string(513, 'A')}) {
+    auto invalid = original; invalid.user_agent = agent;
+    Verify(Read(MakeRaw(invalid, 2), &state, &count, &index), false);
+  }
   Verify(Read(MakeRaw(original, 1, true), &state, &count, &index), false);
   for (int entries : {-1, 0, 10001, std::numeric_limits<int>::max()}) {
     Verify(Read(MakeRaw(original, 1, false, entries), &state, &count, &index), false);

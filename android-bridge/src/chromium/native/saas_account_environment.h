@@ -13,6 +13,10 @@
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/browser/ui/android/tab_model/saas_account_state.h"
+#include "chrome/browser/ui/android/tab_model/saas_user_agent_metadata.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "components/ungoogled/ungoogled_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/site_instance.h"
@@ -21,6 +25,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "services/network/public/mojom/network_context.mojom.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 
 namespace chrome::android {
 
@@ -56,11 +61,12 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
       const std::string& fingerprint_seed,
       std::string* error,
       bool initially_hidden = true,
-      bool no_renderer = false) {
+      bool no_renderer = false,
+      const SaasFingerprintConfig& fingerprint = {}) {
     net::ProxyConfig::ProxyRules proxy;
     if (!browser_context || browser_context->IsOffTheRecord() ||
         !IsValidAccountId(account_id) || !ParseProxy(proxy_rules, &proxy) ||
-        (!fingerprint_seed.empty() && !IsValidSeed(fingerprint_seed))) {
+        (!fingerprint_seed.empty() && !IsValidSeed(fingerprint_seed)) || !fingerprint.IsValid()) {
       SetError(error, "账号标识、代理或指纹参数无效，不能创建隔离环境");
       return nullptr;
     }
@@ -80,8 +86,9 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
         return nullptr;
       }
     } else {
-      existing = registry.entries.emplace(account_id, Entry{proxy_rules, seed, {}}).first;
+      existing = registry.entries.emplace(account_id, Entry{proxy_rules, seed, {}, fingerprint}).first;
     }
+    existing->second.fingerprint = fingerprint;
     const auto config = content::StoragePartitionConfig::Create(
         browser_context, kPartitionDomain, account_id, false);
     content::WebContents::CreateParams params(browser_context);
@@ -98,9 +105,10 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     }
     // 即使创建中途失败也保留该分区的配置约束，避免复用已经缓存的不同网络设置。
     auto environment = std::unique_ptr<SaasAccountEnvironment>(
-        new SaasAccountEnvironment(contents.get(), account_id, proxy_rules, seed));
+        new SaasAccountEnvironment(contents.get(), account_id, proxy_rules, seed, fingerprint));
     existing->second.live = environment->weak_factory_.GetWeakPtr();
     contents->SetUserData(&kEnvironmentKey, std::move(environment));
+    FromWebContents(contents.get())->ApplyFingerprint();
     return contents;
   }
 
@@ -155,11 +163,37 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     state.Set("storage_partition_persistent", true);
     state.Set("proxy_rules", saved.proxy_rules);
     state.Set("fingerprint_seed", saved.fingerprint_seed);
+    state.Set("user_agent", saved.user_agent);
+    state.Set("hardware_concurrency", saved.hardware_concurrency);
+    // 这是浏览器维护的覆盖配置，不是运行中的全部 Worker 已生效证明。
+    state.Set("hardware_override_scope", "page_frames");
+    state.Set("worker_fingerprint_verified", false);
     return state;
   }
 
   SaasAccountState GetPersistentState() const {
-    return {account_id_, proxy_rules_, fingerprint_seed_};
+    return {account_id_, proxy_rules_, fingerprint_seed_,
+            fingerprint_.user_agent, fingerprint_.hardware_concurrency};
+  }
+
+  bool SetFingerprint(const base::Value::Dict& input, std::string* error) {
+    SaasFingerprintConfig next;
+    if (!SaasFingerprintConfig::Update(input, fingerprint_, &next, error)) return false;
+    fingerprint_ = std::move(next);
+    GetRegistry(web_contents()->GetBrowserContext()).entries.at(account_id_).fingerprint = fingerprint_;
+    ApplyFingerprint();
+    return true;
+  }
+
+  void ApplyFingerprint() {
+    if (!web_contents()) return;
+    auto override = blink::UserAgentOverride::UserAgentOnly(fingerprint_.user_agent);
+    if (!fingerprint_.user_agent.empty()) override.ua_metadata_override = SaasUserAgentMetadata(fingerprint_.user_agent);
+    if (auto* entry = web_contents()->GetController().GetLastCommittedEntry()) {
+      entry->SetIsOverridingUserAgent(!fingerprint_.user_agent.empty());
+    }
+    web_contents()->SetUserAgentOverride(override, false);
+    ApplyHardware();
   }
 
  private:
@@ -167,6 +201,7 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     std::string proxy;
     std::string seed;
     base::WeakPtr<SaasAccountEnvironment> live;
+    SaasFingerprintConfig fingerprint;
   };
   struct Registry final : base::SupportsUserData::Data {
     std::map<std::string, Entry> entries;
@@ -193,13 +228,29 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     if (error) *error = value;
   }
   SaasAccountEnvironment(content::WebContents* contents, std::string account_id,
-                         std::string proxy, std::string seed)
+                         std::string proxy, std::string seed, SaasFingerprintConfig fingerprint)
       : content::WebContentsObserver(contents), account_id_(std::move(account_id)),
-        proxy_rules_(std::move(proxy)), fingerprint_seed_(std::move(seed)) {}
+        proxy_rules_(std::move(proxy)), fingerprint_seed_(std::move(seed)),
+        fingerprint_(std::move(fingerprint)) {}
+
+  void ApplyHardware() {
+    if (!web_contents()) return;
+    auto preferences = web_contents()->GetOrCreateWebPreferences();
+    preferences.number_of_cpu_cores = fingerprint_.hardware_concurrency;
+    web_contents()->SetWebPreferences(preferences);
+  }
+  void RenderViewReady() override { ApplyHardware(); }
+  void ReadyToCommitNavigation(content::NavigationHandle* handle) override {
+    if (handle->IsInPrimaryMainFrame()) ApplyHardware();
+  }
+  void DidFinishNavigation(content::NavigationHandle* handle) override {
+    if (handle->IsInPrimaryMainFrame() && handle->HasCommitted()) ApplyHardware();
+  }
 
   inline static const char kEnvironmentKey[] = "fingerprint.android.account.environment";
   inline static const char kRegistryKey[] = "fingerprint.android.account.registry";
   const std::string account_id_, proxy_rules_, fingerprint_seed_;
+  SaasFingerprintConfig fingerprint_;
   base::WeakPtrFactory<SaasAccountEnvironment> weak_factory_{this};
 };
 

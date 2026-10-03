@@ -49,6 +49,7 @@ export interface SaasBridge {
       url?: string;
       proxyRules?: string;
       fingerprintSeed?: string;
+      fingerprint?: {user_agent?: string; hardware_concurrency?: number};
     }): Promise<unknown>;
     activate(options: { tabId: string }): Promise<unknown>;
     navigate(options: { tabId: string; url: string }): Promise<unknown>;

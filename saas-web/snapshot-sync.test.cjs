@@ -187,3 +187,27 @@ test('原生读取使用本次选项，读取期间修改选项不会扩大云�
   assert.deepEqual(saved.local_storage, {});
   assert.equal(saved.storage_url, undefined);
 });
+
+test('恢复先创建空白环境并应用指纹，再发起网站导航', async () => {
+  // 仅核对调用顺序；快照加解密真实执行，不模拟浏览器指纹结果。
+  const key = await sync.passwordKey('restore-before-navigation-test');
+  const data = fixture();
+  const envelope = await sync.encrypt(key, 'test-account', data);
+  const events = [];
+  let tab;
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => sync.defaults,
+    request: async () => ({account_id: 'test-account', schema_version: 1, revision: 1, envelope}),
+    bridge: {tabs: {
+      list: async () => tab ? [tab] : [],
+      create: async (options) => {
+        events.push(['create', options.url]); assert.deepEqual(options.fingerprint, data.fingerprint);
+        tab = {id: 'test-tab', account_id: 'test-account', url: options.url, load_progress: 1}; return tab;
+      },
+      navigate: async (_id, url) => { events.push(['navigate', url]); tab.url = url; return true; },
+      activate: async () => { events.push(['activate']); },
+    }, fingerprint: {set: async () => { events.push(['fingerprint']); }},
+      storage: {writeSnapshot: async () => { events.push(['storage']); return true; }}}});
+  await controller.restore({account_id: 'test-account'});
+  assert.deepEqual(events, [['create', 'about:blank'], ['fingerprint'], ['navigate', data.storage_url], ['storage'], ['activate']]);
+});

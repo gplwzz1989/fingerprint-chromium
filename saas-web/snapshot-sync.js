@@ -291,9 +291,11 @@
             fail('当前 Tab 的代理或指纹种子与云端不同，请先关闭该账号 Tab 再恢复');
           }
           const url = options.page ? snapshot.storage_url || 'about:blank' : tab?.url || 'about:blank';
-          if (!tab) tab = await bridge.tabs.create({accountId: account.account_id, url,
+          // 先在空白账号环境应用指纹，再导航，避免首个网站请求先发送默认 UA。
+          if (!tab) tab = await bridge.tabs.create({accountId: account.account_id, url: 'about:blank',
             ...(options.proxy ? {proxyRules: snapshot.proxy_rules || ''} : {}),
-            ...(options.fingerprint ? {fingerprintSeed: snapshot.fingerprint_seed || ''} : {})});
+            ...(options.fingerprint ? {fingerprintSeed: snapshot.fingerprint_seed || '',
+              ...(snapshot.fingerprint ? {fingerprint: snapshot.fingerprint} : {})} : {})});
           checkContext(key, session);
           if (options.fingerprint && snapshot.fingerprint) await bridge.fingerprint.set(tab.id, snapshot.fingerprint);
           checkContext(key, session);
