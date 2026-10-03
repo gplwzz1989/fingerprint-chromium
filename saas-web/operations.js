@@ -88,7 +88,7 @@
     }
   }
 
-  async function batch(restore) {
+  async function batch(restore, selectedIds = null) {
     if (operation) return;
     if (!key) throw new Error('请先解锁加密快照');
     operation = true;
@@ -98,8 +98,11 @@
     const failures = [];
     try {
       const tabs = restore ? [] : await context.bridge.tabs.list();
-      const accounts = context.getState().accounts.filter((account) => restore ||
-        (account.role !== 'viewer' && tabs.some((tab) => tab.account_id === account.account_id)));
+      const selected = selectedIds ? new Set(selectedIds) : null;
+      const accounts = context.getState().accounts.filter((account) =>
+        (!selected || selected.has(account.account_id)) &&
+        (restore || (account.role !== 'viewer' && tabs.some((tab) => tab.account_id === account.account_id))));
+      if (!accounts.length) throw new Error(selected ? '所选账号没有可执行的同步任务' : '当前没有可执行的账号');
       for (const account of accounts) {
         if (!context.getState().session || context.getState().sessionGeneration !== sessionGeneration || context.getState().workspaceId !== workspaceId) throw new Error('登录会话或工作区已变化，批量操作已停止');
         status(`正在处理 ${success + failures.length + 1}/${accounts.length}：${account.name}`);
@@ -236,7 +239,7 @@
     global.addEventListener('pagehide', lock);
   }
 
-  global.saasConsoleOperations = {configure, lock,
+  global.saasConsoleOperations = {configure, lock, runBatch: batch,
     clear() {
       lock(); find('fingerprint-form').reset();
       for (const id of ['tabs-table-body', 'sessions-table-body']) find(id).replaceChildren();

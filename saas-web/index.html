@@ -146,10 +146,14 @@
                 </div>
                 <button class="primary-small-button" id="new-account-button" type="button">添加账号 <span>＋</span></button>
               </div>
+              <div class="account-selection-toolbar" id="account-selection-toolbar" hidden>
+                <span id="account-selection-count">已选择 0 个账号</span>
+                <div class="table-actions"><button class="secondary-button" id="selected-sync-button" type="button">批量同步</button><button class="secondary-button" id="selected-restore-button" type="button">批量恢复</button></div>
+              </div>
               <div class="table-wrap">
                 <table class="account-table">
                   <thead>
-                    <tr><th>账号</th><th>标签</th><th>修订</th><th>更新时间</th><th><span class="sr-only">操作</span></th></tr>
+                    <tr><th><input id="account-select-all" type="checkbox" aria-label="选择全部账号"> 账号</th><th>标签</th><th>修订</th><th>更新时间</th><th><span class="sr-only">操作</span></th></tr>
                   </thead>
                   <tbody id="account-table-body"></tbody>
                 </table>

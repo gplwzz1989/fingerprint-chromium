@@ -156,9 +156,12 @@ button { cursor: pointer; }
 .account-table { width: 100%; border-collapse: collapse; text-align: left; }
 .account-table th { padding: 10px 22px; color: var(--text-faint); background: rgba(0, 0, 0, .12); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .account-table td { padding: 16px 22px; color: var(--text-soft); border-bottom: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+.account-table th input, .account-select { width: 15px; height: 15px; margin: 0 9px 0 0; accent-color: var(--amber); vertical-align: middle; }
 .account-table tbody tr:hover { background: rgba(255, 255, 255, .025); }
 .account-table tbody tr:last-child td { border-bottom: 0; }
 .account-name-cell { display: flex; gap: 11px; align-items: center; }
+.account-selection-toolbar { display: flex; padding: 10px 22px; gap: 12px; align-items: center; justify-content: space-between; color: var(--text-soft); background: rgba(243, 170, 91, .07); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 11px; }
+.account-selection-toolbar .secondary-button { min-height: 30px; padding: 0 10px; font-size: 11px; }
 .account-avatar { display: grid; width: 30px; height: 30px; place-items: center; color: var(--amber); background: rgba(243, 170, 91, .1); border: 1px solid rgba(243, 170, 91, .22); border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 .account-name { color: var(--text); font-weight: 600; }
 .account-id { margin-top: 3px; color: var(--text-faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; }

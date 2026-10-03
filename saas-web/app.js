@@ -12,6 +12,7 @@
     accounts: [],
     bridge: null,
     currentView: 'overview',
+    selectedAccountIds: new Set(),
   };
   let refreshFlight = null;
   let sessionRecoveryAttempted = false;
@@ -251,6 +252,8 @@
     } while (pageToken);
     if (state.workspaceId !== workspaceId || !state.session) return;
     state.accounts = accounts;
+    const available = new Set(accounts.map((account) => account.account_id));
+    for (const accountId of state.selectedAccountIds) if (!available.has(accountId)) state.selectedAccountIds.delete(accountId);
     render();
   }
 
@@ -379,6 +382,15 @@
       const row = document.createElement('tr');
       const nameCell = document.createElement('td');
       const nameWrap = document.createElement('div');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox'; checkbox.className = 'account-select';
+      checkbox.checked = state.selectedAccountIds.has(account.account_id);
+      checkbox.setAttribute('aria-label', `选择账号 ${account.name}`);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) state.selectedAccountIds.add(account.account_id);
+        else state.selectedAccountIds.delete(account.account_id);
+        renderAccountSelection();
+      });
       nameWrap.className = 'account-name-cell';
       const avatar = document.createElement('span');
       avatar.className = 'account-avatar';
@@ -392,7 +404,7 @@
       id.textContent = account.account_id;
       nameBlock.append(name, id);
       nameWrap.append(avatar, nameBlock);
-      nameCell.append(nameWrap);
+      nameCell.append(checkbox, nameWrap);
 
       const labelsCell = document.createElement('td');
       const labels = document.createElement('div');
@@ -426,6 +438,20 @@
       row.append(nameCell, labelsCell, revisionCell, dateCell, actionCell);
       elements.accountTableBody.append(row);
     }
+    renderAccountSelection();
+  }
+
+  function renderAccountSelection() {
+    const total = state.accounts.length;
+    const selected = state.selectedAccountIds.size;
+    const toolbar = document.querySelector('#account-selection-toolbar');
+    const selectAll = document.querySelector('#account-select-all');
+    const count = document.querySelector('#account-selection-count');
+    if (!toolbar || !selectAll || !count) return;
+    toolbar.hidden = selected === 0;
+    count.textContent = `已选择 ${selected} 个账号`;
+    selectAll.checked = total > 0 && selected === total;
+    selectAll.indeterminate = selected > 0 && selected < total;
   }
 
   function renderBridge() {
@@ -541,6 +567,7 @@
     global.saasConsoleAdministration.clear();
     state.workspaceId = event.target.value;
     state.accounts = [];
+    state.selectedAccountIds.clear();
     render();
     sessionStorage.setItem('fingerprint-saas.workspace-id.v1', state.workspaceId);
     try {
@@ -564,6 +591,19 @@
     } catch (error) {
       showToast(userMessage(error), true);
     }
+  });
+  document.querySelector('#account-select-all').addEventListener('change', (event) => {
+    if (event.currentTarget.checked) for (const account of state.accounts) state.selectedAccountIds.add(account.account_id);
+    else state.selectedAccountIds.clear();
+    renderAccounts();
+  });
+  document.querySelector('#selected-sync-button').addEventListener('click', async () => {
+    try { await global.saasConsoleOperations.runBatch(false, [...state.selectedAccountIds]); }
+    catch (error) { showToast(userMessage(error), true); }
+  });
+  document.querySelector('#selected-restore-button').addEventListener('click', async () => {
+    try { await global.saasConsoleOperations.runBatch(true, [...state.selectedAccountIds]); }
+    catch (error) { showToast(userMessage(error), true); }
   });
   document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => {
     state.currentView = button.dataset.view;
