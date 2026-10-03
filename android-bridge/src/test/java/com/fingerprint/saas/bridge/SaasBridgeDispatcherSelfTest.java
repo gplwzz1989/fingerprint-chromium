@@ -117,6 +117,45 @@ public final class SaasBridgeDispatcherSelfTest {
         Map<String, Object> failure = decode(dispatcher.dispatch(message, ORIGIN, failed));
         check(Boolean.FALSE.equals(failure.get("ok")) && !((String) failure.get("error")).contains("开发者底层细节"), "底层异常直接泄露到网页");
         check("account-01".equals(SaasBridgeDispatcher.decodeNativeState("{\"account_id\":\"account-01\"}").get("account_id")), "原生状态编解码失败");
+        testStorageRouting(dispatcher);
+    }
+
+    /** 仅验证存储路由与编解码边界，不模拟 CookieManager 或 Android 页面。 */
+    private static void testStorageRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "storage".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> args = decode("{\"tabId\":\"account-01\"}");
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("type", "fingerprint-saas-bridge:request"); request.put("requestId", "storage-1");
+        request.put("args", args);
+        for (String method : new String[] {"storage.getSnapshot", "storage.writeSnapshot"}) {
+            request.put("method", method);
+            String message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+            check(Boolean.TRUE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")), "存储操作未路由");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN)).get("ok")), "未绑定存储平台仍被执行");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "存储来源校验被绕过");
+        }
+        check(calls[0] == 2, "拒绝请求进入存储平台层");
+        request.put("method", "storage.clearAllProfiles");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(
+                new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8), ORIGIN, probe)).get("ok")), "未知存储方法被执行");
+        check(calls[0] == 2, "未知存储方法进入平台层");
+        request.put("method", "getCapabilities");
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(
+                new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8), ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("storage")) && Boolean.FALSE.equals(flags.get("tabs")), "未按绑定能力声明存储");
+        check(probe.invokeAsync("storage.getSnapshot", args, () -> true).join().equals(args), "默认异步适配未保留结果");
+        try { probe.invokeAsync("storage.writeSnapshot", args, () -> false); throw new AssertionError("失效授权未拒绝"); }
+        catch (SaasBridgeDispatcher.NativeRequestException expected) { check(true, "授权拒绝"); }
+        check(calls[0] == 3, "失效授权仍执行异步操作");
+        Map<String, Object> data = decode("{\"ok\":true,\"result\":{\"local_storage\":{\"__proto__\":\"原型键\"}}}");
+        check(SaasBridgeDispatcher.decodeNativeReply(SaasBridgeDispatcher.encodeNativePayload(data)).equals(data), "原生 JSON 往返丢失保留键");
+        char[] large = new char[70000]; Arrays.fill(large, '测');
+        Map<String, Object> big = new LinkedHashMap<>(); big.put("value", new String(large));
+        check(SaasBridgeDispatcher.decodeNativeReply(SaasBridgeDispatcher.encodeNativePayload(big)).equals(big), "存储响应误用小状态的 64 KiB 限制");
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
     private static void check(boolean value, String message) { assertions++; if (!value) throw new AssertionError(message); }

@@ -3,6 +3,7 @@ package com.fingerprint.saas.bridge;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /** 原生消息路由；来源参数只能由持有消息端口的 Chromium 宿主提供。 */
 public final class SaasBridgeDispatcher {
@@ -10,7 +11,14 @@ public final class SaasBridgeDispatcher {
     public interface NativeBackend {
         boolean supports(String capability);
         Object invoke(String method, Map<String, Object> args);
+        default CompletableFuture<Object> invokeAsync(String method, Map<String, Object> args,
+                RequestAuthority authority) {
+            if (authority == null || !authority.isActive()) throw new NativeRequestException("页面授权已失效，操作已停止");
+            return CompletableFuture.completedFuture(invoke(method, args));
+        }
     }
+
+    public interface RequestAuthority { boolean isActive(); }
 
     public static final class NativeRequestException extends IllegalArgumentException {
         private static final long serialVersionUID = 1L;
@@ -86,11 +94,27 @@ public final class SaasBridgeDispatcher {
         return SnapshotJson.decode(json.getBytes(StandardCharsets.UTF_8), 65536);
     }
 
+    public static Map<String, Object> decodeNativeReply(String json) {
+        if (json == null || json.length() > 16 * 1024 * 1024) throw new NativeRequestException("原生存储响应超过大小限制");
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        try { return SnapshotJson.decode(bytes, 16 * 1024 * 1024); }
+        finally { java.util.Arrays.fill(bytes, (byte) 0); }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static String encodeNativePayload(Object value) {
+        if (!(value instanceof Map)) throw new NativeRequestException("存储快照格式无效");
+        byte[] bytes = SnapshotJson.encode((Map<String, Object>) value, 14 * 1024 * 1024);
+        try { return new String(bytes, StandardCharsets.UTF_8); }
+        finally { java.util.Arrays.fill(bytes, (byte) 0); }
+    }
+
     private Object invoke(String method, Map<String, Object> args, String origin, NativeBackend backend) {
         if ("getCapabilities".equals(method)) {
             Map<String, Object> capabilities = new LinkedHashMap<>();
             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
             capabilities.put("tabs", backend != null && backend.supports("tabs"));
+            capabilities.put("storage", backend != null && backend.supports("storage"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -101,6 +125,10 @@ public final class SaasBridgeDispatcher {
         if ("tabs.list".equals(method) || "tabs.create".equals(method) ||
                 "tabs.activate".equals(method) || "tabs.navigate".equals(method) || "tabs.close".equals(method)) {
             if (backend == null || !backend.supports("tabs")) throw invalid("当前客户端尚未提供标签管理能力");
+            return backend.invoke(method, args);
+        }
+        if ("storage.getSnapshot".equals(method) || "storage.writeSnapshot".equals(method)) {
+            if (backend == null || !backend.supports("storage")) throw invalid("当前客户端尚未提供存储管理能力");
             return backend.invoke(method, args);
         }
         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {

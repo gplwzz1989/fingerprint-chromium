@@ -213,7 +213,12 @@ public final class SaasBridgeHost extends EmptyTabObserver {
 
         private Object invokeOnUiThread(String method, Map<String, Object> args) {
             CompletableFuture<Object> result = new CompletableFuture<>();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+            long timeoutSeconds = method.startsWith("storage.") ? 35 : 15;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+            SaasBridgeDispatcher.RequestAuthority authority = () -> !result.isDone() &&
+                    System.nanoTime() < deadline && !mDestroyed &&
+                    mGeneration.get() == mWorkGeneration && mPort == mWorkPort &&
+                    !mWorkPort.isClosed() && mOrigin.equals(trustedOrigin(mContents));
             PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
                 if (result.isDone()) return;
                 try {
@@ -224,13 +229,16 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                         return;
                     }
                     if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
-                    result.complete(mNativeBackend.invoke(method, args));
+                    mNativeBackend.invokeAsync(method, args, authority).whenComplete((value, error) -> {
+                        if (error != null) result.completeExceptionally(error);
+                        else result.complete(value);
+                    });
                 } catch (RuntimeException error) { result.completeExceptionally(error); }
                 catch (LinkageError error) {
                     result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("客户端原生接口版本不匹配，请更新客户端"));
                 }
             });
-            try { return result.get(15, TimeUnit.SECONDS); }
+            try { return result.get(timeoutSeconds, TimeUnit.SECONDS); }
             catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 result.cancel(false);

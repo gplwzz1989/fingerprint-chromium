@@ -20,7 +20,7 @@
 - HTTP 页面加密兼容：无 WebCrypto 时调用受同一白名单保护的原生 PBKDF2/AES-GCM 接口；密码只存于当前页面内存，仍需运行版联调。
 - Android 平台无关桥接契约，后续使用 Android Storage Access Framework、Keystore 和原生网络适配。
 - Android 独立快照加密模块：`SnapshotCrypto`、`SnapshotJson` 和 Kotlin 适配器已实现真实 PBKDF2/AES-GCM，与网页信封互通；平台接口默认不获得页面授权，具体消息宿主挂接状态见下一项。
-- 已补充 Android 消息端口宿主、精确来源策略、后台加密路由和 JNI 配置挂接源码；独立路由仅提供 `crypto`，成功绑定 TabModel 后增加 `tabs`，其余能力仍为 `false`。没有生成或安装新 APK，不能把已编码挂接当作 Android 浏览器已可运行。
+- 已补充 Android 消息端口宿主、精确来源策略、后台加密路由和 JNI 配置挂接源码；独立路由仅提供 `crypto`，成功绑定 TabModel 后增加 `tabs/storage`，其余能力仍为 `false`。没有生成或安装新 APK，不能把已编码挂接当作 Android 浏览器已可运行。
 - 后续单代理阶段已编码安卓固定账号分区工厂、按 BrowserContext 保存的本地配置、代理/指纹种子平台钩子、JNI 创建入口、禁止共享复制与 Java 单页导航保护。正常 Tab 的列表/创建/切换/导航/关闭已接入真实模型与创建器源码；绑定平台实现时声明 `tabs`，未绑定仍不可用，尚无完整 Android 编译或设备验收。
 - 桌面 iframe 请求固定发往原生宿主来源并校验回复 Origin；HTTP 服务增加 `frame-ancestors`，避免第三方嵌入页面伪装原生桥。
 - 构建模式、同步边界、桥接消息、部署方式和测试结果文档。
@@ -33,7 +33,9 @@
 - 本轮 Android/消息复测共 461 项通过：加密 55、来源 136、消息路由 20、JVM 网络 187、网页加密互通 39、真实端口互通 16、Kotlin 8。网络模块需 JDK11+，未接入 Android；端口初始化事件为测试上下文注入，不构成 Android 主框架或生命周期的运行验收。
 - 新增 JNI 生成、Android 源文件清单语法与源码补丁反向应用检查通过；未执行 GN 重生成。网页同步 9 项、iframe 消息安全 2 项及真实 PostgreSQL 全包复测通过。
 - 单代理阶段：新账号环境头文件、共享 `chrome_content_browser_client.cc` 和参数测试源码局部语法检查通过；原生参数测试对象编译及链接通过，但运行遇到入口加载错误/系统拒绝启动，未计为运行测试通过，未修改系统策略。新增 JNI 和账号环境补丁反向检查通过；网页 11 项回归通过。
-- 正常 Tab 接入阶段：JVM/协议复测 474 项通过，其中消息路由 33 项包含 13 项平台路由探针，只验证分发与拒绝边界，不模拟 Android 标签。三个平台 Java 文件解析检查、两个 JNI 生成、账号环境/状态 JSON 局部 C++ 检查与新补丁反向检查通过；网页 11 项通过。正常模型操作还未进行 Android 类型检查、完整链接或设备运行验收，`storage/fingerprint/files/http` 仍不提供。
+- 正常 Tab 接入阶段：JVM/协议复测 474 项通过，其中消息路由 33 项包含 13 项平台路由探针，只验证分发与拒绝边界，不模拟 Android 标签。三个平台 Java 文件解析检查、两个 JNI 生成、账号环境/状态 JSON 局部 C++ 检查与新补丁反向检查通过；网页 11 项通过。正常模型操作还未进行 Android 类型检查、完整链接或设备运行验收；当轮未提供 `storage/fingerprint/files/http`，后续存储进展见下一项。
+- 后续存储阶段：`storage.getSnapshot/writeSnapshot` 已编码接入真实原生固定分区和隔离世界，绑定后提供 `storage`；未绑定仍不可用，完整指纹、SAF 文件和原生 HTTP 尚待接入。已修复 host-only Cookie 被恢复为域 Cookie，以及网页存储保留键 `__proto__` 丢失问题；桌面对应路径同步最小修复。
+- 存储专项的 JVM/协议 489 项、实际 C++ 生成脚本的 23 项边界测试和网页 12 项通过；原生引擎/桌面局部语法检查、JNI 生成与 Java 源码解析通过。脚本存储对象为明确的测试探针，不替代真实平台；完整 Android 类型检查、CookieManager/renderer IPC 和设备读写尚未验收。没有 GN 重生成、全量编译或新 APK。
 - `saas-web`：Node JavaScript 语法检查通过。
 - Chromium WebUI：TypeScript 静态检查通过。
 - 独立 Web 加密同步：真实 PBKDF2/AES-GCM 往返、账号绑定、错误密码拒绝、同步类别过滤及旧 WebUI 信封兼容测试通过。

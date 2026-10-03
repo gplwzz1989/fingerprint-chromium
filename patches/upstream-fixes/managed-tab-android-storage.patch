@@ -1,0 +1,907 @@
+--- a/chrome/browser/ui/android/tab_model/saas_account_storage.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_storage.h
+@@ -0,0 +1,485 @@
++#ifndef CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STORAGE_H_
++#define CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STORAGE_H_
++
++#include <cmath>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/json/json_writer.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "base/uuid.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_environment.h"
++#include "chrome/browser/ui/android/tab_model/saas_web_storage_scripts.h"
++#include "chrome/common/chrome_isolated_world_ids.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/storage_partition.h"
++#include "content/public/browser/weak_document_ptr.h"
++#include "net/cookies/canonical_cookie.h"
++#include "net/cookies/cookie_partition_key.h"
++#include "services/network/public/mojom/cookie_manager.mojom.h"
++#include "url/origin.h"
++
++namespace chrome::android {
++
++// 原生异步存储操作：Cookie 只通过真实固定分区的 CookieManager 读写，
++// 网页存储只在原文档内部隔离世界执行，不访问普通 Profile 的共享 Cookie。
++class SaasAccountStorage final : public content::WebContentsObserver,
++                                 public std::enable_shared_from_this<SaasAccountStorage> {
++ public:
++  using Authority = base::RepeatingCallback<bool()>;
++  using Completion = base::OnceCallback<void(base::Value::Dict)>;
++
++  static void Read(content::WebContents* contents, const base::Value::Dict& options,
++                   Authority authority,
++                   Completion callback) {
++    bool cookies = true, local = true, session = true;
++    for (const auto& item : {std::pair{"cookies", &cookies}, std::pair{"local_storage", &local},
++                             std::pair{"session_storage", &session}}) {
++      if (const auto* value = options.Find(item.first)) {
++        auto flag = value->GetIfBool();
++        if (!flag) {
++          base::Value::Dict error; error.Set("ok", false); error.Set("error", "读取选项必须为布尔值");
++          std::move(callback).Run(std::move(error)); return;
++        }
++        *item.second = *flag;
++      }
++    }
++    auto operation = Begin(contents, std::move(authority), std::move(callback), false, local || session);
++    if (operation) {
++      operation->cookies_ = cookies; operation->local_ = local; operation->session_ = session;
++      if (local || session) operation->PrepareDocument();
++      else operation->BeginRead();
++    }
++  }
++
++  static void Write(content::WebContents* contents, const base::Value::Dict& snapshot,
++                    Authority authority, Completion callback) {
++    const auto* flags = snapshot.FindDict("sync_options");
++    const bool needs_page = (flags ? flags->FindBool("local_storage").value_or(true) : true) ||
++        (flags ? flags->FindBool("session_storage").value_or(snapshot.contains("session_storage")) :
++                 snapshot.contains("session_storage"));
++    auto operation = Begin(contents, std::move(authority), std::move(callback), true, needs_page);
++    if (!operation) return;
++    std::string error;
++    if (!operation->ValidateWrite(snapshot, &error)) {
++      operation->Finish(false, std::move(error));
++      return;
++    }
++    if (needs_page) operation->PrepareDocument();
++    else operation->BeginCookieWrite();
++  }
++
++  ~SaasAccountStorage() override {
++    // 等待中的 IPC 仍持有操作对象；其真正释放前不能让第二个操作交叉修改同一分区。
++    if (lock_) lock_->busy = false;
++    --budget_->active;
++    if (!finished_) Finish(false, "存储操作未完成，请重试");
++  }
++
++ private:
++  static constexpr size_t kMaxJsonBytes = 14 * 1024 * 1024;
++  struct Lock { bool busy = false; };
++  struct Budget { size_t active = 0; };
++  struct LockData final : base::SupportsUserData::Data {
++    std::shared_ptr<Lock> lock = std::make_shared<Lock>();
++  };
++  struct BudgetData final : base::SupportsUserData::Data {
++    std::shared_ptr<Budget> budget = std::make_shared<Budget>();
++  };
++  inline static const char kLockKey[] = "fingerprint.android.storage.operation";
++  inline static const char kBudgetKey[] = "fingerprint.android.storage.budget";
++
++  SaasAccountStorage(content::WebContents* contents, Authority authority,
++                     Completion callback, std::shared_ptr<Lock> lock,
++                     std::shared_ptr<Budget> budget, bool write, bool needs_page)
++      : content::WebContentsObserver(contents), authority_(std::move(authority)),
++        callback_(std::move(callback)), lock_(std::move(lock)),
++        budget_(std::move(budget)), write_(write), needs_page_(needs_page),
++        document_(contents->GetPrimaryMainFrame()->GetWeakDocumentPtr()),
++        storage_url_(contents->GetPrimaryMainFrame()->GetLastCommittedURL()),
++        account_(SaasAccountEnvironment::FromWebContents(contents)->GetPersistentState()) {}
++
++  static std::shared_ptr<SaasAccountStorage> Begin(
++      content::WebContents* contents, Authority authority, Completion callback,
++      bool write, bool needs_page) {
++    auto reject = [&](const char* error) {
++      base::Value::Dict reply;
++      reply.Set("ok", false); reply.Set("error", error);
++      std::move(callback).Run(std::move(reply));
++    };
++    auto* account = SaasAccountEnvironment::FromWebContents(contents);
++    auto* frame = contents ? contents->GetPrimaryMainFrame() : nullptr;
++    if (!account || !frame || !frame->IsActive() ||
++        (needs_page && (!frame->IsRenderFrameLive() ||
++          !frame->GetLastCommittedURL().SchemeIsHTTPOrHTTPS() ||
++          frame->GetLastCommittedOrigin().opaque())) ||
++        authority.is_null() || !authority.Run()) {
++      reject("账号页面尚未准备好，请先打开需要同步的网站");
++      return nullptr;
++    }
++    auto* context = contents->GetBrowserContext();
++    auto* budget = static_cast<BudgetData*>(context->GetUserData(&kBudgetKey));
++    if (!budget) {
++      auto owned = std::make_unique<BudgetData>();
++      budget = owned.get();
++      context->SetUserData(&kBudgetKey, std::move(owned));
++    }
++    if (budget->budget->active >= 8) {
++      reject("存储操作数量已达上限，请等待现有操作完成"); return nullptr;
++    }
++    auto* data = static_cast<LockData*>(contents->GetUserData(&kLockKey));
++    if (!data) {
++      auto owned = std::make_unique<LockData>();
++      data = owned.get();
++      contents->SetUserData(&kLockKey, std::move(owned));
++    }
++    if (data->lock->busy) {
++      reject("该账号已有存储操作，请等待完成后重试");
++      return nullptr;
++    }
++    data->lock->busy = true;
++    auto operation = std::shared_ptr<SaasAccountStorage>(
++        new SaasAccountStorage(contents, std::move(authority), std::move(callback),
++                               data->lock, budget->budget, write, needs_page));
++    ++budget->budget->active;
++    std::weak_ptr<SaasAccountStorage> weak = operation;
++    operation->timer_.Start(FROM_HERE, base::Seconds(30),
++        base::BindOnce([](std::weak_ptr<SaasAccountStorage> weak) {
++          if (auto current = weak.lock()) current->Finish(false, "存储操作等待超时，请重试");
++        }, weak));
++    return operation;
++  }
++
++  bool Current() const {
++    auto* frame = document_.AsRenderFrameHostIfValid();
++    auto* contents = web_contents();
++    auto* environment = SaasAccountEnvironment::FromWebContents(contents);
++    return !finished_ && contents && frame && (!needs_page_ || frame->IsRenderFrameLive()) &&
++           frame->IsActive() && contents->GetPrimaryMainFrame() == frame &&
++           frame->GetLastCommittedURL() == storage_url_ && environment &&
++           environment->GetPersistentState().account_id == account_.account_id &&
++           authority_.Run();
++  }
++
++  bool Check() {
++    if (Current()) return true;
++    Finish(false, "页面或授权在存储操作期间发生变化，请重试");
++    return false;
++  }
++
++  void Execute(std::string script, base::OnceCallback<void(base::Value)> callback) {
++    if (!Check()) return;
++    document_.AsRenderFrameHostIfValid()->ExecuteJavaScriptInIsolatedWorld(
++        base::UTF8ToUTF16(script), std::move(callback), ISOLATED_WORLD_ID_CHROME_INTERNAL);
++  }
++
++  void PrepareDocument() {
++    Execute(SaasStoragePrepareScript(base::Uuid::GenerateRandomV4().AsLowercaseString()),
++        base::BindOnce(&SaasAccountStorage::OnPrepared, shared_from_this()));
++  }
++
++  void OnPrepared(base::Value result) {
++    if (!Check()) return;
++    const auto* data = result.GetIfDict();
++    const auto* token = data ? data->FindString("token") : nullptr;
++    const auto* url = data ? data->FindString("url") : nullptr;
++    if (!token || token->size() != 36 || !url || GURL(*url) != storage_url_) {
++      Finish(false, "当前文档未能建立存储保护，请重试"); return;
++    }
++    token_ = *token;
++    if (write_) {
++      if (local_ || session_) {
++        Execute(SaasStorageWriteScript(token_, storage_url_.spec(), payload_),
++            base::BindOnce(&SaasAccountStorage::OnWebStorageWritten, shared_from_this()));
++      } else {
++        BeginCookieWrite();
++      }
++    } else {
++      BeginRead();
++    }
++  }
++
++  void BeginRead() {
++    if (!Check()) return;
++    if (cookies_) CookieManager()->GetAllCookies(
++        base::BindOnce(&SaasAccountStorage::OnCookiesRead, shared_from_this()));
++    else OnCookiesRead({});
++  }
++
++  network::mojom::CookieManager* CookieManager() {
++    // 显式使用当前 SiteInstance 的固定配置，不能省略配置退回 Profile 默认分区。
++    return web_contents()->GetBrowserContext()->GetStoragePartition(
++        web_contents()->GetSiteInstance()->GetStoragePartitionConfig())
++        ->GetCookieManagerForBrowserProcess();
++  }
++
++  void OnCookiesRead(const net::CookieList& cookies) {
++    if (!Check()) return;
++    if (cookies.size() > 5000) {
++      Finish(false, "Cookie 数量超过支持范围"); return;
++    }
++    base::Value::List serialized;
++    for (const auto& cookie : cookies) {
++      base::Value::Dict value;
++      value.Set("name", cookie.Name()); value.Set("value", cookie.Value());
++      value.Set("domain", cookie.Domain()); value.Set("path", cookie.Path());
++      value.Set("secure", cookie.IsSecure()); value.Set("http_only", cookie.IsHttpOnly());
++      value.Set("same_site", static_cast<int>(cookie.SameSite()));
++      value.Set("priority", static_cast<int>(cookie.Priority()));
++      value.Set("creation", static_cast<double>(cookie.CreationDate().InMillisecondsSinceUnixEpoch()));
++      value.Set("last_access", static_cast<double>(cookie.LastAccessDate().InMillisecondsSinceUnixEpoch()));
++      value.Set("expires", cookie.IsPersistent() ? base::Value(
++          static_cast<double>(cookie.ExpiryDate().InMillisecondsSinceUnixEpoch())) : base::Value());
++      auto key = net::CookiePartitionKey::Serialize(cookie.PartitionKey());
++      if (cookie.IsPartitioned() && !key.has_value()) {
++        Finish(false, "该 Cookie 分区键不能安全导出，快照已停止"); return;
++      }
++      if (key.has_value()) {
++        base::Value::Dict partition;
++        partition.Set("top_level_site", key->TopLevelSite());
++        partition.Set("has_cross_site_ancestor", key->has_cross_site_ancestor());
++        value.Set("partition_key", std::move(partition));
++      }
++      serialized.Append(std::move(value));
++    }
++    snapshot_.Set("schema_version", 1);
++    snapshot_.Set("account_id", account_.account_id);
++    snapshot_.Set("storage_url", storage_url_.spec());
++    snapshot_.Set("proxy_rules", account_.proxy_rules);
++    snapshot_.Set("fingerprint_seed", account_.fingerprint_seed);
++    snapshot_.Set("cookies", std::move(serialized));
++    if (local_ || session_) {
++      Execute(SaasStorageReadScript(token_, storage_url_.spec(), local_, session_),
++          base::BindOnce(&SaasAccountStorage::OnWebStorageRead, shared_from_this()));
++    } else {
++      base::Value::Dict values; values.Set("ok", true);
++      values.Set("local_storage", base::Value::Dict());
++      values.Set("session_storage", base::Value::Dict());
++      OnWebStorageRead(base::Value(std::move(values)));
++    }
++  }
++
++  void OnWebStorageRead(base::Value result) {
++    if (!Check()) return;
++    const auto* values = result.GetIfDict();
++    const auto* local = values ? values->FindDict("local_storage") : nullptr;
++    const auto* session = values ? values->FindDict("session_storage") : nullptr;
++    if (!values || values->FindBool("ok") != true || !local || !session) {
++      Finish(false, "网页存储读取失败或数据超过支持范围"); return;
++    }
++    snapshot_.Set("local_storage", local->Clone());
++    snapshot_.Set("session_storage", session->Clone());
++    base::Value::Dict options;
++    options.Set("cookies", cookies_); options.Set("local_storage", local_);
++    options.Set("session_storage", session_); options.Set("proxy", true);
++    options.Set("page", needs_page_);
++    options.Set("fingerprint", false);
++    snapshot_.Set("sync_options", std::move(options));
++    Finish(true, {}, base::Value(std::move(snapshot_)));
++  }
++
++  static bool TimeField(const base::Value::Dict& cookie, const char* key,
++                        base::Time* result, bool expiry) {
++    const auto* value = cookie.Find(key);
++    if (!value || (expiry && value->is_none())) {
++      *result = expiry ? base::Time() : base::Time::Now(); return true;
++    }
++    if (!value->is_double() && !value->is_int()) return false;
++    double millis = value->is_int() ? value->GetInt() : value->GetDouble();
++    if (!std::isfinite(millis) || std::abs(millis) > 8640000000000000.0) return false;
++    *result = base::Time::FromMillisecondsSinceUnixEpoch(millis);
++    return true;
++  }
++
++  bool ValidateWrite(const base::Value::Dict& snapshot, std::string* error) {
++    const auto fail = [&](const char* message) { *error = message; return false; };
++    const auto* id = snapshot.FindString("account_id");
++    if (snapshot.FindInt("schema_version") != 1 || !id || *id != account_.account_id) {
++      return fail("快照版本或账号与目标标签不一致");
++    }
++    auto json = base::WriteJson(snapshot);
++    if (!json || json->size() > kMaxJsonBytes) return fail("存储快照超过大小限制");
++    const auto* flags = snapshot.FindDict("sync_options");
++    if (snapshot.contains("sync_options") && !flags) return fail("同步选项格式无效");
++    const auto option = [&](const char* key, bool fallback) -> std::optional<bool> {
++      const auto* value = flags ? flags->Find(key) : nullptr;
++      return value ? value->GetIfBool() : std::optional<bool>(fallback);
++    };
++    auto cookies = option("cookies", true);
++    auto local = option("local_storage", true);
++    auto session = option("session_storage", snapshot.contains("session_storage"));
++    auto fingerprint = option("fingerprint", true);
++    auto proxy = option("proxy", true);
++    if (!cookies || !local || !session || !fingerprint || !proxy) return fail("同步选项必须为布尔值");
++    cookies_ = *cookies; local_ = *local; session_ = *session;
++    if (*proxy && snapshot.contains("proxy_rules")) {
++      const auto* rules = snapshot.FindString("proxy_rules");
++      if (!rules || *rules != account_.proxy_rules) return fail("快照代理与当前账号环境不一致");
++    }
++    if (*fingerprint) {
++      const auto* seed = snapshot.FindString("fingerprint_seed");
++      if (snapshot.contains("fingerprint_seed") && (!seed || *seed != account_.fingerprint_seed)) {
++        return fail("快照指纹种子与当前账号环境不一致");
++      }
++      if (snapshot.contains("fingerprint")) return fail("当前安卓客户端尚未支持完整指纹快照写入");
++    }
++    if (local_ || session_) {
++      const auto* url = snapshot.FindString("storage_url");
++      GURL source(url ? *url : "");
++      if (!source.SchemeIsHTTPOrHTTPS() ||
++          url::Origin::Create(source) != url::Origin::Create(storage_url_)) {
++        return fail("网页存储所属来源与当前页面不一致，请先打开对应网站");
++      }
++    }
++    payload_.Set("local", local_); payload_.Set("session", session_);
++    for (const auto& item : {std::pair{"local_storage", local_}, std::pair{"session_storage", session_}}) {
++      const auto* data = snapshot.FindDict(item.first);
++      if (!item.second) { payload_.Set(item.first, base::Value::Dict()); continue; }
++      if (!data || data->size() > 10000) return fail("网页存储快照格式或数量无效");
++      size_t bytes = 0;
++      for (auto entry : *data) {
++        if (!entry.second.is_string() || entry.first.size() > 1024 ||
++            entry.second.GetString().size() > 1024 * 1024) return fail("网页存储键或内容无效");
++        bytes += entry.first.size() + entry.second.GetString().size();
++      }
++      if (bytes > 10 * 1024 * 1024) return fail("网页存储数据超过大小限制");
++      payload_.Set(item.first, data->Clone());
++    }
++    if (!cookies_) return true;
++    const auto* list = snapshot.FindList("cookies");
++    if (!list || list->size() > 5000) return fail("Cookie 格式或数量无效");
++    for (const auto& input : *list) {
++      const auto* value = input.GetIfDict();
++      const auto* name = value ? value->FindString("name") : nullptr;
++      const auto* content = value ? value->FindString("value") : nullptr;
++      const auto* domain = value ? value->FindString("domain") : nullptr;
++      const auto* path = value ? value->FindString("path") : nullptr;
++      auto secure = value ? value->FindBool("secure") : std::nullopt;
++      auto httponly = value ? value->FindBool("http_only") : std::nullopt;
++      if (!name || !content || !domain || !path || !secure || !httponly ||
++          name->size() > 4096 || content->size() > 4096 || domain->empty() ||
++          domain->size() > 255 || path->empty() || path->size() > 4096) return fail("Cookie 字段无效");
++      std::string host = domain->front() == '.' ? domain->substr(1) : *domain;
++      GURL source(std::string(*secure ? "https://" : "http://") + host + "/");
++      if (!source.is_valid() || source.host() != host || source.has_port() ||
++          source.has_username() || source.has_password()) return fail("Cookie 域名无效");
++      auto same_site = value->FindInt("same_site");
++      auto priority = value->FindInt("priority");
++      if ((value->contains("same_site") && !same_site) ||
++          (value->contains("priority") && !priority) ||
++          same_site.value_or(-1) < -1 || same_site.value_or(-1) > 2 ||
++          priority.value_or(net::COOKIE_PRIORITY_DEFAULT) < net::COOKIE_PRIORITY_LOW ||
++          priority.value_or(net::COOKIE_PRIORITY_DEFAULT) > net::COOKIE_PRIORITY_HIGH) return fail("Cookie 策略字段无效");
++      base::Time creation, access, expiry;
++      if (!TimeField(*value, "creation", &creation, false) ||
++          !TimeField(*value, "last_access", &access, false) ||
++          !TimeField(*value, "expires", &expiry, true)) return fail("Cookie 时间字段无效");
++      std::optional<net::CookiePartitionKey> partition;
++      if (value->contains("partition_key")) {
++        const auto* key = value->FindDict("partition_key");
++        const auto* site = key ? key->FindString("top_level_site") : nullptr;
++        auto cross = key ? key->FindBool("has_cross_site_ancestor") : std::nullopt;
++        if (!site || !cross) return fail("Cookie 分区键无效");
++        auto parsed = net::CookiePartitionKey::FromUntrustedInput(*site, *cross);
++        if (!parsed.has_value()) return fail("Cookie 分区键无效");
++        partition = std::move(parsed.value());
++      }
++      net::CookieInclusionStatus status;
++      // 无前导点的是 host-only Cookie；把域名当 Domain 属性传入会扩大到子域，且破坏 __Host- 前缀。
++      const std::string domain_attribute = domain->front() == '.' ? *domain : std::string();
++      auto canonical = net::CanonicalCookie::CreateSanitizedCookie(
++          source, *name, *content, domain_attribute, *path, creation, expiry, access,
++          *secure, *httponly, static_cast<net::CookieSameSite>(same_site.value_or(-1)),
++          static_cast<net::CookiePriority>(priority.value_or(net::COOKIE_PRIORITY_DEFAULT)),
++          std::move(partition), &status);
++      if (!canonical || !status.IsInclude() || canonical->Domain() != *domain ||
++          canonical->Path() != *path) return fail("Cookie 无法安全写入");
++      incoming_.push_back(std::move(canonical));
++    }
++    return true;
++  }
++
++  void OnWebStorageWritten(base::Value result) {
++    if (!Check()) return;
++    const auto* value = result.GetIfDict();
++    if (!value || value->FindBool("ok") != true) {
++      Finish(false, value && value->FindBool("rollback_failed") == true ?
++          "网页存储写入及回滚失败，请检查本地数据后重试" : "网页存储写入失败，已尝试恢复原数据");
++      return;
++    }
++    BeginCookieWrite();
++  }
++
++  void BeginCookieWrite() {
++    if (!Check()) return;
++    if (!cookies_) { Finish(true, {}, base::Value(true)); return; }
++    // 先完成网页存储，再清理选中的 Cookie；后续失败可能已有局部修改，不能声称事务成功。
++    CookieManager()->DeleteCookies(network::mojom::CookieDeletionFilter::New(),
++        base::BindOnce(&SaasAccountStorage::OnCookiesDeleted, shared_from_this()));
++  }
++
++  void OnCookiesDeleted(uint32_t) {
++    if (!Check()) return;
++    WriteNextCookie();
++  }
++
++  void WriteNextCookie() {
++    if (!Check()) return;
++    if (cookie_index_ == incoming_.size()) { Finish(true, {}, base::Value(true)); return; }
++    const auto& cookie = *incoming_[cookie_index_++];
++    std::string host = cookie.Domain().front() == '.' ? cookie.Domain().substr(1) : cookie.Domain();
++    net::CookieOptions options;
++    options.set_include_httponly();
++    options.set_same_site_cookie_context(net::CookieOptions::SameSiteCookieContext::MakeInclusiveForSet());
++    CookieManager()->SetCanonicalCookie(cookie,
++        GURL(std::string(cookie.IsSecure() ? "https://" : "http://") + host + "/"), options,
++        base::BindOnce(&SaasAccountStorage::OnCookieWritten, shared_from_this()));
++  }
++
++  void OnCookieWritten(net::CookieAccessResult result) {
++    if (!Check()) return;
++    if (!result.status.IsInclude()) { Finish(false, "部分 Cookie 未能写入，请检查账号数据后重试"); return; }
++    WriteNextCookie();
++  }
++
++  void WebContentsDestroyed() override { Finish(false, "账号标签已关闭，存储操作已停止"); }
++
++  void Finish(bool success, std::string error, base::Value result = base::Value()) {
++    if (finished_) return;
++    finished_ = true; timer_.Stop();
++    authority_.Reset();
++    incoming_.clear(); payload_.clear(); snapshot_.clear();
++    base::Value::Dict reply;
++    reply.Set("ok", success);
++    if (success) reply.Set("result", std::move(result));
++    else reply.Set("error", std::move(error));
++    auto json = base::WriteJson(reply);
++    if (!json || json->size() > kMaxJsonBytes) {
++      reply.clear(); reply.Set("ok", false); reply.Set("error", "存储响应超过大小限制，请减少同步数据");
++    }
++    if (callback_) std::move(callback_).Run(std::move(reply));
++  }
++
++  Authority authority_;
++  Completion callback_;
++  std::shared_ptr<Lock> lock_;
++  std::shared_ptr<Budget> budget_;
++  const bool write_;
++  const bool needs_page_;
++  content::WeakDocumentPtr document_;
++  const GURL storage_url_;
++  const SaasAccountState account_;
++  base::OneShotTimer timer_;
++  bool finished_ = false, cookies_ = false, local_ = false, session_ = false;
++  size_t cookie_index_ = 0;
++  std::string token_;
++  base::Value::Dict payload_, snapshot_;
++  std::vector<std::unique_ptr<net::CanonicalCookie>> incoming_;
++};
++
++}  // namespace chrome::android
++#endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STORAGE_H_
+--- a/chrome/browser/ui/android/tab_model/saas_web_storage_scripts.h
++++ b/chrome/browser/ui/android/tab_model/saas_web_storage_scripts.h
+@@ -0,0 +1,105 @@
++#ifndef CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_WEB_STORAGE_SCRIPTS_H_
++#define CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_WEB_STORAGE_SCRIPTS_H_
++
++#include <string>
++#include "base/json/json_writer.h"
++#include "base/values.h"
++
++namespace chrome::android {
++
++// 仅在 Chrome 内部隔离世界执行。普通网页不能创建或覆盖这里的文档标记。
++inline std::string SaasStoragePrepareScript(const std::string& nonce) {
++  auto quoted = base::WriteJson(base::Value(nonce)).value_or("null");
++  return "(() => {const key='__fingerprint_saas_storage_document';"
++         "if(!Object.prototype.hasOwnProperty.call(globalThis,key)){"
++         "Object.defineProperty(globalThis,key,{value:" + quoted + "});}"
++         "return {token:globalThis[key],url:location.href};})()";
++}
++
++inline std::string SaasStorageGuardScript(const std::string& token,
++                                          const std::string& url) {
++  return "if(globalThis.__fingerprint_saas_storage_document!==" +
++         base::WriteJson(base::Value(token)).value_or("null") +
++         "||location.href!==" + base::WriteJson(base::Value(url)).value_or("null") +
++         ")return {ok:false};";
++}
++
++inline std::string SaasStorageReadScript(const std::string& token,
++                                         const std::string& url,
++                                         bool local = true, bool session = true) {
++  return "(() => {" + SaasStorageGuardScript(token, url) +
++         "const includeLocal=" + (local ? "true;" : "false;") +
++         "const includeSession=" + (session ? "true;" : "false;") + R"JS(
++    try {
++      const encoder = new TextEncoder();
++      const read = storage => {
++        const result = Object.create(null);
++        let bytes = 0;
++        if (storage.length > 10000) throw new Error();
++        for (let index = 0; index < storage.length; index++) {
++          const key = storage.key(index);
++          if (key === null) throw new Error();
++          const value = storage.getItem(key);
++          if (value === null || key.length > 1024 || value.length > 1048576) throw new Error();
++          const keyBytes = encoder.encode(key).length;
++          const valueBytes = encoder.encode(value).length;
++          if (keyBytes > 1024 || valueBytes > 1048576) throw new Error();
++          bytes += keyBytes + valueBytes;
++          if (bytes > 10485760) throw new Error();
++          result[key] = value;
++        }
++        return result;
++      };
++      return {ok:true,local_storage:includeLocal?read(localStorage):{},session_storage:includeSession?read(sessionStorage):{}};
++    } catch (_) { return {ok:false}; }
++  })())JS";
++}
++
++inline std::string SaasStorageWriteScript(const std::string& token,
++                                          const std::string& url,
++                                          const base::Value::Dict& payload) {
++  auto json = base::WriteJson(payload);
++  if (!json) return {};
++  // JSON.parse 保留 "__proto__" 等真实键，不使用会改变对象原型的对象字面量。
++  return "(() => {" + SaasStorageGuardScript(token, url) +
++         "const input=JSON.parse(" +
++         base::WriteJson(base::Value(*json)).value_or("null") + R"JS();
++    const backup = storage => {
++      const result = Object.create(null);
++      if (storage.length > 10000) throw new Error();
++      let bytes = 0;
++      const encoder = new TextEncoder();
++      for (let index=0; index<storage.length; index++) {
++        const key=storage.key(index), value=storage.getItem(key);
++        if (key===null || value===null || key.length>1024 || value.length>1048576) throw new Error();
++        bytes += encoder.encode(key).length + encoder.encode(value).length;
++        if (bytes>10485760) throw new Error();
++        result[key]=value;
++      }
++      return result;
++    };
++    const replace = (storage, values) => {
++      storage.clear();
++      for (const [key,value] of Object.entries(values)) storage.setItem(key,value);
++    };
++    let localBefore, sessionBefore;
++    try {
++      if (input.local) localBefore=backup(localStorage);
++      if (input.session) sessionBefore=backup(sessionStorage);
++    } catch (_) { return {ok:false,rollback_failed:false}; }
++    try {
++      if (input.local) replace(localStorage,input.local_storage);
++      if (input.session) replace(sessionStorage,input.session_storage);
++      return {ok:true};
++    } catch (_) {
++      let failed=false;
++      // 一类恢复失败仍继续尝试恢复另一类；失败状态不能被包装为成功。
++      if (input.local) try { replace(localStorage,localBefore); } catch (_) { failed=true; }
++      if (input.session) try { replace(sessionStorage,sessionBefore); } catch (_) { failed=true; }
++      return {ok:false,rollback_failed:failed};
++    }
++  })())JS";
++}
++
++}  // namespace chrome::android
++#endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_WEB_STORAGE_SCRIPTS_H_
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
+@@ -3,6 +3,7 @@
+ import java.nio.charset.StandardCharsets;
+ import java.util.LinkedHashMap;
+ import java.util.Map;
++import java.util.concurrent.CompletableFuture;
+ 
+ /** 原生消息路由；来源参数只能由持有消息端口的 Chromium 宿主提供。 */
+ public final class SaasBridgeDispatcher {
+@@ -10,7 +11,14 @@
+     public interface NativeBackend {
+         boolean supports(String capability);
+         Object invoke(String method, Map<String, Object> args);
++        default CompletableFuture<Object> invokeAsync(String method, Map<String, Object> args,
++                RequestAuthority authority) {
++            if (authority == null || !authority.isActive()) throw new NativeRequestException("页面授权已失效，操作已停止");
++            return CompletableFuture.completedFuture(invoke(method, args));
++        }
+     }
++
++    public interface RequestAuthority { boolean isActive(); }
+ 
+     public static final class NativeRequestException extends IllegalArgumentException {
+         private static final long serialVersionUID = 1L;
+@@ -86,11 +94,27 @@
+         return SnapshotJson.decode(json.getBytes(StandardCharsets.UTF_8), 65536);
+     }
+ 
++    public static Map<String, Object> decodeNativeReply(String json) {
++        if (json == null || json.length() > 16 * 1024 * 1024) throw new NativeRequestException("原生存储响应超过大小限制");
++        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
++        try { return SnapshotJson.decode(bytes, 16 * 1024 * 1024); }
++        finally { java.util.Arrays.fill(bytes, (byte) 0); }
++    }
++
++    @SuppressWarnings("unchecked")
++    public static String encodeNativePayload(Object value) {
++        if (!(value instanceof Map)) throw new NativeRequestException("存储快照格式无效");
++        byte[] bytes = SnapshotJson.encode((Map<String, Object>) value, 14 * 1024 * 1024);
++        try { return new String(bytes, StandardCharsets.UTF_8); }
++        finally { java.util.Arrays.fill(bytes, (byte) 0); }
++    }
++
+     private Object invoke(String method, Map<String, Object> args, String origin, NativeBackend backend) {
+         if ("getCapabilities".equals(method)) {
+             Map<String, Object> capabilities = new LinkedHashMap<>();
+             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
+             capabilities.put("tabs", backend != null && backend.supports("tabs"));
++            capabilities.put("storage", backend != null && backend.supports("storage"));
+             capabilities.put("crypto", true);
+             Map<String, Object> details = new LinkedHashMap<>();
+             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
+@@ -101,6 +125,10 @@
+         if ("tabs.list".equals(method) || "tabs.create".equals(method) ||
+                 "tabs.activate".equals(method) || "tabs.navigate".equals(method) || "tabs.close".equals(method)) {
+             if (backend == null || !backend.supports("tabs")) throw invalid("当前客户端尚未提供标签管理能力");
++            return backend.invoke(method, args);
++        }
++        if ("storage.getSnapshot".equals(method) || "storage.writeSnapshot".equals(method)) {
++            if (backend == null || !backend.supports("storage")) throw invalid("当前客户端尚未提供存储管理能力");
+             return backend.invoke(method, args);
+         }
+         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {
+--- a/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
+@@ -213,7 +213,12 @@
+ 
+         private Object invokeOnUiThread(String method, Map<String, Object> args) {
+             CompletableFuture<Object> result = new CompletableFuture<>();
+-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
++            long timeoutSeconds = method.startsWith("storage.") ? 35 : 15;
++            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
++            SaasBridgeDispatcher.RequestAuthority authority = () -> !result.isDone() &&
++                    System.nanoTime() < deadline && !mDestroyed &&
++                    mGeneration.get() == mWorkGeneration && mPort == mWorkPort &&
++                    !mWorkPort.isClosed() && mOrigin.equals(trustedOrigin(mContents));
+             PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
+                 if (result.isDone()) return;
+                 try {
+@@ -224,13 +229,16 @@
+                         return;
+                     }
+                     if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
+-                    result.complete(mNativeBackend.invoke(method, args));
++                    mNativeBackend.invokeAsync(method, args, authority).whenComplete((value, error) -> {
++                        if (error != null) result.completeExceptionally(error);
++                        else result.complete(value);
++                    });
+                 } catch (RuntimeException error) { result.completeExceptionally(error); }
+                 catch (LinkageError error) {
+                     result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("客户端原生接口版本不匹配，请更新客户端"));
+                 }
+             });
+-            try { return result.get(15, TimeUnit.SECONDS); }
++            try { return result.get(timeoutSeconds, TimeUnit.SECONDS); }
+             catch (InterruptedException error) {
+                 Thread.currentThread().interrupt();
+                 result.cancel(false);
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
+@@ -58,6 +58,7 @@
+ import java.util.HashSet;
+ import java.util.List;
+ import java.util.Map;
++import java.util.concurrent.CompletableFuture;
+ import java.util.Set;
+ 
+ /** Bridges between the C++ and Java {@link TabModel} interfaces. */
+@@ -129,10 +130,16 @@
+                     TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl(),
+                     new SaasBridgeDispatcher.NativeBackend() {
+                         @Override public boolean supports(String capability) {
+-                            return "tabs".equals(capability);
++                            return "tabs".equals(capability) || "storage".equals(capability);
+                         }
+                         @Override public Object invoke(String method, Map<String, Object> args) {
+                             return invokeSaasTabs(method, args);
++                        }
++                        @Override public CompletableFuture<Object> invokeAsync(
++                                String method, Map<String, Object> args,
++                                SaasBridgeDispatcher.RequestAuthority authority) {
++                            if (method.startsWith("storage.")) return invokeSaasStorage(method, args, authority);
++                            return CompletableFuture.completedFuture(invokeSaasTabs(method, args));
+                         }
+                     });
+         } catch (IllegalArgumentException error) {
+@@ -161,6 +168,7 @@
+         state.put("url", tab.getUrl().getSpec());
+         state.put("frozen", tab.isFrozen());
+         state.put("active", getTabAt(index()) == tab);
++        if (contents != null && !contents.isDestroyed()) state.put("load_progress", contents.getLoadProgress());
+         return state;
+     }
+ 
+@@ -290,6 +298,74 @@
+         throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供该标签操作");
+     }
+ 
++    private static final class SaasStorageRequest {
++        final CompletableFuture<Object> completion = new CompletableFuture<>();
++        final SaasBridgeDispatcher.RequestAuthority authority;
++        SaasStorageRequest(SaasBridgeDispatcher.RequestAuthority authority) { this.authority = authority; }
++    }
++
++    @CalledByNative
++    private static boolean isSaasStorageRequestActive(SaasStorageRequest request) {
++        try { return ThreadUtils.runningOnUiThread() && request.authority.isActive(); }
++        catch (RuntimeException error) { return false; }
++    }
++
++    @CalledByNative
++    private static void completeSaasStorageRequest(
++            SaasStorageRequest request, @JniType("std::string") String json) {
++        if (request.completion.isDone()) return;
++        try {
++            if (!isSaasStorageRequestActive(request)) throw new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，存储操作已停止");
++            Map<String, Object> reply = SaasBridgeDispatcher.decodeNativeReply(json);
++            if (!Boolean.TRUE.equals(reply.get("ok"))) {
++                Object message = reply.get("error");
++                throw new SaasBridgeDispatcher.NativeRequestException(
++                        message instanceof String ? (String) message : "存储操作失败，请重试");
++            }
++            request.completion.complete(reply.get("result"));
++        } catch (RuntimeException error) {
++            request.completion.completeExceptionally(
++                    error instanceof SaasBridgeDispatcher.NativeRequestException ? error :
++                    new SaasBridgeDispatcher.NativeRequestException("原生存储响应无效，请重试"));
++        }
++    }
++
++    private CompletableFuture<Object> invokeSaasStorage(String method, Map<String, Object> args,
++            SaasBridgeDispatcher.RequestAuthority authority) {
++        if (!ThreadUtils.runningOnUiThread() || !isNativeInitialized() ||
++                isIncognito() || !isInitializationComplete() || !authority.isActive()) {
++            throw new SaasBridgeDispatcher.NativeRequestException("账号存储环境尚未准备好，请重试");
++        }
++        String id = saasString(args, "tabId", 128, false);
++        Tab target = null;
++        for (int i=0; i<getCount(); i++) {
++            Tab tab = getTabAt(i);
++            if (tab == null || tab.isClosing()) continue;
++            Map<String, Object> state = readSaasAccountState(tab);
++            if (state != null && id.equals(state.get("id"))) { target=tab; break; }
++        }
++        if (target == null || isResidentSaasTab(target)) throw new SaasBridgeDispatcher.NativeRequestException("隔离账号标签不存在");
++        if (target.isFrozen()) target.loadIfNeeded(TabLoadIfNeededCaller.OTHER);
++        WebContents contents = target.getWebContents();
++        if (!authority.isActive() || contents == null || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
++            throw new SaasBridgeDispatcher.NativeRequestException("隔离账号存储环境未就绪，操作已停止");
++        }
++        boolean write = "storage.writeSnapshot".equals(method);
++        String snapshot;
++        if (write) {
++            Object value = args.get("snapshot");
++            if (!(value instanceof Map)) throw new SaasBridgeDispatcher.NativeRequestException("存储快照格式无效");
++            snapshot = SaasBridgeDispatcher.encodeNativePayload(value);
++        } else if ("storage.getSnapshot".equals(method)) {
++            snapshot = SaasBridgeDispatcher.encodeNativePayload(args);
++        } else {
++            throw new SaasBridgeDispatcher.NativeRequestException("不支持的存储操作");
++        }
++        SaasStorageRequest request = new SaasStorageRequest(authority);
++        TabModelJniBridgeJni.get().startSaasStorageRequest(contents, write, snapshot, request);
++        return request.completion;
++    }
++
+     /** Returns whether the native-side pointer has been initialized. */
+     public boolean isNativeInitialized() {
+         return mNativeTabModelJniBridge != 0;
+@@ -876,6 +952,9 @@
+         @JniType("std::string")
+         String getSaasAccountState(WebContents contents);
+ 
++        void startSaasStorageRequest(WebContents contents, boolean write,
++                @JniType("std::string") String snapshot, Object request);
++
+         long init(
+                 TabModelJniBridge self,
+                 @JniType("Profile*") Profile profile,
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -17,6 +17,7 @@
+ #include "base/android/jni_weak_ref.h"
+ #include "base/android/token_android.h"
+ #include "base/json/json_writer.h"
++#include "base/json/json_reader.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/notimplemented.h"
+ #include "base/strings/string_split.h"
+@@ -31,6 +32,7 @@
+ #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model_observer_jni_bridge.h"
+ #include "chrome/browser/ui/android/tab_model/saas_account_environment.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_storage.h"
+ #include "chrome/browser/ui/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/common/fingerprint_saas_startup.h"
+@@ -123,6 +125,37 @@
+                          chrome::android::SaasAccountEnvironment::kPartitionDomain;
+ }
+ 
++static void JNI_TabModelJniBridge_StartSaasStorageRequest(
++    JNIEnv* env, const JavaParamRef<jobject>& java_contents, bool write,
++    const std::string& snapshot, const JavaParamRef<jobject>& java_request) {
++  base::android::ScopedJavaGlobalRef<jobject> request(java_request);
++  auto authority = base::BindRepeating(
++      [](const base::android::ScopedJavaGlobalRef<jobject>& request) {
++        return Java_TabModelJniBridge_isSaasStorageRequestActive(AttachCurrentThread(), request);
++      }, request);
++  auto complete = base::BindOnce(
++      [](base::android::ScopedJavaGlobalRef<jobject> request, base::Value::Dict reply) {
++        Java_TabModelJniBridge_completeSaasStorageRequest(
++            AttachCurrentThread(), request, base::WriteJson(reply).value_or(
++                "{\"ok\":false,\"error\":\"原生存储响应无效\"}"));
++      }, request);
++  auto* contents = WebContents::FromJavaWebContents(java_contents);
++  auto parsed = snapshot.size() <= 14 * 1024 * 1024 ?
++      base::JSONReader::ReadDict(snapshot, base::JSON_PARSE_RFC) : std::nullopt;
++  if (!parsed) {
++    base::Value::Dict error; error.Set("ok", false); error.Set("error", "存储快照格式或大小无效");
++    std::move(complete).Run(std::move(error));
++    return;
++  }
++  if (!write) {
++    chrome::android::SaasAccountStorage::Read(
++        contents, *parsed, std::move(authority), std::move(complete));
++    return;
++  }
++  chrome::android::SaasAccountStorage::Write(
++      contents, *parsed, std::move(authority), std::move(complete));
++}
++
+ static std::vector<std::string>
+ JNI_TabModelJniBridge_GetFingerprintSaasAllowedOrigins(JNIEnv* env) {
+   auto origins = base::SplitString(BUILDFLAG(FINGERPRINT_SAAS_ALLOWED_ORIGINS),
+--- a/chrome/browser/ui/browser_tab_strip_model_delegate.cc
++++ b/chrome/browser/ui/browser_tab_strip_model_delegate.cc
+@@ -99,7 +99,7 @@
+ constexpr char16_t kLocalStorageSnapshotScript[] =
+     u"(() => {"
+     u"  const readStorage = storage => {"
+-    u"    const snapshot = {};"
++    u"    const snapshot = Object.create(null);"
+     u"    for (let index = 0; index < storage.length; ++index) {"
+     u"      const key = storage.key(index);"
+     u"      if (key !== null) snapshot[key] = storage.getItem(key);"
+@@ -1178,7 +1178,8 @@
+ 
+     net::CookieInclusionStatus status;
+     auto canonical_cookie = net::CanonicalCookie::CreateSanitizedCookie(
+-        source_url, *name, *cookie_value, *domain, *path, creation_time,
++        source_url, *name, *cookie_value,
++        domain->front() == '.' ? *domain : std::string(), *path, creation_time,
+         expiry_time, last_access_time, *secure, *http_only,
+         static_cast<net::CookieSameSite>(same_site_value),
+         static_cast<net::CookiePriority>(priority_value),
+@@ -1239,9 +1240,11 @@
+ 
+   if (*sync_local_storage || *sync_session_storage) {
+     std::string storage_script = "(() => {";
+-    storage_script += "const snapshot = " + local_storage_json + ";";
++    storage_script += "const snapshot = JSON.parse(" +
++        base::WriteJson(base::Value(local_storage_json)).value_or("\"{}\"") + ");";
+     storage_script +=
+-        "const sessionSnapshot = " + session_storage_json + ";";
++        "const sessionSnapshot = JSON.parse(" +
++        base::WriteJson(base::Value(session_storage_json)).value_or("\"{}\"") + ");";
+     if (*sync_local_storage) {
+       storage_script += "localStorage.clear();";
+       storage_script +=

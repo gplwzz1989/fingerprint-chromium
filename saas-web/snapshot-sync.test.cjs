@@ -160,3 +160,30 @@ test('恢复读取 Tab 期间会话变化后不能写入本地或创建新 Tab',
   await assert.rejects(controller.restore({account_id: 'test-account'}), /操作已停止/);
   assert.equal(writes, 0);
 });
+
+test('原生读取使用本次选项，读取期间修改选项不会扩大云端同步范围', async () => {
+  // 仅注入接口边界时机；使用真实快照加密，不替代生产存储或服务端。
+  const key = await sync.passwordKey('selection-during-read-test');
+  const options = {...sync.defaults, local_storage: false, session_storage: false,
+    fingerprint: false, proxy: false, page: false};
+  let requested, uploaded;
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => options,
+    bridge: {tabs: {list: async () => [{id: 'test-tab', account_id: 'test-account'}]},
+      storage: {getSnapshot: async (_id, selection) => {
+        requested = {...selection};
+        options.local_storage = true;
+        return fixture();
+      }}},
+    request: async (_path, request = {}) => {
+      if (request.method === 'POST') return {lease_id: 'test-lease'};
+      if (request.method === 'PUT') { uploaded = request.body.envelope; return {revision: 1}; }
+      return null;
+    }});
+  await controller.upload({account_id: 'test-account', revision: 0});
+  const saved = await sync.decrypt(key, 'test-account', uploaded);
+  assert.equal(requested.local_storage, false);
+  assert.equal(saved.sync_options.local_storage, false);
+  assert.deepEqual(saved.local_storage, {});
+  assert.equal(saved.storage_url, undefined);
+});

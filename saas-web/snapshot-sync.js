@@ -268,9 +268,10 @@
           const tab = (await tabs()).find((value) => value.account_id === account.account_id);
           checkContext(key, session);
           if (!tab) fail('请先打开该账号的隔离 Tab');
-          const raw = await bridge.storage.getSnapshot(tab.id);
+          const requested = optionsFor({sync_options: getOptions()});
+          const raw = await bridge.storage.getSnapshot(tab.id, requested);
           checkContext(key, session);
-          const snapshot = select(raw, account.account_id, getOptions());
+          const snapshot = select(raw, account.account_id, requested);
           return save(account, snapshot, key, session, account.revision);
         });
       },
