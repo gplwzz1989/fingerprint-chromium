@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" role="img" aria-labelledby="title description">
+  <title id="title">指纹云控桌面账号工作台高保真设计稿</title>
+  <desc id="description">shadcn 风格桌面设计，展示尚未选择工作区的初始状态，不含虚构账号或业务指标。</desc>
+  <defs>
+    <style>
+      text{font-family:"Geist","Noto Sans SC","Microsoft YaHei",sans-serif;fill:#18181b;font-size:14px} .muted{fill:#71717a}.small{font-size:12px}.label{font-size:13px;font-weight:600}.heading{font-size:24px;font-weight:650}.section-title{font-size:18px;font-weight:600}.metric-value{font-size:26px;font-weight:600}.white{fill:#fff}.line{stroke:#e4e4e7;stroke-width:1}.icon{stroke:#52525b;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+    </style>
+  </defs>
+  <rect width="1440" height="960" fill="#ffffff"/>
+  <rect width="224" height="960" fill="#fafafa"/>
+  <path d="M224 0V960" class="line"/>
+  <rect x="20" y="22" width="32" height="32" rx="8" fill="#18181b"/>
+  <path d="M29 46V34M36 46V29M43 46V37" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <text x="64" y="44" font-weight="700">指纹云控</text>
+  <rect x="16" y="80" width="192" height="42" rx="7" fill="#fff" stroke="#e4e4e7"/>
+  <rect x="28" y="93" width="15" height="15" rx="3" class="icon"/>
+  <text x="53" y="106" class="label">选择工作区</text><path d="m186 98 4 4 4-4" class="icon"/>
+  <text x="28" y="157" class="muted small">工作台</text>
+  <rect x="12" y="173" width="200" height="40" rx="6" fill="#eaeaec"/>
+  <rect x="28" y="186" width="16" height="14" rx="2" class="icon"/>
+  <text x="56" y="199" class="label">账号环境</text>
+  <path d="M29 233h15v12H29zM33 249h8" class="icon"/>
+  <text x="56" y="244" class="muted">运行中的环境</text>
+  <path d="M30 281a7 7 0 0 1 12-4m0 0v-4m0 4h-4m5 5a7 7 0 0 1-12 4m0 0v4m0-4h4" class="icon"/>
+  <text x="56" y="288" class="muted">环境同步</text>
+  <path d="M30 321h12v13H30zM26 327h4m12 0h4" class="icon"/>
+  <text x="56" y="332" class="muted">代理与连接</text>
+  <text x="28" y="390" class="muted small">团队管理</text>
+  <circle cx="34" cy="423" r="4" class="icon"/><path d="M27 436c0-8 14-8 14 0m0-14c8-3 10 6 7 7" class="icon"/>
+  <text x="56" y="434" class="muted">成员与权限</text>
+  <path d="m28 467 8-4 8 4v8c0 5-8 8-8 8s-8-3-8-8z" class="icon"/>
+  <text x="56" y="478" class="muted">设备与安全</text>
+  <path d="M29 507h13v18H29zM33 512h5m-5 5h5" class="icon"/>
+  <text x="56" y="522" class="muted">审计日志</text>
+  <path d="M16 812h192" class="line"/>
+  <circle cx="31" cy="841" r="4" fill="#a1a1aa"/><text x="44" y="846" class="muted small">本机浏览器未连接</text>
+  <rect x="20" y="881" width="32" height="32" rx="16" fill="#f0f0f2" stroke="#dedee2"/>
+  <circle cx="36" cy="893" r="4" class="icon"/><path d="M29 904c0-8 14-8 14 0" class="icon"/>
+  <text x="63" y="902" class="label">个人设置</text><path d="m187 893 4 4-4 4" class="icon"/>
+  <path d="M224 68h1216" class="line"/>
+  <path d="M248 25h15v17h-15m5-17v17" class="icon"/>
+  <text x="286" y="41" class="muted">工作区</text><text x="344" y="41" class="muted">/</text><text x="363" y="41" class="label">账号环境</text>
+  <rect x="1273" y="19" width="135" height="30" rx="6" fill="#fff" stroke="#e4e4e7"/>
+  <circle cx="1288" cy="34" r="3" fill="#a1a1aa"/><text x="1298" y="39" class="muted small">客户端待连接</text>
+  <text x="256" y="123" class="heading">账号环境</text>
+  <text x="256" y="149" class="muted">管理独立的账号环境，在同一窗口中打开并跨设备同步。</text>
+  <rect x="1296" y="103" width="112" height="36" rx="6" fill="#f4f4f5" stroke="#e4e4e7"/>
+  <text x="1313" y="126" class="muted small">＋ 创建账号</text>
+  <rect x="256" y="177" width="1152" height="52" rx="7" fill="#fafafa" stroke="#e4e4e7"/>
+  <circle cx="280" cy="203" r="8" class="icon"/><path d="M280 200v7m0-10v1" class="icon"/>
+  <text x="302" y="208" class="label">选择工作区后，查看并管理团队可访问的账号环境。</text>
+  <text x="1294" y="208" class="muted small">选择工作区 →</text>
+  <rect x="256" y="253" width="360" height="98" rx="8" fill="#fff" stroke="#e4e4e7"/>
+  <text x="276" y="281" class="muted small">可访问账号</text><text x="276" y="320" class="metric-value">—</text><text x="313" y="320" class="muted small">选择工作区后读取</text>
+  <rect x="636" y="253" width="360" height="98" rx="8" fill="#fff" stroke="#e4e4e7"/>
+  <text x="656" y="281" class="muted small">运行中的环境</text><text x="656" y="320" class="metric-value">—</text><text x="693" y="320" class="muted small">连接客户端后读取</text>
+  <rect x="1016" y="253" width="392" height="98" rx="8" fill="#fff" stroke="#e4e4e7"/>
+  <text x="1036" y="281" class="muted small">环境同步</text><text x="1036" y="318" class="section-title">等待工作区</text><text x="1172" y="318" class="muted small">按账号保存加密环境</text>
+  <rect x="256" y="375" width="1152" height="449" rx="8" fill="#fff" stroke="#e4e4e7"/>
+  <rect x="272" y="391" width="298" height="36" rx="6" fill="#fff" stroke="#e4e4e7"/>
+  <circle cx="289" cy="407" r="5" class="icon"/><path d="m293 411 4 4" class="icon"/>
+  <text x="308" y="414" class="muted small">搜索账号名称、标识或标签</text>
+  <rect x="580" y="391" width="93" height="36" rx="6" fill="#fff" stroke="#e4e4e7"/><text x="595" y="414" class="muted small">筛选条件</text><path d="m657 405-4 5-4-5" class="icon"/>
+  <text x="1304" y="414" class="muted small">刷新列表 ↻</text>
+  <path d="M256 443h1152" class="line"/><rect x="257" y="444" width="1150" height="43" fill="#fafafa"/>
+  <rect x="276" y="458" width="14" height="14" rx="3" fill="#fff" stroke="#d4d4d8"/>
+  <text x="308" y="470" class="muted small">账号环境</text><text x="615" y="470" class="muted small">标签</text><text x="780" y="470" class="muted small">运行状态</text><text x="948" y="470" class="muted small">同步状态</text><text x="1132" y="470" class="muted small">权限</text><text x="1320" y="470" class="muted small">操作</text>
+  <path d="M256 488h1152" class="line"/>
+  <rect x="806" y="549" width="52" height="52" rx="12" fill="#fafafa" stroke="#e4e4e7"/>
+  <path d="M819 563h26v24h-26zM819 569h26m-19-6v6" class="icon"/>
+  <text x="832" y="634" text-anchor="middle" class="section-title">先选择一个工作区</text>
+  <text x="832" y="662" text-anchor="middle" class="muted">账号、成员权限和环境同步将在所选工作区内管理。</text>
+  <rect x="766" y="689" width="132" height="36" rx="6" fill="#18181b"/>
+  <text x="832" y="712" text-anchor="middle" class="white label">创建工作区</text>
+  <text x="832" y="757" text-anchor="middle" class="muted small">已有团队？使用邀请令牌加入工作区</text>
+  <path d="M256 781h1152" class="line"/><text x="276" y="808" class="muted small">尚未读取账号列表</text><text x="1261" y="808" class="muted small">按工作区加载</text>
+  <rect x="256" y="844" width="1152" height="61" rx="8" fill="#fafafa" stroke="#e4e4e7"/>
+  <text x="276" y="871" class="label">环境同步</text><text x="276" y="892" class="muted small">选择需要同步的数据类别；加密密码仅由您保管。</text>
+  <rect x="1281" y="858" width="111" height="34" rx="6" fill="#fff" stroke="#e4e4e7"/><text x="1299" y="880" class="muted small">同步设置 →</text>
+  <text x="256" y="942" class="muted small">桌面高保真设计稿 · 初始空状态 · 静态设计，尚未替换生产页面</text>
+</svg>
