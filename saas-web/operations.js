@@ -65,7 +65,9 @@
     if (!conflict) return;
     conflictAccount = account;
     find('snapshot-conflict-title').textContent = `${account.name} · 同步冲突`;
-    find('snapshot-conflict-detail').textContent = `云端版本已变为 ${conflict.revision ?? '新版本'}，本次上传尚未写入。请选择处理方式。`;
+    find('snapshot-conflict-detail').textContent = '云端数据在本次上传前发生了变化。本地快照尚未写入，请先确认要保留哪一份环境。';
+    find('conflict-local-version').textContent = `本地目录版本 r${account.revision ?? '—'}`;
+    find('conflict-cloud-version').textContent = `云端当前版本 r${conflict.revision ?? '—'}`;
     find('snapshot-conflict-status').textContent = '';
     if (!find('snapshot-conflict-modal').open) find('snapshot-conflict-modal').showModal();
   }
@@ -82,7 +84,10 @@
     } catch (error) {
       const conflict = controller.getConflict(account.account_id);
       find('snapshot-conflict-status').textContent = context.userMessage(error);
-      if (conflict) find('snapshot-conflict-detail').textContent = `当前云端版本 ${conflict.revision ?? '已变化'}，请重新选择处理方式。`;
+      if (conflict) {
+        find('snapshot-conflict-detail').textContent = '云端版本再次变化，本次处理没有写入。请重新确认版本后再操作。';
+        find('conflict-cloud-version').textContent = `云端当前版本 r${conflict.revision ?? '—'}`;
+      }
     } finally {
       for (const id of ['conflict-keep-cloud', 'conflict-merge', 'conflict-overwrite']) find(id).disabled = false;
     }

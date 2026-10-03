@@ -229,6 +229,18 @@ button:disabled { opacity: .45; cursor: wait; }
 .modal-actions { display: flex; margin-top: 10px; gap: 9px; justify-content: flex-end; }
 .modal-actions .primary-button { width: auto; margin-top: 0; }
 .modal-actions .secondary-button { min-width: 68px; }
+.conflict-version-grid { display: grid; margin: 18px 0; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.conflict-version-grid > div { padding: 13px 14px; background: var(--surface-hover); border: 1px solid var(--line); border-radius: 7px; }
+.conflict-version-grid span, .conflict-version-grid strong { display: block; }
+.conflict-version-grid span { color: var(--text-faint); font-size: 11px; }
+.conflict-version-grid strong { margin-top: 6px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; }
+.conflict-choice-grid { display: grid; margin-top: 18px; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.conflict-choice { display: flex; min-height: 112px; padding: 14px; flex-direction: column; align-items: flex-start; gap: 8px; color: var(--text); background: #fff; border: 1px solid var(--line-strong); border-radius: 7px; text-align: left; }
+.conflict-choice:hover { background: var(--surface-hover); border-color: var(--amber); }
+.conflict-choice strong { font-size: 12px; }
+.conflict-choice span { color: var(--text-soft); font-size: 11px; line-height: 1.55; }
+.conflict-choice.is-danger { border-color: rgba(220, 38, 38, .35); }
+.conflict-choice.is-danger:hover { border-color: var(--danger); }
 .toast { position: fixed; right: 28px; bottom: 28px; max-width: 360px; padding: 12px 15px; color: #fff; background: #18181b; border: 1px solid #27272a; border-left: 2px solid var(--amber); border-radius: 5px; box-shadow: var(--shadow); font-size: 11px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .18s, transform .18s; z-index: 5; }
 .toast.is-visible { opacity: 1; transform: translateY(0); }
 .toast.is-error { border-left-color: var(--danger); }
@@ -268,6 +280,7 @@ button:disabled { opacity: .45; cursor: wait; }
   .account-selection-toolbar { align-items: flex-start; flex-direction: column; }
   .account-selection-toolbar .table-actions { width: 100%; }
   .account-selection-toolbar .secondary-button { flex: 1; }
+  .conflict-version-grid, .conflict-choice-grid { grid-template-columns: 1fr; }
   .account-table-toolbar { align-items: stretch; flex-direction: column; }
   .search-field, .table-filter { width: 100%; }
 }

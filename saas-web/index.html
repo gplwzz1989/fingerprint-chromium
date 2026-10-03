@@ -310,9 +310,10 @@
     <dialog class="modal wide-modal" id="snapshot-conflict-modal"><div class="modal-card">
       <h2 id="snapshot-conflict-title">账号环境同步冲突</h2>
       <p class="panel-copy" id="snapshot-conflict-detail"></p>
+      <div class="conflict-version-grid"><div><span>本地目录</span><strong id="conflict-local-version">—</strong></div><div><span>云端数据</span><strong id="conflict-cloud-version">—</strong></div></div>
       <p class="panel-copy">合并会保留两端数据，同一 Cookie 身份或存储键以本地为准；不同网页来源不能合并。覆盖会使用本地待同步快照替换云端内容。提交时仍会检查最新版本。</p>
       <div class="form-status" id="snapshot-conflict-status" role="status"></div>
-      <div class="modal-actions"><button class="secondary-button" id="conflict-keep-cloud" type="button">保留云端</button><button class="secondary-button" id="conflict-merge" type="button">合并后同步</button><button class="primary-button" id="conflict-overwrite" type="button">明确覆盖云端</button></div>
+      <div class="conflict-choice-grid"><button class="conflict-choice" id="conflict-keep-cloud" type="button"><strong>保留云端</strong><span>放弃本次本地上传，当前云端版本不变。</span></button><button class="conflict-choice" id="conflict-merge" type="button"><strong>合并后同步</strong><span>合并 Cookie 和网页存储，冲突键以本地为准。</span></button><button class="conflict-choice is-danger" id="conflict-overwrite" type="button"><strong>明确覆盖云端</strong><span>使用本地快照替换云端环境，需确认覆盖意图。</span></button></div>
     </div></dialog>
     <script src="/bridge-contract.js"></script>
     <script src="/session-persistence.js"></script>
