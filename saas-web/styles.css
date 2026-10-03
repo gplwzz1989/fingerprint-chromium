@@ -153,6 +153,13 @@ button { cursor: pointer; }
 .compact-heading { padding-bottom: 15px; }
 .panel-heading h2, .bridge-panel h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
 .table-wrap { overflow: auto; }
+.account-table-toolbar { display: flex; padding: 14px 22px; gap: 9px; align-items: center; border-bottom: 1px solid var(--line); }
+.search-field { display: flex; width: min(340px, 100%); height: 36px; padding: 0 10px; gap: 8px; align-items: center; color: var(--text-faint); background: #fff; border: 1px solid var(--line-strong); border-radius: 6px; }
+.search-field:focus-within { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(24, 24, 27, .08); }
+.search-symbol { font-size: 18px; line-height: 1; }
+.search-field input { width: 100%; min-width: 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 12px; }
+.search-field input::placeholder { color: var(--text-faint); }
+.table-filter { height: 36px; padding: 0 30px 0 10px; color: var(--text-soft); background: #fff; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; }
 .account-table { width: 100%; border-collapse: collapse; text-align: left; }
 .account-table th { padding: 10px 22px; color: var(--text-faint); background: rgba(0, 0, 0, .12); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .account-table td { padding: 16px 22px; color: var(--text-soft); border-bottom: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
@@ -261,6 +268,8 @@ button:disabled { opacity: .45; cursor: wait; }
   .account-selection-toolbar { align-items: flex-start; flex-direction: column; }
   .account-selection-toolbar .table-actions { width: 100%; }
   .account-selection-toolbar .secondary-button { flex: 1; }
+  .account-table-toolbar { align-items: stretch; flex-direction: column; }
+  .search-field, .table-filter { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

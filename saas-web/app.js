@@ -50,6 +50,10 @@
     userName: document.querySelector('#user-name'),
     accountTableBody: document.querySelector('#account-table-body'),
     accountEmpty: document.querySelector('#account-empty'),
+    accountEmptyTitle: document.querySelector('#account-empty-title'),
+    accountEmptyCopy: document.querySelector('#account-empty-copy'),
+    accountSearch: document.querySelector('#account-search'),
+    accountFilter: document.querySelector('#account-filter'),
     metricAccounts: document.querySelector('#metric-accounts'),
     metricRevisions: document.querySelector('#metric-revisions'),
     metricBridge: document.querySelector('#metric-bridge'),
@@ -373,12 +377,18 @@
   }
 
   function renderAccounts() {
+    const visibleAccounts = getVisibleAccounts();
     elements.accountTableBody.replaceChildren();
-    elements.accountEmpty.hidden = state.accounts.length > 0;
+    elements.accountEmpty.hidden = visibleAccounts.length > 0;
+    const hasFilter = visibleAccounts.length !== state.accounts.length;
+    elements.accountEmptyTitle.textContent = hasFilter ? '没有符合条件的账号' : '当前工作区还没有账号';
+    elements.accountEmptyCopy.textContent = hasFilter
+      ? '请调整搜索或筛选条件。账号目录保持真实服务端数据，不会填充演示内容。'
+      : '添加真实账号目录后，才能从浏览器创建隔离 Tab。这里不会填充演示数据。';
     elements.metricAccounts.textContent = String(state.accounts.length);
     const revisionTotal = state.accounts.reduce((total, account) => total + Number(account.revision || 0), 0);
     elements.metricRevisions.textContent = state.accounts.length ? String(revisionTotal) : '—';
-    for (const account of state.accounts) {
+    for (const account of visibleAccounts) {
       const row = document.createElement('tr');
       const nameCell = document.createElement('td');
       const nameWrap = document.createElement('div');
@@ -438,11 +448,24 @@
       row.append(nameCell, labelsCell, revisionCell, dateCell, actionCell);
       elements.accountTableBody.append(row);
     }
-    renderAccountSelection();
+    renderAccountSelection(visibleAccounts);
   }
 
-  function renderAccountSelection() {
-    const total = state.accounts.length;
+  function getVisibleAccounts() {
+    const query = String(elements.accountSearch?.value || '').trim().toLocaleLowerCase();
+    const filter = elements.accountFilter?.value || 'all';
+    return state.accounts.filter((account) => {
+      const haystack = [account.name, account.account_id, ...(Array.isArray(account.labels) ? account.labels : [])]
+        .filter(Boolean).join(' ').toLocaleLowerCase();
+      const matchesQuery = !query || haystack.includes(query);
+      const matchesFilter = filter === 'all' || (filter === 'editable' && account.role !== 'viewer') ||
+        (filter === 'viewer' && account.role === 'viewer');
+      return matchesQuery && matchesFilter;
+    });
+  }
+
+  function renderAccountSelection(visibleAccounts = getVisibleAccounts()) {
+    const total = visibleAccounts.length;
     const selected = state.selectedAccountIds.size;
     const toolbar = document.querySelector('#account-selection-toolbar');
     const selectAll = document.querySelector('#account-select-all');
@@ -450,8 +473,9 @@
     if (!toolbar || !selectAll || !count) return;
     toolbar.hidden = selected === 0;
     count.textContent = `已选择 ${selected} 个账号`;
-    selectAll.checked = total > 0 && selected === total;
-    selectAll.indeterminate = selected > 0 && selected < total;
+    const visibleSelected = visibleAccounts.filter((account) => state.selectedAccountIds.has(account.account_id)).length;
+    selectAll.checked = total > 0 && visibleSelected === total;
+    selectAll.indeterminate = visibleSelected > 0 && visibleSelected < total;
   }
 
   function renderBridge() {
@@ -593,10 +617,13 @@
     }
   });
   document.querySelector('#account-select-all').addEventListener('change', (event) => {
-    if (event.currentTarget.checked) for (const account of state.accounts) state.selectedAccountIds.add(account.account_id);
-    else state.selectedAccountIds.clear();
+    const visibleAccounts = getVisibleAccounts();
+    if (event.currentTarget.checked) for (const account of visibleAccounts) state.selectedAccountIds.add(account.account_id);
+    else for (const account of visibleAccounts) state.selectedAccountIds.delete(account.account_id);
     renderAccounts();
   });
+  elements.accountSearch.addEventListener('input', () => renderAccounts());
+  elements.accountFilter.addEventListener('change', () => renderAccounts());
   document.querySelector('#selected-sync-button').addEventListener('click', async () => {
     try { await global.saasConsoleOperations.runBatch(false, [...state.selectedAccountIds]); }
     catch (error) { showToast(userMessage(error), true); }

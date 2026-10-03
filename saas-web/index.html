@@ -151,6 +151,10 @@
                 <div class="table-actions"><button class="secondary-button" id="selected-sync-button" type="button">批量同步</button><button class="secondary-button" id="selected-restore-button" type="button">批量恢复</button></div>
               </div>
               <div class="table-wrap">
+                <div class="account-table-toolbar">
+                  <label class="search-field" for="account-search"><span class="search-symbol">⌕</span><span class="sr-only">搜索账号</span><input id="account-search" type="search" placeholder="搜索账号名称、标识或标签" autocomplete="off"></label>
+                  <label class="sr-only" for="account-filter">账号权限筛选</label><select class="table-filter" id="account-filter"><option value="all">全部账号</option><option value="editable">可编辑账号</option><option value="viewer">只读账号</option></select>
+                </div>
                 <table class="account-table">
                   <thead>
                     <tr><th><input id="account-select-all" type="checkbox" aria-label="选择全部账号"> 账号</th><th>标签</th><th>修订</th><th>更新时间</th><th><span class="sr-only">操作</span></th></tr>
@@ -159,8 +163,8 @@
                 </table>
                 <div class="empty-state" id="account-empty" hidden>
                   <div class="empty-glyph">∅</div>
-                  <h3>当前工作区还没有账号</h3>
-                  <p>添加真实账号目录后，才能从浏览器创建隔离 Tab。这里不会填充演示数据。</p>
+                  <h3 id="account-empty-title">当前工作区还没有账号</h3>
+                  <p id="account-empty-copy">添加真实账号目录后，才能从浏览器创建隔离 Tab。这里不会填充演示数据。</p>
                   <button class="secondary-button" id="empty-new-account-button" type="button">添加第一个账号</button>
                 </div>
               </div>
