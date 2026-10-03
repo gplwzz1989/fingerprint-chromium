@@ -6,7 +6,7 @@
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
 - `SnapshotCrypto.java`、`SnapshotJson.java` 与 `JvmSnapshotCryptoAdapter.kt`：可独立编译的真实快照加密模块，使用 Java 标准 JCA/JCE，无新增运行时依赖。
-- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹/原生 HTTP；宿主绑定真实 SAF 适配器后增加 `files=true`，目录访问仍需系统授权。独立路由未绑定平台时仅声明 `crypto=true`；尚未完成完整 Android Java/C++ 编译和设备验收，不能将源码挂接当作已安装可用的 Android 浏览器。
+- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹/原生 HTTP；宿主绑定真实 SAF 和 Keystore 适配器后增加 `files/secureStorage=true`，目录访问仍需系统授权。独立路由未绑定平台时仅声明 `crypto=true`；尚未完成完整 Android Java/C++ 编译和设备验收，不能将源码挂接当作已安装可用的 Android 浏览器。
 - `SaasOriginPolicy.java` 使用可信宿主提供的完整 Origin 白名单，默认 URL 不在模块内硬编码；Android JNI 从现有 C++ 常量和编译参数读取配置，默认来源随该常量更新。
 - 文件能力必须使用 Storage Access Framework 返回的授权 URI；禁止把 Windows 路径模型带入 Android。
 - 会话密钥使用 Android Keystore；应用生命周期恢复必须覆盖进程被系统回收、断网和权限撤销。
@@ -37,7 +37,7 @@
 
 新消息宿主已编码校验真实来源、请求类型及消息大小，路由 `crypto.encryptSnapshot` 与 `crypto.decryptSnapshot`，拒绝非整数或越界 `iterations`；使用有界后台执行器，不在 Android 主线程派生密钥。Kotlin 适配器的 `suspend` 方法本身不切换线程。页面登录和工作区权限仍由独立 SaaS 校验，不把业务逻辑复制进 Chromium。
 
-本模块已接入原生 Tab/存储和 SAF 文件源码，但尚未完成平台验收；Keystore 会话、完整 SDK/NDK 构建和 APK 尚未提供。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。
+本模块已接入原生 Tab/存储、SAF 文件和 Keystore 通用安全存储源码，但尚未完成平台验收；完整 SDK/NDK 构建和 APK 尚未提供。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。按本轮用户要求继续编码，整体验收暂缓，不启动整体构建或设备联调。
 
 ## 独立验证
 
@@ -77,13 +77,23 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 正常使用链路已在 `managed-tab-android-tab-operations.patch` 接入 `tabs.list/create/activate/navigate/close`。使用真实 TabModel、TabCreator 和 TabRemover，在 UI 线程重新校验消息端口、文档代次、真实主框架 Origin 与等待期限；控制台和普通标签不能作为账号目标，冻结/归档环境参与重复账号检查。创建先建立固定分区并核对 WebContents 所有者，再加载网页；创建失败清理实际所有者，不退回普通标签。
 
-平台实现成功绑定时提供 `tabs/storage/fingerprint/http/crypto`；宿主同时绑定 SAF 适配器后提供 `files`，但并不预授予目录访问权限。未绑定的独立路由仍只提供 `crypto`。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
+平台实现成功绑定时提供 `tabs/storage/fingerprint/http/crypto`；宿主同时绑定 SAF 和 Keystore 适配器后提供 `files/secureStorage`，但并不预授予目录访问权限。未绑定的独立路由仍只提供 `crypto`。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
 
 本轮独立复测 474 项通过，包含 33 项消息路由测试；其中 13 项仅为分发边界探针，不模拟 Android 标签。三个平台 Java 文件解析、两个 JNI 生成、环境/状态 JSON 局部 C++ 检查和新补丁反向检查通过。未完成 Android 类型检查、完整编译或设备运行；原生参数测试对象/链接成功但加载入口错误仍未解决，不计为运行通过。
 
 验证边界：实际原生参数函数测试源码保存在 `tests/account-environment-validation.cc`，可复用 `utils/check_cpp_syntax.py` 的现有编译参数。头文件、共享浏览器代码和测试源码语法检查通过；测试对象编译和链接通过，但测试程序启动被系统拒绝，不能宣称参数运行测试或 Android 分区运行验收通过。新增 JNI 生成和源码补丁反向检查通过；没有全量构建或修改系统策略。
 
 ## 完整构建限制
+
+### Keystore 安全存储编码进展
+
+`SaasSecureStorage.java` 提供按真实 Origin 隔离的 `secureStorage.get/set/remove`，只识别键名和不透明文本，不识别登录、令牌、工作区或其他 SaaS 业务。AES-256 密钥由真实 AndroidKeyStore 生成和持有，不提供导出接口；`SaasSecureValue.java` 使用随机 IV 的 AES-GCM，认证数据绑定版本、Origin 和键名，密文持久化到应用私有 SharedPreferences。密文和索引不保存来源/值明文，单值 UTF-8 上限 16 KiB，来源最多 16 条、应用最多 256 条。
+
+全应用单后台线程与 4 项等待队列，串行创建密钥和提交存储；不在 UI 线程执行 Keystore 密码操作。导航代次、销毁和 15 秒宿主期限持续撤权，取消后的后续步骤不执行，不能撤回已经发出的系统操作；`remove` 只清除当前来源的逻辑条目，不删除文件或共享密钥。损坏密文、设备密钥失效和容量超限返回中文错误，不降级明文。是否具有硬件保护由真实设备决定；同键旧密文重放与服务端会话有效性不由存储层决定。
+
+独立 Web 的 `session-persistence.js` 保存刷新令牌、认证时捕获的设备标识和刷新服务地址；不保存访问令牌、用户信息或快照密码。原生能力启用后清除旧 SessionStorage 会话，保护模式标记令后续页面在端口尚未重连时也不写回明文。退出标志不含秘密，原生清除失败时仍禁止自动恢复；串行保存/清除与操作代次防止旧写入、旧读取和旧用户刷新请求恢复已退出的会话。恢复必须经服务端刷新验证，断网保留凭据，401 清除当前会话。未具备安全存储的普通浏览器和桌面过渡端保留原有 SessionStorage 行为，不能称为 Keystore 保护。
+
+本轮 JVM/协议 667 项通过（真实安全值加密 79、消息路由 90），网页 32 项通过，其中 17 项验证会话模块、实际 app.js 会话函数和登录表单快照；平台边界探针只存在于测试。两个宿主 Java 文件仅通过语法解析，Android 类型检查、系统 Keystore、SharedPreferences 磁盘提交和平台效果未验收。补丁保存到 `managed-tab-android-secure-storage.patch`，仅新增两个 Android 源清单项并检查格式，不执行 GN 重生成；没有整体验收或全量编译。
 
 ### 原生 HTTP 编码进展
 

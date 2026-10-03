@@ -78,6 +78,7 @@
       tabs: ['list', 'create', 'activate', 'navigate', 'close'],
       storage: ['getSnapshot', 'writeSnapshot'], fingerprint: ['get', 'set'],
       files: ['list', 'read', 'write'], http: ['request'], crypto: ['encryptSnapshot', 'decryptSnapshot'],
+      secureStorage: ['get', 'set', 'remove'],
     };
     nativePortBridge = {version: '1.0', origin, getCapabilities: () => request('getCapabilities')};
     for (const [group, names] of Object.entries(methods)) {
@@ -137,6 +138,11 @@
       version: '1.0',
       origin: global.location.origin,
       getCapabilities() { return request('getCapabilities', {}); },
+      secureStorage: {
+        get(options) { return request('secureStorage.get', options); },
+        set(options) { return request('secureStorage.set', options); },
+        remove(options) { return request('secureStorage.remove', options); },
+      },
       tabs: {
         list() { return request('tabs.list', {}); },
         create(options) { return request('tabs.create', options); },
@@ -200,6 +206,7 @@
     ['files', '本地文件'],
     ['http', '原生 HTTP'],
     ['crypto', '原生快照加密'],
+    ['secureStorage', '安全存储'],
   ];
 
   const client = Object.freeze({
@@ -266,6 +273,11 @@
     crypto: {
       encryptSnapshot(options) { return call(['crypto', 'encryptSnapshot'], options); },
       decryptSnapshot(options) { return call(['crypto', 'decryptSnapshot'], options); },
+    },
+    secureStorage: {
+      get(options) { return call(['secureStorage', 'get'], options); },
+      set(options) { return call(['secureStorage', 'set'], options); },
+      remove(options) { return call(['secureStorage', 'remove'], options); },
     },
   });
 

@@ -28,7 +28,8 @@ object SnapshotCryptoAdapterSelfTest {
         check(!options.toString().contains(password) && !decryptOptions.toString().contains(password)) {
             "参数显示泄露密码"
         }
-        check(!SaasBridgeCapabilities(false, false, false, false, false).crypto) { "未绑定消息通道却启用能力" }
+        val defaults = SaasBridgeCapabilities(false, false, false, false, false)
+        check(!defaults.crypto && !defaults.secureStorage) { "未绑定消息通道却启用能力" }
         reject { invoke { adapter.decryptSnapshot(decryptOptions.copy(accountId = "另一个账号")) } }
         reject { invoke { adapter.decryptSnapshot(decryptOptions.copy(password = password + "错误")) } }
         reject { invoke { adapter.encryptSnapshot(options.copy(password = "")) } }

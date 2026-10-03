@@ -54,3 +54,19 @@ test('目录选择预留等待时间，文件回复保留真实备份路径', as
     data: {type: 'fingerprint-saas-bridge:response', requestId: sent.message.requestId, ok: true, result: reply}});
   assert.deepEqual(JSON.parse(JSON.stringify(await pending)), reply);
 });
+
+test('安全存储通过原生宿主定向传输，不接受其他来源的读取回复', async () => {
+  const listeners = new Map(); let sent;
+  const parent = {postMessage: (message, origin) => { sent = {message, origin}; }};
+  const window = {parent, location: {origin: 'https://saas.example.test'}, setTimeout, clearTimeout,
+    addEventListener: (name, handler) => listeners.set(name, handler)};
+  vm.runInContext(fs.readFileSync(require.resolve('./bridge-contract.js'), 'utf8'), vm.createContext({window, URL, Event}));
+  let finished = false;
+  const pending = window.saasBridgeClient.secureStorage.get({key: 'test.value'}).then((value) => { finished = true; return value; });
+  assert.equal(sent.origin, 'chrome://fingerprint-manager'); assert.equal(sent.message.method, 'secureStorage.get');
+  const response = {type: 'fingerprint-saas-bridge:response', requestId: sent.message.requestId, ok: true, result: {value: null}};
+  listeners.get('message')({source: parent, origin: 'https://other.test', data: response});
+  await new Promise(setImmediate); assert.equal(finished, false);
+  listeners.get('message')({source: parent, origin: sent.origin, data: response});
+  assert.deepEqual(JSON.parse(JSON.stringify(await pending)), {value: null});
+});

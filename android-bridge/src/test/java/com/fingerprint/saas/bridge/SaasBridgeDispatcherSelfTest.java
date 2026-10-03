@@ -24,7 +24,7 @@ public final class SaasBridgeDispatcherSelfTest {
         check(Boolean.TRUE.equals(caps.get("ok")), "能力查询失败");
         Map<String, Object> flags = object(object(caps.get("result")).get("capabilities"));
         check(Boolean.TRUE.equals(flags.get("crypto")), "真实加密模块未声明");
-        for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) check(Boolean.FALSE.equals(flags.get(name)), "未实现能力不能声称可用");
+        for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http", "secureStorage"}) check(Boolean.FALSE.equals(flags.get(name)), "未实现能力不能声称可用");
         check(Boolean.FALSE.equals(invoke(dispatcher, "getCapabilities", new LinkedHashMap<>(), "https://other.test").get("ok")), "未授权来源获得能力");
         Map<String, Object> forged = new LinkedHashMap<>(); forged.put("origin", ORIGIN);
         check(Boolean.FALSE.equals(invoke(dispatcher, "getCapabilities", forged, "https://other.test").get("ok")), "消息自报来源绕过校验");
@@ -68,6 +68,7 @@ public final class SaasBridgeDispatcherSelfTest {
         testFingerprintRouting(dispatcher);
         testFileRouting(dispatcher);
         testHttpRouting(dispatcher);
+        testSecureRouting(dispatcher);
         System.out.println("原生消息路由自测通过：" + assertions + " 项");
     }
 
@@ -225,6 +226,27 @@ public final class SaasBridgeDispatcherSelfTest {
         request.put("method", "getCapabilities");
         Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
         check(Boolean.TRUE.equals(flags.get("http")) && Boolean.FALSE.equals(flags.get("files")), "HTTP 能力声明错误");
+    }
+    /** 仅验证安全存储分发，不把探针当作真实 Keystore 或权限验收。 */
+    private static void testSecureRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "secureStorage".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> request = decode("{\"type\":\"fingerprint-saas-bridge:request\",\"requestId\":\"secure-1\",\"args\":{\"key\":\"test.value\"}}");
+        for (String method : new String[] {"secureStorage.get", "secureStorage.set", "secureStorage.remove"}) {
+            request.put("method", method); String message = SaasBridgeDispatcher.encodeNativePayload(request);
+            check(Boolean.TRUE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")), "安全存储未路由");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN)).get("ok")), "未绑定仍执行安全存储");
+            check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "安全存储绕过来源校验");
+        }
+        check(calls[0] == 3, "拒绝的安全请求进入平台层");
+        request.put("method", "secureStorage.exportKey");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("ok")) && calls[0] == 3, "密钥导出方法未被拒绝");
+        request.put("method", "getCapabilities");
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("secureStorage")) && Boolean.FALSE.equals(flags.get("storage")), "安全值与网页存储能力混淆");
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
     private static void check(boolean value, String message) { assertions++; if (!value) throw new AssertionError(message); }

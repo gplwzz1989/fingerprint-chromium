@@ -9,6 +9,7 @@ data class SaasBridgeCapabilities(
     val files: Boolean,
     val http: Boolean,
     val crypto: Boolean = false,
+    val secureStorage: Boolean = false,
 )
 
 data class SaasBridgeDetails(
@@ -99,6 +100,13 @@ interface SaasBridgeContract {
 
     // 适配器存在不代表消息通道可用；未绑定 Chromium 时能力仍为 false。
     val crypto: Crypto? get() = null
+    val secureStorage: SecureStorage? get() = null
+
+    interface SecureStorage {
+        suspend fun get(key: String): String?
+        suspend fun set(key: String, value: String): Boolean
+        suspend fun remove(key: String): Boolean
+    }
 
     interface Crypto {
         suspend fun encryptSnapshot(options: SnapshotEncryptOptions): SaasSnapshotEnvelope

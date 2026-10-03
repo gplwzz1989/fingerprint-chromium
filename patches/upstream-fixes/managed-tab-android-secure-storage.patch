@@ -1,0 +1,333 @@
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
+@@ -122,6 +122,7 @@
+             capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
+             capabilities.put("files", backend != null && backend.supports("files"));
+             capabilities.put("http", backend != null && backend.supports("http"));
++            capabilities.put("secureStorage", backend != null && backend.supports("secureStorage"));
+             capabilities.put("crypto", true);
+             Map<String, Object> details = new LinkedHashMap<>();
+             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
+@@ -129,6 +130,10 @@
+         }
+         String accountId;
+         char[] password;
++        if ("secureStorage.get".equals(method) || "secureStorage.set".equals(method) || "secureStorage.remove".equals(method)) {
++            if (backend == null || !backend.supports("secureStorage")) throw invalid("当前客户端尚未提供安全存储能力");
++            return backend.invoke(method, args);
++        }
+         if ("http.request".equals(method)) {
+             if (backend == null || !backend.supports("http")) throw invalid("当前客户端尚未提供原生网络能力");
+             return backend.invoke(method, args);
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasSecureValue.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasSecureValue.java
+@@ -0,0 +1,112 @@
++package com.fingerprint.saas.bridge;
++
++import java.nio.ByteBuffer;
++import java.nio.charset.CodingErrorAction;
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.util.Arrays;
++import java.util.Base64;
++import java.util.Collections;
++import javax.crypto.Cipher;
++import javax.crypto.SecretKey;
++import javax.crypto.spec.GCMParameterSpec;
++
++/** 通用安全值编码；不识别登录、令牌或账号业务，平台密钥只能由原生宿主提供。 */
++public final class SaasSecureValue {
++    public static final int MAX_VALUE_BYTES = 16384;
++    public static final int MAX_ENVELOPE_CHARACTERS = 22000;
++    private SaasSecureValue() {}
++
++    public static String key(Object key) {
++        if (!(key instanceof String) || !((String) key).matches("[A-Za-z0-9._-]{1,128}")) throw error("安全存储键名无效");
++        return (String) key;
++    }
++
++    public static String value(Object value) {
++        if (!(value instanceof String) || ((String) value).length() > MAX_VALUE_BYTES) throw error("安全存储值必须为不超过 16 KiB 的文本");
++        String text = (String) value;
++        for (int i = 0; i < text.length(); i++) {
++            char c = text.charAt(i);
++            if (Character.isHighSurrogate(c)) {
++                if (++i >= text.length() || !Character.isLowSurrogate(text.charAt(i))) throw error("安全存储文本编码无效");
++            } else if (Character.isLowSurrogate(c)) throw error("安全存储文本编码无效");
++        }
++        if (text.getBytes(StandardCharsets.UTF_8).length > MAX_VALUE_BYTES) throw error("安全存储值超过 16 KiB 限制");
++        return text;
++    }
++
++    public static String originPrefix(String origin) {
++        validateOrigin(origin);
++        return digest(origin) + ".";
++    }
++
++    public static String entry(String origin, String key) { return originPrefix(origin) + digest(key(key)); }
++
++    private static void validateOrigin(String origin) {
++        try { new SaasOriginPolicy(Collections.singletonList(origin), origin + "/"); }
++        catch (RuntimeException invalid) { throw error("安全存储页面来源无效"); }
++    }
++
++    private static String digest(String value) {
++        try {
++            return Base64.getUrlEncoder().withoutPadding().encodeToString(
++                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
++        } catch (Exception invalid) { throw error("无法识别安全存储范围"); }
++    }
++
++    private static byte[] aad(String origin, String key) {
++        validateOrigin(origin);
++        return ("fingerprint-secure-value-v1\u0000" + origin + "\u0000" + key(key)).getBytes(StandardCharsets.UTF_8);
++    }
++
++    public static String encrypt(SecretKey secret, String origin, String key, String value) {
++        byte[] associated = aad(origin, key);
++        byte[] plain = value(value).getBytes(StandardCharsets.UTF_8);
++        byte[] encrypted = null;
++        try {
++            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
++            // AndroidKeyStore 自行生成随机 IV；不能向加密过程注入固定 IV。
++            cipher.init(Cipher.ENCRYPT_MODE, secret);
++            cipher.updateAAD(associated);
++            encrypted = cipher.doFinal(plain);
++            byte[] iv = cipher.getIV();
++            if (iv == null || iv.length != 12) throw error("安全存储加密参数不受支持");
++            return "1:" + Base64.getEncoder().encodeToString(iv) + ":" + Base64.getEncoder().encodeToString(encrypted);
++        } catch (SaasBridgeDispatcher.NativeRequestException invalid) { throw invalid; }
++        catch (Exception invalid) { throw error("安全存储加密失败，请检查设备密钥状态"); }
++        finally { Arrays.fill(plain, (byte) 0); Arrays.fill(associated, (byte) 0); if (encrypted != null) Arrays.fill(encrypted, (byte) 0); }
++    }
++
++    public static String decrypt(SecretKey secret, String origin, String key, String envelope) {
++        byte[] associated = aad(origin, key);
++        byte[] iv = null, encrypted = null, plain = null;
++        try {
++            if (envelope == null || envelope.length() > MAX_ENVELOPE_CHARACTERS) throw error("安全存储密文无效或过大");
++            String[] parts = envelope.split(":", -1);
++            if (parts.length != 3 || !parts[0].equals("1") || parts[1].length() != 16) throw error("安全存储密文格式不受支持");
++            iv = decode(parts[1]); encrypted = decode(parts[2]);
++            if (iv.length != 12 || encrypted.length < 16 || encrypted.length > MAX_VALUE_BYTES + 16) throw error("安全存储密文长度无效");
++            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
++            cipher.init(Cipher.DECRYPT_MODE, secret, new GCMParameterSpec(128, iv));
++            cipher.updateAAD(associated);
++            plain = cipher.doFinal(encrypted);
++            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
++                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(plain)).toString();
++        } catch (SaasBridgeDispatcher.NativeRequestException invalid) { throw invalid; }
++        catch (Exception invalid) { throw error("安全存储内容无法解密，请重新登录或写入新值"); }
++        finally {
++            Arrays.fill(associated, (byte) 0);
++            if (iv != null) Arrays.fill(iv, (byte) 0);
++            if (encrypted != null) Arrays.fill(encrypted, (byte) 0);
++            if (plain != null) Arrays.fill(plain, (byte) 0);
++        }
++    }
++
++    private static byte[] decode(String value) {
++        byte[] bytes = Base64.getDecoder().decode(value);
++        if (!Base64.getEncoder().encodeToString(bytes).equals(value)) { Arrays.fill(bytes, (byte) 0); throw error("安全存储密文编码无效"); }
++        return bytes;
++    }
++
++    private static SaasBridgeDispatcher.NativeRequestException error(String message) { return new SaasBridgeDispatcher.NativeRequestException(message); }
++}
+--- a/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
+@@ -44,6 +44,7 @@
+     private final SaasBridgeDispatcher mDispatcher;
+     private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+     private final SaasSafFiles mFiles;
++    private final SaasSecureStorage mSecureStorage;
+     private final AtomicLong mGeneration = new AtomicLong();
+     private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(
+             2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), task -> {
+@@ -67,6 +68,7 @@
+         mDispatcher = new SaasBridgeDispatcher(mPolicy);
+         mNativeBackend = nativeBackend;
+         mFiles = new SaasSafFiles(tab, ContextUtils.getApplicationContext());
++        mSecureStorage = new SaasSecureStorage(ContextUtils.getApplicationContext());
+         mWorker.allowCoreThreadTimeOut(true);
+         tab.addObserver(this);
+         bindWebContents();
+@@ -83,6 +85,7 @@
+         mDestroyed = true;
+         revoke();
+         mFiles.close();
++        mSecureStorage.close();
+         mWorker.shutdownNow();
+         if (mObserver != null) { mObserver.observe(null); mObserver = null; }
+         mTab.removeObserver(this);
+@@ -194,7 +197,7 @@
+                 String response = mDispatcher.dispatch(mMessage, mOrigin,
+                         new SaasBridgeDispatcher.NativeBackend() {
+                             @Override public boolean supports(String capability) {
+-                                return "files".equals(capability) ||
++                                return "files".equals(capability) || "secureStorage".equals(capability) ||
+                                         (mNativeBackend != null && mNativeBackend.supports(capability));
+                             }
+                             @Override public Object invoke(String method, Map<String, Object> args) {
+@@ -242,6 +245,7 @@
+                     }
+                     CompletableFuture<Object> operation;
+                     if (method.startsWith("files.")) operation = mFiles.invoke(method, args, mOrigin, authority);
++                    else if (method.startsWith("secureStorage.")) operation = mSecureStorage.invoke(method, args, mOrigin, authority);
+                     else {
+                         if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
+                         operation = mNativeBackend.invokeAsync(method, args, authority);
+@@ -275,6 +279,7 @@
+     private void revoke() {
+         mGeneration.incrementAndGet();
+         mFiles.revoke();
++        mSecureStorage.revoke();
+         Runnable queued;
+         while ((queued = mWorker.getQueue().poll()) != null) ((BridgeWork) queued).release();
+         if (mPort != null) {
+--- a/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasSecureStorage.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasSecureStorage.java
+@@ -0,0 +1,128 @@
++package org.chromium.chrome.browser.saas;
++
++import android.content.Context;
++import android.content.SharedPreferences;
++import android.security.keystore.KeyGenParameterSpec;
++import android.security.keystore.KeyProperties;
++
++import com.fingerprint.saas.bridge.SaasBridgeDispatcher;
++import com.fingerprint.saas.bridge.SaasSecureValue;
++
++import java.security.Key;
++import java.security.KeyStore;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.concurrent.ArrayBlockingQueue;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
++import javax.crypto.KeyGenerator;
++import javax.crypto.SecretKey;
++
++/** 原生通用安全存储：只保存来源隔离的密文，不承载 SaaS 用户系统。 */
++public final class SaasSecureStorage {
++    private static final String ALIAS = "fingerprint.native.secure-value.v1";
++    private static final ThreadPoolExecutor WORKER = worker();
++    private final SharedPreferences preferences;
++    private volatile boolean closed;
++
++    public SaasSecureStorage(Context context) {
++        preferences = context.getSharedPreferences("fingerprint_native_secure_values", Context.MODE_PRIVATE);
++    }
++
++    private static ThreadPoolExecutor worker() {
++        // 所有宿主串行获取/创建同一 Keystore 密钥，不能并发重建导致其他密文失效。
++        ThreadPoolExecutor result = new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS,
++                new ArrayBlockingQueue<>(4), task -> {
++                    Thread thread = new Thread(task, "SaasSecureStorage"); thread.setDaemon(true); return thread;
++                });
++        result.allowCoreThreadTimeOut(true); return result;
++    }
++
++    public CompletableFuture<Object> invoke(String method, Map<String, Object> args, String origin,
++            SaasBridgeDispatcher.RequestAuthority authority) {
++        if (closed || !authority.isActive()) throw error("页面授权已失效，安全存储操作已停止");
++        boolean set = method.equals("secureStorage.set");
++        if (!set && !method.equals("secureStorage.get") && !method.equals("secureStorage.remove")) throw error("不支持该安全存储操作");
++        for (String field : args.keySet()) if (!field.equals("key") && !(set && field.equals("value"))) throw error("安全存储参数包含不支持的字段");
++        String key = SaasSecureValue.key(args.get("key"));
++        String value = set ? SaasSecureValue.value(args.get("value")) : null;
++        Work work = new Work(method, key, value, origin, authority);
++        try { WORKER.execute(work); }
++        catch (RejectedExecutionException busy) { work.result.completeExceptionally(error("安全存储操作繁忙，请稍后重试")); }
++        return work.result;
++    }
++
++    public void revoke() {
++        for (Runnable task : WORKER.getQueue().toArray(new Runnable[0])) {
++            Work work = (Work) task;
++            if (work.owner == this && WORKER.getQueue().remove(work)) work.cancel();
++        }
++    }
++    public void close() { closed = true; revoke(); }
++
++    private final class Work implements Runnable {
++        final SaasSecureStorage owner = SaasSecureStorage.this;
++        final String method, key, value, origin;
++        final SaasBridgeDispatcher.RequestAuthority authority;
++        final CompletableFuture<Object> result = new CompletableFuture<>();
++        Work(String method, String key, String value, String origin, SaasBridgeDispatcher.RequestAuthority authority) {
++            this.method = method; this.key = key; this.value = value; this.origin = origin; this.authority = authority;
++        }
++        void check() {
++            if (closed || Thread.currentThread().isInterrupted() || result.isDone() || !authority.isActiveInBackground()) throw error("页面授权已失效，安全存储操作已停止");
++        }
++        void cancel() { result.completeExceptionally(error("安全存储操作已取消")); }
++        @Override public void run() {
++            try {
++                check();
++                String entry = SaasSecureValue.entry(origin, key);
++                Map<String, Object> reply = new LinkedHashMap<>();
++                if (method.equals("secureStorage.get")) {
++                    String envelope = preferences.getString(entry, null);
++                    String plain = envelope == null ? null : SaasSecureValue.decrypt(secret(false), origin, key, envelope);
++                    check(); reply.put("value", plain);
++                } else if (method.equals("secureStorage.set")) {
++                    Map<String, ?> saved = preferences.getAll();
++                    if (!saved.containsKey(entry)) {
++                        String prefix = SaasSecureValue.originPrefix(origin);
++                        int scoped = 0;
++                        for (String name : saved.keySet()) if (name.startsWith(prefix)) scoped++;
++                        if (scoped >= 16 || saved.size() >= 256) throw error("安全存储条目已达上限，请移除不再使用的值");
++                    }
++                    check();
++                    String envelope = SaasSecureValue.encrypt(secret(true), origin, key, value);
++                    check();
++                    if (!preferences.edit().putString(entry, envelope).commit()) throw error("安全存储写入未完成，请重试");
++                    check(); reply.put("ok", true);
++                } else {
++                    check();
++                    // 仅清除当前来源的逻辑条目，不删除文件或共享密钥，也不触及其他来源。
++                    if (!preferences.edit().remove(entry).commit()) throw error("安全存储清除未完成，请重试");
++                    check(); reply.put("ok", true);
++                }
++                result.complete(reply);
++            } catch (SaasBridgeDispatcher.NativeRequestException failure) { result.completeExceptionally(failure); }
++            catch (Exception failure) { result.completeExceptionally(error("安全存储不可用，请检查设备密钥状态后重试")); }
++        }
++    }
++
++    private static SecretKey secret(boolean create) throws Exception {
++        KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
++        Key key = store.getKey(ALIAS, null);
++        if (key != null) {
++            if (!(key instanceof SecretKey) || !"AES".equals(key.getAlgorithm())) throw error("安全存储密钥类型不受支持");
++            return (SecretKey) key;
++        }
++        if (!create) throw error("安全存储密钥已失效，请重新登录");
++        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
++        generator.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
++                .setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
++                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
++                .setRandomizedEncryptionRequired(true).build());
++        return generator.generateKey();
++    }
++
++    private static SaasBridgeDispatcher.NativeRequestException error(String message) { return new SaasBridgeDispatcher.NativeRequestException(message); }
++}
+--- a/chrome/android/java_sources.gni
++++ b/chrome/android/java_sources.gni
+@@ -13,10 +13,12 @@
+   "java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java",
+   "java/src/com/fingerprint/saas/bridge/SaasFilePolicy.java",
+   "java/src/com/fingerprint/saas/bridge/SaasOriginPolicy.java",
++  "java/src/com/fingerprint/saas/bridge/SaasSecureValue.java",
+   "java/src/com/fingerprint/saas/bridge/SnapshotCrypto.java",
+   "java/src/com/fingerprint/saas/bridge/SnapshotJson.java",
+   "java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java",
+   "java/src/org/chromium/chrome/browser/saas/SaasSafFiles.java",
++  "java/src/org/chromium/chrome/browser/saas/SaasSecureStorage.java",
+ ]
+ 
+ # Only used for testing, should not be shipped to end users.

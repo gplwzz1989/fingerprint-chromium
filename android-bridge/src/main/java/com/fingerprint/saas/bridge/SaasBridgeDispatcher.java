@@ -122,6 +122,7 @@ public final class SaasBridgeDispatcher {
             capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
             capabilities.put("files", backend != null && backend.supports("files"));
             capabilities.put("http", backend != null && backend.supports("http"));
+            capabilities.put("secureStorage", backend != null && backend.supports("secureStorage"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -129,6 +130,10 @@ public final class SaasBridgeDispatcher {
         }
         String accountId;
         char[] password;
+        if ("secureStorage.get".equals(method) || "secureStorage.set".equals(method) || "secureStorage.remove".equals(method)) {
+            if (backend == null || !backend.supports("secureStorage")) throw invalid("当前客户端尚未提供安全存储能力");
+            return backend.invoke(method, args);
+        }
         if ("http.request".equals(method)) {
             if (backend == null || !backend.supports("http")) throw invalid("当前客户端尚未提供原生网络能力");
             return backend.invoke(method, args);

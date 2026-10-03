@@ -44,6 +44,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private final SaasBridgeDispatcher mDispatcher;
     private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
     private final SaasSafFiles mFiles;
+    private final SaasSecureStorage mSecureStorage;
     private final AtomicLong mGeneration = new AtomicLong();
     private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(
             2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), task -> {
@@ -67,6 +68,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
         mDispatcher = new SaasBridgeDispatcher(mPolicy);
         mNativeBackend = nativeBackend;
         mFiles = new SaasSafFiles(tab, ContextUtils.getApplicationContext());
+        mSecureStorage = new SaasSecureStorage(ContextUtils.getApplicationContext());
         mWorker.allowCoreThreadTimeOut(true);
         tab.addObserver(this);
         bindWebContents();
@@ -83,6 +85,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
         mDestroyed = true;
         revoke();
         mFiles.close();
+        mSecureStorage.close();
         mWorker.shutdownNow();
         if (mObserver != null) { mObserver.observe(null); mObserver = null; }
         mTab.removeObserver(this);
@@ -194,7 +197,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                 String response = mDispatcher.dispatch(mMessage, mOrigin,
                         new SaasBridgeDispatcher.NativeBackend() {
                             @Override public boolean supports(String capability) {
-                                return "files".equals(capability) ||
+                                return "files".equals(capability) || "secureStorage".equals(capability) ||
                                         (mNativeBackend != null && mNativeBackend.supports(capability));
                             }
                             @Override public Object invoke(String method, Map<String, Object> args) {
@@ -242,6 +245,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                     }
                     CompletableFuture<Object> operation;
                     if (method.startsWith("files.")) operation = mFiles.invoke(method, args, mOrigin, authority);
+                    else if (method.startsWith("secureStorage.")) operation = mSecureStorage.invoke(method, args, mOrigin, authority);
                     else {
                         if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
                         operation = mNativeBackend.invokeAsync(method, args, authority);
@@ -275,6 +279,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private void revoke() {
         mGeneration.incrementAndGet();
         mFiles.revoke();
+        mSecureStorage.revoke();
         Runnable queued;
         while ((queued = mWorker.getQueue().poll()) != null) ((BridgeWork) queued).release();
         if (mPort != null) {

@@ -5,6 +5,7 @@ export interface SaasBridgeCapabilities {
   files?: boolean;
   http?: boolean;
   crypto?: boolean;
+  secureStorage?: boolean;
 }
 
 export interface SaasBridgeDetails {
@@ -96,6 +97,12 @@ export interface SaasBridge {
     encryptSnapshot(options: {accountId: string; password: string; snapshot: unknown}): Promise<SaasSnapshotEnvelope>;
     decryptSnapshot(options: {accountId: string; password: string; envelope: SaasSnapshotEnvelope}): Promise<unknown>;
   };
+  /** 按真实来源隔离的通用安全值；不返回或接受密钥。 */
+  secureStorage?: {
+    get(options: {key: string}): Promise<{value: string | null}>;
+    set(options: {key: string; value: string}): Promise<{ok: boolean}>;
+    remove(options: {key: string}): Promise<{ok: boolean}>;
+  };
 }
 
 export interface SaasBridgeClient {
@@ -127,6 +134,7 @@ export interface SaasBridgeClient {
   files: SaasBridge['files'];
   http: SaasBridge['http'];
   crypto: NonNullable<SaasBridge['crypto']>;
+  secureStorage: NonNullable<SaasBridge['secureStorage']>;
 }
 
 declare global {

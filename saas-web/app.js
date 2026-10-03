@@ -14,6 +14,12 @@
     currentView: 'overview',
   };
   let refreshFlight = null;
+  let sessionRecoveryAttempted = false;
+  let sessionMarkerStorage;
+  try { sessionMarkerStorage = global.localStorage; } catch (_) { sessionMarkerStorage = null; }
+  const sessionPersistence = global.saasSessionPersistence.create({bridge: global.saasBridgeClient,
+    serviceUrl: new URL(`${apiBase}/api/v1/sessions/refresh`, global.location.href).href,
+    deviceId: getDeviceId, storage: sessionMarkerStorage});
 
   class ApiError extends Error {
     constructor(status, message, code = '', currentRevision = null) {
@@ -69,6 +75,7 @@
 
   function readSession() {
     try {
+      if (sessionPersistence.requiresSecureStorage()) return null;
       const value = sessionStorage.getItem(sessionStorageKey);
       return value ? JSON.parse(value) : null;
     } catch (_error) {
@@ -79,16 +86,25 @@
   function writeSession(session) {
     if (!session || !state.session || session.user?.user_id !== state.session.user?.user_id) state.sessionGeneration++;
     state.session = session;
-    if (session) {
-      sessionStorage.setItem(sessionStorageKey, JSON.stringify(session));
+    if (session && !sessionPersistence.requiresSecureStorage()) {
+      try { sessionStorage.setItem(sessionStorageKey, JSON.stringify(session)); }
+      catch (_) { showToast('本地会话保存不可用，本次登录仅在当前页面有效', true); }
     } else {
-      sessionStorage.removeItem(sessionStorageKey);
+      try { sessionStorage.removeItem(sessionStorageKey); }
+      catch (_) { showToast('网页会话缓存不可用，请检查存储权限', true); }
+    }
+    if (!session) {
       state.workspaces = []; state.accounts = []; state.workspaceId = '';
       elements.loginForm.reset();
       global.saasConsoleOperations.clear();
       global.saasConsoleAdministration.clear();
       render();
     }
+    const saved = session ? sessionPersistence.save(session) : sessionPersistence.clear();
+    return saved.catch((error) => {
+      if (state.session === session) showToast(userMessage(error), true);
+      return false;
+    });
   }
 
   function setStatus(element, message, success = false) {
@@ -146,10 +162,11 @@
 
   async function refreshSession() {
     if (!state.session?.refreshToken) return false;
-    if (refreshFlight) return refreshFlight;
-    refreshFlight = performRefreshSession(state.session);
-    try { return await refreshFlight; }
-    finally { refreshFlight = null; }
+    if (refreshFlight?.session === state.session) return refreshFlight.promise;
+    const flight = {session: state.session, promise: performRefreshSession(state.session)};
+    refreshFlight = flight;
+    try { return await flight.promise; }
+    finally { if (refreshFlight === flight) refreshFlight = null; }
   }
 
   async function performRefreshSession(originalSession) {
@@ -158,7 +175,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'omit',
-        body: JSON.stringify({ refresh_token: originalSession.refreshToken, device_id: getDeviceId() }),
+        body: JSON.stringify({ refresh_token: originalSession.refreshToken, device_id: originalSession.deviceId || getDeviceId() }),
       });
       const payload = await response.json().catch(() => null);
       if (state.session !== originalSession) return false;
@@ -170,6 +187,7 @@
         accessToken: payload.access_token,
         refreshToken: payload.refresh_token || originalSession.refreshToken,
         user: payload.user,
+        deviceId: originalSession.deviceId || getDeviceId(),
       });
       return true;
     } catch (_error) {
@@ -179,12 +197,13 @@
   }
 
   async function login(email, password) {
+    const deviceId = getDeviceId();
     const payload = await request('/api/v1/sessions', {
       method: 'POST',
       body: {
         email,
         password,
-        device_id: getDeviceId(),
+        device_id: deviceId,
         device_name: getDeviceName(),
       },
     }, false);
@@ -192,6 +211,7 @@
       accessToken: payload.access_token,
       refreshToken: payload.refresh_token,
       user: payload.user,
+      deviceId,
     });
     elements.loginForm.reset();
   }
@@ -251,6 +271,7 @@
   }
 
   async function logout() {
+    sessionRecoveryAttempted = true;
     const session = state.session;
     writeSession(null);
     try {
@@ -265,6 +286,21 @@
   async function inspectBridge() {
     state.bridge = await global.saasBridgeClient.describe();
     renderBridge();
+    const wasEnabled = sessionPersistence.isEnabled();
+    if (!sessionPersistence.configure(state.bridge) || wasEnabled) return;
+    try { sessionStorage.removeItem(sessionStorageKey); }
+    catch (_) { showToast('网页会话缓存清理失败，请检查存储权限', true); }
+    if (state.session?.accessToken) {
+      sessionRecoveryAttempted = true;
+      await writeSession(state.session);
+    } else if (!sessionRecoveryAttempted) {
+      sessionRecoveryAttempted = true;
+      const generation = state.sessionGeneration;
+      const stored = await sessionPersistence.restore();
+      if (!stored || generation !== state.sessionGeneration || state.session) return;
+      state.session = {refreshToken: stored.refreshToken, deviceId: stored.deviceId};
+      if (await refreshSession()) { await loadWorkspaces(); render(); }
+    }
   }
 
   async function openAccount(account) {
@@ -450,6 +486,9 @@
   elements.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(elements.loginForm);
+    // 用户主动登录优先，不能让后台恢复请求在随后覆盖新的会话。
+    sessionRecoveryAttempted = true;
+    if (!state.session?.accessToken) writeSession(null);
     setStatus(elements.loginStatus, '正在建立安全会话…');
     try {
       await login(String(form.get('email') || '').trim(), String(form.get('password') || ''));
@@ -538,8 +577,8 @@
     showToast, userMessage, logout});
   global.saasConsoleAdministration.configure({request, getState: () => state,
     refreshAccounts: loadAccounts, showToast, userMessage});
-  global.addEventListener('saas-native-bridge-ready', () => inspectBridge().catch(() => {
-    showToast('原生桥状态更新失败，请重新加载控制台', true);
+  global.addEventListener('saas-native-bridge-ready', () => inspectBridge().catch((error) => {
+    showToast(userMessage(error), true);
   }));
   state.session = readSession();
   render();
@@ -551,5 +590,7 @@
       showToast(userMessage(error), true);
       render();
     });
+  } else {
+    inspectBridge().catch((error) => showToast(userMessage(error), true));
   }
 })(window);
