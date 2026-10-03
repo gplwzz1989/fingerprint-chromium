@@ -1,0 +1,195 @@
+--- a/third_party/blink/public/mojom/worker/shared_worker_info.mojom
++++ b/third_party/blink/public/mojom/worker/shared_worker_info.mojom
+@@ -35,4 +35,8 @@ struct SharedWorkerInfo {
+   // have been destructed.
+   // See: https://github.com/whatwg/html/issues/10997
+   bool extended_lifetime;
++
++  // Captures the creating page's effective account-level hardware value so
++  // the SharedWorker keeps the same fingerprint snapshot.
++  uint32 fingerprint_hardware_concurrency = 0;
+ };
+
+--- a/third_party/blink/renderer/core/workers/shared_worker_client_holder.cc
++++ b/third_party/blink/renderer/core/workers/shared_worker_client_holder.cc
+@@ -30,10 +30,13 @@
+ 
+ #include "third_party/blink/renderer/core/workers/shared_worker_client_holder.h"
+ 
++#include <cstdint>
+ #include <memory>
+ #include <utility>
+ 
+ #include "base/check.h"
++#include "base/command_line.h"
++#include "components/ungoogled/ungoogled_switches.h"
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+ #include "third_party/blink/public/common/messaging/message_port_channel.h"
+ #include "third_party/blink/public/common/security_context/insecure_request_policy.h"
+@@ -49,6 +52,7 @@
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/fetch/request.h"
+ #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
++#include "third_party/blink/renderer/core/frame/navigator.h"
+ #include "third_party/blink/renderer/core/script/script.h"
+ #include "third_party/blink/renderer/core/workers/shared_worker.h"
+ #include "third_party/blink/renderer/core/workers/shared_worker_client.h"
+@@ -109,6 +113,16 @@ void SharedWorkerClientHolder::Connect(
+           ? mojom::InsecureRequestsPolicy::kUpgrade
+           : mojom::InsecureRequestsPolicy::kDoNotUpgrade;
+ 
++  uint32_t fingerprint_hardware_concurrency = 0;
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
++          switches::kFingerprint)) {
++    auto* window = DynamicTo<LocalDOMWindow>(worker->GetExecutionContext());
++    if (window) {
++      fingerprint_hardware_concurrency =
++          window->navigator()->hardwareConcurrency();
++    }
++  }
++
+   auto info = mojom::blink::SharedWorkerInfo::New(
+       url, std::move(options),
+       mojo::Clone(worker->GetExecutionContext()
+@@ -118,7 +132,7 @@ void SharedWorkerClientHolder::Connect(
+           outside_fetch_client_settings_object->GetReferrerPolicy(),
+           KURL(outside_fetch_client_settings_object->GetOutgoingReferrer()),
+           insecure_requests_policy),
+-      same_site_cookies, extended_lifetime);
++      same_site_cookies, extended_lifetime, fingerprint_hardware_concurrency);
+ 
+   const HeapMojoRemote<mojom::blink::SharedWorkerConnector>& connector =
+       connector_override ? *connector_override : connector_;
+
+--- a/content/renderer/worker/embedded_shared_worker_stub.h
++++ b/content/renderer/worker/embedded_shared_worker_stub.h
+@@ -5,6 +5,7 @@
+ #ifndef CONTENT_RENDERER_WORKER_EMBEDDED_SHARED_WORKER_STUB_H_
+ #define CONTENT_RENDERER_WORKER_EMBEDDED_SHARED_WORKER_STUB_H_
+ 
++#include <cstdint>
+ #include <memory>
+ #include <vector>
+ 
+@@ -64,6 +65,7 @@ class EmbeddedSharedWorkerStub : public blink::WebSharedWorkerClient,
+       bool is_constructor_secure_context,
+       const std::string& user_agent,
+       const blink::UserAgentMetadata& ua_metadata,
++      uint32_t fingerprint_hardware_concurrency,
+       bool pause_on_start,
+       const base::UnguessableToken& devtools_worker_token,
+       const blink::RendererPreferences& renderer_preferences,
+
+--- a/content/renderer/worker/embedded_shared_worker_stub.cc
++++ b/content/renderer/worker/embedded_shared_worker_stub.cc
+@@ -42,6 +42,7 @@ EmbeddedSharedWorkerStub::EmbeddedSharedWorkerStub(
+     bool is_constructor_secure_context,
+     const std::string& user_agent,
+     const blink::UserAgentMetadata& ua_metadata,
++    uint32_t fingerprint_hardware_concurrency,
+     bool pause_on_start,
+     const base::UnguessableToken& devtools_worker_token,
+     const blink::RendererPreferences& renderer_preferences,
+@@ -130,6 +131,7 @@ EmbeddedSharedWorkerStub::EmbeddedSharedWorkerStub(
+       blink::WebSecurityOrigin(constructor_key.origin()),
+       blink::WebSecurityOrigin(origin), is_constructor_secure_context,
+       blink::WebString::FromUTF8(user_agent), ua_metadata,
++      fingerprint_hardware_concurrency,
+       ToWebContentSecurityPolicies(std::move(info->content_security_policies)),
+       FetchClientSettingsObjectFromMojomToWeb(
+           info->outside_fetch_client_settings_object),
+
+--- a/content/renderer/worker/shared_worker_factory_impl.cc
++++ b/content/renderer/worker/shared_worker_factory_impl.cc
+@@ -55,9 +55,12 @@ void SharedWorkerFactoryImpl::CreateSharedWorker(
+     mojo::PendingReceiver<blink::mojom::ReportingObserver>
+         dip_reporting_observer) {
+   // Bound to the lifetime of the underlying blink::WebSharedWorker instance.
++  const uint32_t fingerprint_hardware_concurrency =
++      info->fingerprint_hardware_concurrency;
+   new EmbeddedSharedWorkerStub(
+       std::move(info), token, constructor_key, origin,
+-      is_constructor_secure_context, user_agent, ua_metadata, pause_on_start,
++      is_constructor_secure_context, user_agent, ua_metadata,
++      fingerprint_hardware_concurrency, pause_on_start,
+       devtools_worker_token, renderer_preferences,
+       std::move(preference_watcher_receiver), std::move(content_settings),
+       std::move(service_worker_container_info),
+
+--- a/third_party/blink/public/web/web_shared_worker.h
++++ b/third_party/blink/public/web/web_shared_worker.h
+@@ -31,6 +31,7 @@
+ #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_SHARED_WORKER_H_
+ #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_SHARED_WORKER_H_
+ 
++#include <cstdint>
+ #include <memory>
+ #include <vector>
+ 
+@@ -82,6 +83,7 @@ class BLINK_EXPORT WebSharedWorker {
+       bool is_constructor_secure_context,
+       const WebString& user_agent,
+       const UserAgentMetadata& ua_metadata,
++      uint32_t fingerprint_hardware_concurrency,
+       const std::vector<WebContentSecurityPolicy>& content_security_policies,
+       const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
+       const base::UnguessableToken& devtools_worker_token,
+
+--- a/third_party/blink/renderer/core/exported/web_shared_worker_impl.h
++++ b/third_party/blink/renderer/core/exported/web_shared_worker_impl.h
+@@ -31,6 +31,7 @@
+ #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EXPORTED_WEB_SHARED_WORKER_IMPL_H_
+ #define THIRD_PARTY_BLINK_RENDERER_CORE_EXPORTED_WEB_SHARED_WORKER_IMPL_H_
+ 
++#include <cstdint>
+ #include <memory>
+ 
+ #include "base/memory/scoped_refptr.h"
+@@ -113,6 +114,7 @@ class CORE_EXPORT WebSharedWorkerImpl final : public WebSharedWorker {
+       bool is_constructor_secure_context,
+       const WebString& user_agent,
+       const blink::UserAgentMetadata& ua_metadata,
++      uint32_t fingerprint_hardware_concurrency,
+       const std::vector<WebContentSecurityPolicy>& content_security_policies,
+       const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
+       const base::UnguessableToken& devtools_worker_token,
+
+--- a/third_party/blink/renderer/core/exported/web_shared_worker_impl.cc
++++ b/third_party/blink/renderer/core/exported/web_shared_worker_impl.cc
+@@ -214,6 +214,7 @@ void WebSharedWorkerImpl::StartWorkerContext(
+     bool is_constructor_secure_context,
+     const WebString& user_agent,
+     const UserAgentMetadata& ua_metadata,
++    uint32_t fingerprint_hardware_concurrency,
+     const std::vector<WebContentSecurityPolicy>& content_security_policies,
+     const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
+     const base::UnguessableToken& devtools_worker_token,
+@@ -260,6 +261,8 @@ void WebSharedWorkerImpl::StartWorkerContext(
+       true /* allow_running_of_insecure_content */,
+       false /* strictly_block_blockable_mixed_content */,
+       GenericFontFamilySettings());
++  worker_settings->SetFingerprintHardwareConcurrency(
++      fingerprint_hardware_concurrency);
+ 
+   // Some params (e.g. address space) passed to GlobalScopeCreationParams are
+   // dummy values. They will be updated after worker script fetch on the worker
+@@ -361,6 +364,7 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
+     bool is_constructor_secure_context,
+     const WebString& user_agent,
+     const UserAgentMetadata& ua_metadata,
++    uint32_t fingerprint_hardware_concurrency,
+     const std::vector<WebContentSecurityPolicy>& content_security_policies,
+     const WebFetchClientSettingsObject& outside_fetch_client_settings_object,
+     const base::UnguessableToken& devtools_worker_token,
+@@ -386,7 +390,8 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
+   worker->StartWorkerContext(
+       script_request_url, script_type, credentials_mode, name,
+       constructor_origin, origin_from_browser, is_constructor_secure_context,
+-      user_agent, ua_metadata, content_security_policies,
++      user_agent, ua_metadata, fingerprint_hardware_concurrency,
++      content_security_policies,
+       outside_fetch_client_settings_object, devtools_worker_token,
+       std::move(content_settings), std::move(browser_interface_broker),
+       pause_worker_context_on_start, std::move(worker_main_script_load_params),
+
+
