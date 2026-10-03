@@ -1,0 +1,525 @@
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasBridgeDispatcher.java
+@@ -6,6 +6,17 @@
+ 
+ /** 原生消息路由；来源参数只能由持有消息端口的 Chromium 宿主提供。 */
+ public final class SaasBridgeDispatcher {
++    /** 平台实现只暴露已接入的能力；消息宿主必须在执行前重新检查真实页面授权。 */
++    public interface NativeBackend {
++        boolean supports(String capability);
++        Object invoke(String method, Map<String, Object> args);
++    }
++
++    public static final class NativeRequestException extends IllegalArgumentException {
++        private static final long serialVersionUID = 1L;
++        public NativeRequestException(String message) { super(message); }
++    }
++
+     public static final int MAX_MESSAGE_BYTES = 24 * 1024 * 1024;
+     private final SaasOriginPolicy policy;
+     private final SnapshotCrypto crypto = new SnapshotCrypto();
+@@ -16,6 +27,10 @@
+     }
+ 
+     public String dispatch(String message, String trustedOrigin) {
++        return dispatch(message, trustedOrigin, null);
++    }
++
++    public String dispatch(String message, String trustedOrigin, NativeBackend backend) {
+         Map<String, Object> response = new LinkedHashMap<>();
+         response.put("type", "fingerprint-saas-bridge:response");
+         response.put("requestId", "");
+@@ -34,11 +49,13 @@
+             if (!"fingerprint-saas-bridge:request".equals(request.get("type"))) throw invalid("原生桥消息类型无效");
+             String method = string(request, "method", 64);
+             Map<String, Object> args = object(request.get("args"));
+-            response.put("result", invoke(method, args, trustedOrigin));
++            response.put("result", invoke(method, args, trustedOrigin, backend));
+             response.put("ok", true);
+         } catch (SnapshotCrypto.SnapshotCryptoException error) {
+             response.put("ok", false); response.put("error", error.getMessage());
+         } catch (BridgeException error) {
++            response.put("ok", false); response.put("error", error.getMessage());
++        } catch (NativeRequestException error) {
+             response.put("ok", false); response.put("error", error.getMessage());
+         } catch (RuntimeException error) {
+             response.put("ok", false); response.put("error", "原生桥请求失败，请检查参数后重试");
+@@ -64,10 +81,16 @@
+         }
+     }
+ 
+-    private Object invoke(String method, Map<String, Object> args, String origin) {
++    public static Map<String, Object> decodeNativeState(String json) {
++        if (json == null || json.length() > 65536) throw new NativeRequestException("原生标签状态无效");
++        return SnapshotJson.decode(json.getBytes(StandardCharsets.UTF_8), 65536);
++    }
++
++    private Object invoke(String method, Map<String, Object> args, String origin, NativeBackend backend) {
+         if ("getCapabilities".equals(method)) {
+             Map<String, Object> capabilities = new LinkedHashMap<>();
+             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
++            capabilities.put("tabs", backend != null && backend.supports("tabs"));
+             capabilities.put("crypto", true);
+             Map<String, Object> details = new LinkedHashMap<>();
+             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
+@@ -75,6 +98,11 @@
+         }
+         String accountId;
+         char[] password;
++        if ("tabs.list".equals(method) || "tabs.create".equals(method) ||
++                "tabs.activate".equals(method) || "tabs.navigate".equals(method) || "tabs.close".equals(method)) {
++            if (backend == null || !backend.supports("tabs")) throw invalid("当前客户端尚未提供标签管理能力");
++            return backend.invoke(method, args);
++        }
+         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {
+             throw invalid("当前客户端尚未提供该原生能力");
+         }
+--- a/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
+@@ -22,6 +22,10 @@
+ import org.chromium.url.Origin;
+ 
+ import java.util.List;
++import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.TimeoutException;
+ import java.util.concurrent.ArrayBlockingQueue;
+ import java.util.concurrent.RejectedExecutionException;
+ import java.util.concurrent.ThreadPoolExecutor;
+@@ -37,6 +41,7 @@
+     private final Tab mTab;
+     private final SaasOriginPolicy mPolicy;
+     private final SaasBridgeDispatcher mDispatcher;
++    private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+     private final AtomicLong mGeneration = new AtomicLong();
+     private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(
+             2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), task -> {
+@@ -50,9 +55,15 @@
+     private long mPendingBytes;
+ 
+     public SaasBridgeHost(Tab tab, List<String> allowedOrigins, String startupUrl) {
++        this(tab, allowedOrigins, startupUrl, null);
++    }
++
++    public SaasBridgeHost(Tab tab, List<String> allowedOrigins, String startupUrl,
++            @Nullable SaasBridgeDispatcher.NativeBackend nativeBackend) {
+         mTab = tab;
+         mPolicy = new SaasOriginPolicy(allowedOrigins, startupUrl);
+         mDispatcher = new SaasBridgeDispatcher(mPolicy);
++        mNativeBackend = nativeBackend;
+         mWorker.allowCoreThreadTimeOut(true);
+         tab.addObserver(this);
+         bindWebContents();
+@@ -176,7 +187,15 @@
+         @Override public void run() {
+             try {
+                 if (mGeneration.get() != mWorkGeneration) return;
+-                String response = mDispatcher.dispatch(mMessage, mOrigin);
++                String response = mDispatcher.dispatch(mMessage, mOrigin,
++                        mNativeBackend == null ? null : new SaasBridgeDispatcher.NativeBackend() {
++                            @Override public boolean supports(String capability) {
++                                return mNativeBackend != null && mNativeBackend.supports(capability);
++                            }
++                            @Override public Object invoke(String method, Map<String, Object> args) {
++                                return invokeOnUiThread(method, args);
++                            }
++                        });
+                 PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
+                     if (mGeneration.get() != mWorkGeneration) return;
+                     try {
+@@ -191,6 +210,41 @@
+                 });
+             } finally { PostTask.postTask(TaskTraits.UI_DEFAULT, this::release); }
+         }
++
++        private Object invokeOnUiThread(String method, Map<String, Object> args) {
++            CompletableFuture<Object> result = new CompletableFuture<>();
++            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
++            PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
++                if (result.isDone()) return;
++                try {
++                    if (System.nanoTime() >= deadline || mDestroyed ||
++                            mGeneration.get() != mWorkGeneration || mPort != mWorkPort ||
++                            mWorkPort.isClosed() || !mOrigin.equals(trustedOrigin(mContents))) {
++                        result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，标签操作已停止"));
++                        return;
++                    }
++                    if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
++                    result.complete(mNativeBackend.invoke(method, args));
++                } catch (RuntimeException error) { result.completeExceptionally(error); }
++                catch (LinkageError error) {
++                    result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("客户端原生接口版本不匹配，请更新客户端"));
++                }
++            });
++            try { return result.get(15, TimeUnit.SECONDS); }
++            catch (InterruptedException error) {
++                Thread.currentThread().interrupt();
++                result.cancel(false);
++                throw new SaasBridgeDispatcher.NativeRequestException("标签操作已取消");
++            } catch (TimeoutException error) {
++                result.cancel(false);
++                throw new SaasBridgeDispatcher.NativeRequestException("标签操作等待超时，请重试");
++            } catch (ExecutionException error) {
++                if (error.getCause() instanceof SaasBridgeDispatcher.NativeRequestException) {
++                    throw (SaasBridgeDispatcher.NativeRequestException) error.getCause();
++                }
++                throw new SaasBridgeDispatcher.NativeRequestException("标签操作失败，请检查账号环境后重试");
++            }
++        }
+     }
+ 
+     private void revoke() {
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelJniBridge.java
+@@ -19,6 +19,7 @@
+ import org.chromium.base.ContextUtils;
+ import org.chromium.base.Log;
+ import org.chromium.base.Token;
++import org.chromium.base.ThreadUtils;
+ import org.chromium.base.task.PostTask;
+ import org.chromium.base.task.TaskTraits;
+ import org.chromium.build.annotations.NullMarked;
+@@ -33,8 +34,11 @@
+ import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
+ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.saas.SaasBridgeHost;
++import com.fingerprint.saas.bridge.SaasBridgeDispatcher;
+ import org.chromium.chrome.browser.tab.Tab;
+ import org.chromium.chrome.browser.tab.TabId;
++import org.chromium.chrome.browser.tab.TabLoadIfNeededCaller;
++import org.chromium.chrome.browser.tab.WebContentsState;
+ import org.chromium.chrome.browser.tab.TabLaunchType;
+ import org.chromium.chrome.browser.tab.TabSelectionType;
+ import org.chromium.chrome.browser.tabwindow.TabWindowManager;
+@@ -53,6 +57,7 @@
+ import java.util.Arrays;
+ import java.util.HashSet;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Set;
+ 
+ /** Bridges between the C++ and Java {@link TabModel} interfaces. */
+@@ -103,7 +108,8 @@
+         GURL startupUrl = new GURL(TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl());
+         for (int i = 0; i < getCount(); i++) {
+             Tab tab = getTabAt(i);
+-            if (tab != null && Origin.create(tab.getUrl()).equals(Origin.create(startupUrl))) {
++            if (tab != null && readSaasAccountState(tab) == null &&
++                    Origin.create(tab.getUrl()).equals(Origin.create(startupUrl))) {
+                 mResidentSaasTab = tab;
+                 attachSaasBridge(tab);
+                 setIndex(i, TabSelectionType.FROM_USER);
+@@ -120,7 +126,15 @@
+         try {
+             mSaasBridgeHost = new SaasBridgeHost(tab,
+                     Arrays.asList(TabModelJniBridgeJni.get().getFingerprintSaasAllowedOrigins()),
+-                    TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl());
++                    TabModelJniBridgeJni.get().getFingerprintSaasStartupUrl(),
++                    new SaasBridgeDispatcher.NativeBackend() {
++                        @Override public boolean supports(String capability) {
++                            return "tabs".equals(capability);
++                        }
++                        @Override public Object invoke(String method, Map<String, Object> args) {
++                            return invokeSaasTabs(method, args);
++                        }
++                    });
+         } catch (IllegalArgumentException error) {
+             // 配置失效时关闭原生能力，不影响控制台显示或泄露白名单、密码等信息。
+             Log.w("FingerprintSaas", "原生桥未启用：来源配置无效");
+@@ -129,6 +143,151 @@
+ 
+     protected boolean isResidentSaasTab(Tab tab) {
+         return tab == mResidentSaasTab;
++    }
++
++    private @Nullable Map<String, Object> readSaasAccountState(Tab tab) {
++        if (tab.isDestroyed() || tab == mResidentSaasTab) return null;
++        WebContents contents = tab.getWebContents();
++        String json = "";
++        if (contents != null && !contents.isDestroyed()) {
++            json = TabModelJniBridgeJni.get().getSaasAccountState(contents);
++        } else {
++            WebContentsState frozen = tab.getWebContentsState();
++            if (frozen != null) json = frozen.getSaasAccountState();
++        }
++        if (json.isEmpty()) return null;
++        Map<String, Object> state = SaasBridgeDispatcher.decodeNativeState(json);
++        state.put("title", tab.getTitle());
++        state.put("url", tab.getUrl().getSpec());
++        state.put("frozen", tab.isFrozen());
++        state.put("active", getTabAt(index()) == tab);
++        return state;
++    }
++
++    @CalledByNative
++    private boolean hasSaasAccountTab(@JniType("std::string") String accountId) {
++        for (int i = 0; i < getCount(); i++) {
++            Tab tab = getTabAt(i);
++            if (tab == null || tab.isDestroyed()) continue;
++            Map<String, Object> state = readSaasAccountState(tab);
++            if (state != null && accountId.equals(state.get("account_id"))) return true;
++        }
++        return false;
++    }
++
++    private String saasString(Map<String, Object> args, String name, int max, boolean optional) {
++        Object value = args.get(name);
++        if (value == null && optional) return "";
++        if (!(value instanceof String) || ((String) value).length() > max ||
++                (!optional && ((String) value).isEmpty())) {
++            throw new SaasBridgeDispatcher.NativeRequestException("标签操作参数格式或长度无效");
++        }
++        return (String) value;
++    }
++
++    private GURL saasNavigationUrl(String value) {
++        GURL url = new GURL(value.isEmpty() ? "about:blank" : value);
++        if (!url.isValid() || !("http".equals(url.getScheme()) ||
++                "https".equals(url.getScheme()) || "about:blank".equals(url.getSpec()))) {
++            throw new SaasBridgeDispatcher.NativeRequestException("账号页面仅支持 HTTP、HTTPS 或空白页");
++        }
++        return url;
++    }
++
++    private Object invokeSaasTabs(String method, Map<String, Object> args) {
++        if (!ThreadUtils.runningOnUiThread()) {
++            throw new SaasBridgeDispatcher.NativeRequestException("标签操作暂不可用，请重试");
++        }
++        if (!isNativeInitialized() || isIncognito() || !isInitializationComplete() ||
++                isSessionRestoreInProgress()) {
++            throw new SaasBridgeDispatcher.NativeRequestException("浏览器标签尚未准备好，请稍后重试");
++        }
++        if ("tabs.list".equals(method)) {
++            List<Map<String, Object>> states = new ArrayList<>();
++            for (int i = 0; i < getCount(); i++) {
++                Tab tab = getTabAt(i);
++                if (tab == null || tab.isClosing()) continue;
++                Map<String, Object> state = readSaasAccountState(tab);
++                if (state != null) states.add(state);
++            }
++            return states;
++        }
++        if ("tabs.create".equals(method)) {
++            String accountId = saasString(args, "accountId", 128, false);
++            if (!accountId.matches("[A-Za-z0-9_-]+")) {
++                throw new SaasBridgeDispatcher.NativeRequestException("账号标识格式无效");
++            }
++            GURL url = saasNavigationUrl(saasString(args, "url", 8192, true));
++            WebContents contents = TabModelJniBridgeJni.get().createSaasAccountWebContents(
++                    mProfile, accountId, saasString(args, "proxyRules", 2048, true),
++                    saasString(args, "fingerprintSeed", 10, true));
++            if (contents == null) throw new SaasBridgeDispatcher.NativeRequestException("账号环境创建失败，请检查重复标签、代理和指纹配置");
++            Tab created = null;
++            try {
++                created = getTabCreator(false).createTabWithWebContents(
++                        null, false, contents, TabLaunchType.FROM_CHROME_UI,
++                        new GURL("about:blank"), true);
++                if (created == null) throw new SaasBridgeDispatcher.NativeRequestException("隔离标签创建失败");
++                if (created.getWebContents() != contents || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
++                    throw new SaasBridgeDispatcher.NativeRequestException("隔离标签校验失败，操作已停止");
++                }
++                if (created.loadUrl(new LoadUrlParams(url)).tabLoadStatus == Tab.TabLoadStatus.PAGE_LOAD_FAILED) {
++                    throw new SaasBridgeDispatcher.NativeRequestException("账号页面导航未被接受");
++                }
++                Map<String, Object> state = readSaasAccountState(created);
++                if (state == null) throw new SaasBridgeDispatcher.NativeRequestException("账号环境状态读取失败");
++                return state;
++            } catch (RuntimeException error) {
++                // 创建器可能已经添加标签后再抛错；先找回实际所有者，避免销毁仍被标签持有的对象。
++                if (created == null) {
++                    for (int i = 0; i < getCount(); i++) {
++                        Tab tab = getTabAt(i);
++                        if (tab != null && tab.getWebContents() == contents) {
++                            created = tab; break;
++                        }
++                    }
++                }
++                if (created != null && !created.isDestroyed()) {
++                    getTabRemover().closeTabs(TabClosureParams.closeTab(created).allowUndo(false).build(), false);
++                } else if (!contents.isDestroyed()) {
++                    contents.destroy();
++                }
++                throw error;
++            }
++        }
++        String accountId = saasString(args, "tabId", 128, false);
++        Tab target = null;
++        int targetIndex = -1;
++        for (int i = 0; i < getCount(); i++) {
++            Tab tab = getTabAt(i);
++            if (tab == null || tab.isClosing()) continue;
++            Map<String, Object> state = readSaasAccountState(tab);
++            if (state != null && accountId.equals(state.get("id"))) {
++                target = tab; targetIndex = i; break;
++            }
++        }
++        if (target == null || isResidentSaasTab(target)) {
++            throw new SaasBridgeDispatcher.NativeRequestException("隔离账号标签不存在或已关闭");
++        }
++        if ("tabs.close".equals(method)) {
++            getTabRemover().closeTabs(TabClosureParams.closeTab(target).allowUndo(false).build(), false);
++            return target.isClosing() || target.isDestroyed() ||
++                    TabModelUtils.getTabIndexById(this, target.getId()) == -1;
++        }
++        if ("tabs.activate".equals(method)) {
++            setIndex(targetIndex, TabSelectionType.FROM_USER);
++            return index() == targetIndex;
++        }
++        if ("tabs.navigate".equals(method)) {
++            GURL url = saasNavigationUrl(saasString(args, "url", 8192, false));
++            if (target.isFrozen()) target.loadIfNeeded(TabLoadIfNeededCaller.OTHER);
++            WebContents contents = target.getWebContents();
++            if (contents == null || !TabModelJniBridgeJni.get().isSaasAccountWebContents(contents)) {
++                throw new SaasBridgeDispatcher.NativeRequestException("隔离账号环境未就绪，导航已停止");
++            }
++            return target.loadUrl(new LoadUrlParams(url)).tabLoadStatus != Tab.TabLoadStatus.PAGE_LOAD_FAILED;
++        }
++        throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供该标签操作");
+     }
+ 
+     /** Returns whether the native-side pointer has been initialized. */
+@@ -714,6 +873,9 @@
+ 
+         boolean isSaasAccountWebContents(WebContents contents);
+ 
++        @JniType("std::string")
++        String getSaasAccountState(WebContents contents);
++
+         long init(
+                 TabModelJniBridge self,
+                 @JniType("Profile*") Profile profile,
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -16,6 +16,7 @@
+ #include "base/android/jni_string.h"
+ #include "base/android/jni_weak_ref.h"
+ #include "base/android/token_android.h"
++#include "base/json/json_writer.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/notimplemented.h"
+ #include "base/strings/string_split.h"
+@@ -72,10 +73,37 @@
+   return chrome::kFingerprintSaasStartupUrl;
+ }
+ 
++static std::string JNI_TabModelJniBridge_GetSaasAccountState(
++    JNIEnv* env, const JavaParamRef<jobject>& java_contents) {
++  auto* contents = WebContents::FromJavaWebContents(java_contents);
++  auto* account = chrome::android::SaasAccountEnvironment::FromWebContents(contents);
++  return account ? base::WriteJson(
++                       chrome::android::SaasAccountEnvironment::PersistentStateToValue(
++                           account->GetPersistentState())).value_or("") : "";
++}
++
+ static ScopedJavaLocalRef<jobject>
+ JNI_TabModelJniBridge_CreateSaasAccountWebContents(
+     JNIEnv* env, Profile* profile, const std::string& account_id,
+     const std::string& proxy_rules, const std::string& fingerprint_seed) {
++  if (!profile || profile->IsOffTheRecord()) return ScopedJavaLocalRef<jobject>();
++  // 冻结 Tab 没有活跃 WebContents，也必须阻止跨模型重复占用同一账号分区。
++  for (const auto& model : TabModelList::models()) {
++    if (model->GetProfile() != profile) continue;
++    auto java_model = model->GetJavaObject();
++    if (!java_model.is_null() &&
++        Java_TabModelJniBridge_hasSaasAccountTab(env, java_model, account_id)) {
++      return ScopedJavaLocalRef<jobject>();
++    }
++  }
++  auto* archived = TabModelList::GetArchivedTabModel();
++  if (archived && archived->GetProfile() == profile) {
++    auto java_model = archived->GetJavaObject();
++    if (!java_model.is_null() &&
++        Java_TabModelJniBridge_hasSaasAccountTab(env, java_model, account_id)) {
++      return ScopedJavaLocalRef<jobject>();
++    }
++  }
+   std::string error;
+   auto contents = chrome::android::SaasAccountEnvironment::Create(
+       profile, account_id, proxy_rules, fingerprint_seed, &error);
+--- a/chrome/browser/ui/android/tab_model/saas_account_environment.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_environment.h
+@@ -141,15 +141,20 @@
+   }
+ 
+   base::Value::Dict GetState() const {
++    auto state = PersistentStateToValue(GetPersistentState());
++    state.Set("url", web_contents()->GetVisibleURL().spec());
++    state.Set("load_progress", web_contents()->GetLoadProgress());
++    return state;
++  }
++
++  static base::Value::Dict PersistentStateToValue(const SaasAccountState& saved) {
+     base::Value::Dict state;
+-    state.Set("id", account_id_);
+-    state.Set("account_id", account_id_);
+-    state.Set("url", web_contents()->GetVisibleURL().spec());
+-    state.Set("storage_partition", account_id_);
++    state.Set("id", saved.account_id);
++    state.Set("account_id", saved.account_id);
++    state.Set("storage_partition", saved.account_id);
+     state.Set("storage_partition_persistent", true);
+-    state.Set("proxy_rules", proxy_rules_);
+-    state.Set("fingerprint_seed", fingerprint_seed_);
+-    state.Set("load_progress", web_contents()->GetLoadProgress());
++    state.Set("proxy_rules", saved.proxy_rules);
++    state.Set("fingerprint_seed", saved.fingerprint_seed);
+     return state;
+   }
+ 
+--- a/chrome/browser/tab/java/src/org/chromium/chrome/browser/tab/WebContentsState.java
++++ b/chrome/browser/tab/java/src/org/chromium/chrome/browser/tab/WebContentsState.java
+@@ -251,6 +251,11 @@
+                 .isDefaultRestorationFallbackAllowed(buffer(), version());
+     }
+ 
++    /** 普通冻结读取只返回经过原生解析校验的账号分区身份，不由网页自报。 */
++    public String getSaasAccountState() {
++        return WebContentsStateJni.get().getSaasAccountState(buffer(), version());
++    }
++
+     /**
+      * Deletes navigation entries from this {@link WebContentsState} matching the predicate.
+      *
+@@ -323,6 +328,9 @@
+     public interface Natives {
+         boolean isDefaultRestorationFallbackAllowed(ByteBuffer state, int savedStateVersion);
+ 
++        @JniType("std::string")
++        String getSaasAccountState(ByteBuffer state, int savedStateVersion);
++
+         @Nullable WebContents restoreContentsFromByteBuffer(
+                 @JniType("Profile*") Profile profile,
+                 ByteBuffer buffer,
+--- a/chrome/browser/tab/web_contents_state.cc
++++ b/chrome/browser/tab/web_contents_state.cc
+@@ -19,6 +19,7 @@
+ #include "base/compiler_specific.h"
+ #include "base/containers/span.h"
+ #include "base/logging.h"
++#include "base/json/json_writer.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "base/pickle.h"
+@@ -573,6 +574,21 @@
+ 
+ // Static JNI methods.
+ 
++static std::string JNI_WebContentsState_GetSaasAccountState(
++    JNIEnv* env, const JavaParamRef<jobject>& state, int saved_state_version) {
++  bool off_the_record;
++  int current;
++  std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<SaasAccountState> account_state;
++  if (!WebContentsState::ExtractNavigationEntries(
++          base::android::JavaByteBufferToSpan(env, state), saved_state_version,
++          &off_the_record, &current, &navigations, &account_state) || !account_state) {
++    return "";
++  }
++  return base::WriteJson(SaasAccountEnvironment::PersistentStateToValue(*account_state))
++      .value_or("");
++}
++
+ static jboolean JNI_WebContentsState_IsDefaultRestorationFallbackAllowed(
+     JNIEnv* env, const JavaParamRef<jobject>& state, int saved_state_version) {
+   return WebContentsState::IsDefaultRestorationFallbackAllowed(

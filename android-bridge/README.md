@@ -6,7 +6,7 @@
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
 - `SnapshotCrypto.java`、`SnapshotJson.java` 与 `JvmSnapshotCryptoAdapter.kt`：可独立编译的真实快照加密模块，使用 Java 标准 JCA/JCE，无新增运行时依赖。
-- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密；尚未完成完整 Android Java/C++ 编译和设备验收。宿主成功建立端口后仅声明 `crypto=true`，其余能力为 `false`；未绑定的平台仍保持默认不可用，不能将源码挂接当作已安装可用的 Android 浏览器。
+- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签操作；尚未完成完整 Android Java/C++ 编译和设备验收。未绑定平台实现时仅声明 `crypto=true`，绑定 TabModel 后增加 `tabs=true`，其余能力为 `false`；不能将源码挂接当作已安装可用的 Android 浏览器。
 - `SaasOriginPolicy.java` 使用可信宿主提供的完整 Origin 白名单，默认 URL 不在模块内硬编码；Android JNI 从现有 C++ 常量和编译参数读取配置，默认来源随该常量更新。
 - 文件能力必须使用 Storage Access Framework 返回的授权 URI；禁止把 Windows 路径模型带入 Android。
 - 会话密钥使用 Android Keystore；应用生命周期恢复必须覆盖进程被系统回收、断网和权限撤销。
@@ -37,7 +37,7 @@
 
 新消息宿主已编码校验真实来源、请求类型及消息大小，路由 `crypto.encryptSnapshot` 与 `crypto.decryptSnapshot`，拒绝非整数或越界 `iterations`；使用有界后台执行器，不在 Android 主线程派生密钥。Kotlin 适配器的 `suspend` 方法本身不切换线程。页面登录和工作区权限仍由独立 SaaS 校验，不把业务逻辑复制进 Chromium。
 
-本模块尚未提供原生 Tab/存储、SAF 文件、Keystore 会话、完整 SDK/NDK 构建或 APK。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。
+本模块已接入原生 Tab 源码，但尚未完成平台验收；存储、SAF 文件、Keystore 会话、完整 SDK/NDK 构建和 APK 尚未提供。消息宿主已有导航、WebContents 替换、渲染进程退出和销毁时撤销逻辑，但这些 Android 平台生命周期行为尚未经过设备验证。
 
 ## 独立验证
 
@@ -73,7 +73,13 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 `src/chromium/native/saas_account_environment.h` 与 `managed-tab-android-account-environment.patch` 提供创建基础。账号使用 `saasandroid` 域下的固定持久化 `StoragePartition`，先设置代理/指纹种子，再创建 SiteInstance 和 WebContents；不通过清空全局 Cookie 或无痕模式模拟隔离。配置注册表绑定真实 BrowserContext，活跃账号不能重复创建，不同配置不能静默复用已有网络缓存。
 
-现阶段关闭环境后，如代理或指纹种子与已有缓存不同，会明确要求重启浏览器，不报告虚假的配置切换成功。账号环境不允许 Clone 复用同一分区；Java 新 Tab 导航入口复用原页面，保留请求正文、发起来源和额外请求头。尚未覆盖所有原生 Popup WebContents 入口，也未完成冻结和重启恢复，故不开放 `tabs` 能力。
+现阶段关闭环境后，如代理或指纹种子与已有缓存不同，需要重启浏览器，不报告虚假的配置切换成功。账号环境不允许 Clone 复用同一分区；Java 新 Tab 导航入口复用原页面，保留请求正文、发起来源和额外请求头。另一个已创建 Popup 的接收入口拒绝第二个账号页面，不把缺少 POST 正文的 URL 假装转换成原页导航；完整单页跳转仍需设备回归。
+
+正常使用链路已在 `managed-tab-android-tab-operations.patch` 接入 `tabs.list/create/activate/navigate/close`。使用真实 TabModel、TabCreator 和 TabRemover，在 UI 线程重新校验消息端口、文档代次、真实主框架 Origin 与等待期限；控制台和普通标签不能作为账号目标，冻结/归档环境参与重复账号检查。创建先建立固定分区并核对 WebContents 所有者，再加载网页；创建失败清理实际所有者，不退回普通标签。
+
+平台实现成功绑定时提供 `tabs` 与 `crypto`；未绑定的独立路由仍只提供 `crypto`。`storage/fingerprint/files/http` 尚未接入，保持不可用。普通冻结读取使用必需状态头和真实分区元数据；异常关闭自动恢复按用户指定的低优先级暂缓，不继续扩大该专项。
+
+本轮独立复测 474 项通过，包含 33 项消息路由测试；其中 13 项仅为分发边界探针，不模拟 Android 标签。三个平台 Java 文件解析、两个 JNI 生成、环境/状态 JSON 局部 C++ 检查和新补丁反向检查通过。未完成 Android 类型检查、完整编译或设备运行；原生参数测试对象/链接成功但加载入口错误仍未解决，不计为运行通过。
 
 验证边界：实际原生参数函数测试源码保存在 `tests/account-environment-validation.cc`，可复用 `utils/check_cpp_syntax.py` 的现有编译参数。头文件、共享浏览器代码和测试源码语法检查通过；测试对象编译和链接通过，但测试程序启动被系统拒绝，不能宣称参数运行测试或 Android 分区运行验收通过。新增 JNI 生成和源码补丁反向检查通过；没有全量构建或修改系统策略。
 

@@ -64,6 +64,7 @@ public final class SaasBridgeDispatcherSelfTest {
         decrypt.put("envelope", deepEnvelope);
         Map<String, Object> deepResponse = invoke(dispatcher, "crypto.decryptSnapshot", decrypt, ORIGIN);
         check(Boolean.FALSE.equals(deepResponse.get("ok")) && ((String) deepResponse.get("error")).contains("支持范围"), "过深响应未包装为安全错误");
+        testNativeRouting(dispatcher);
         System.out.println("原生消息路由自测通过：" + assertions + " 项");
     }
 
@@ -73,6 +74,50 @@ public final class SaasBridgeDispatcherSelfTest {
         return decode(dispatcher.dispatch(new String(SnapshotJson.encode(request, SaasBridgeDispatcher.MAX_MESSAGE_BYTES), StandardCharsets.UTF_8), origin));
     }
     private static Map<String, Object> decode(String value) { return SnapshotJson.decode(value.getBytes(StandardCharsets.UTF_8)); }
+
+    /** 仅验证路由边界的探针，不模拟 Android 标签或替代真实平台验收。 */
+    private static void testNativeRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "tabs".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("type", "fingerprint-saas-bridge:request"); request.put("requestId", "native-1");
+        request.put("args", decode("{\"tabId\":\"account-01\"}"));
+        for (String method : new String[] {"tabs.list", "tabs.create", "tabs.activate", "tabs.navigate", "tabs.close"}) {
+            request.put("method", method);
+            String message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+            Map<String, Object> response = decode(dispatcher.dispatch(message, ORIGIN, probe));
+            check(Boolean.TRUE.equals(response.get("ok")) && request.get("args").equals(response.get("result")), "原生标签路由或参数不一致");
+        }
+        check(calls[0] == 5, "允许的标签操作未全部路由");
+        request.put("method", "getCapabilities");
+        String message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("tabs")) && Boolean.FALSE.equals(flags.get("storage")), "未按已绑定的平台能力声明");
+        request.put("method", "tabs.close");
+        message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "原生路由未拒绝未授权来源");
+        check(calls[0] == 5, "未授权请求到达平台层");
+        request.put("method", "tabs.destroyEverything");
+        message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")) && calls[0] == 5, "未知方法到达平台层");
+        SaasBridgeDispatcher.NativeBackend denied = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return false; }
+            public Object invoke(String method, Map<String, Object> args) { throw new AssertionError("能力不可用时不应调用"); }
+        };
+        request.put("method", "tabs.list");
+        message = new String(SnapshotJson.encode(request, 65536), StandardCharsets.UTF_8);
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN, denied)).get("ok")), "能力撤销后仍到达平台层");
+        SaasBridgeDispatcher.NativeBackend failed = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return true; }
+            public Object invoke(String method, Map<String, Object> args) { throw new IllegalStateException("开发者底层细节"); }
+        };
+        Map<String, Object> failure = decode(dispatcher.dispatch(message, ORIGIN, failed));
+        check(Boolean.FALSE.equals(failure.get("ok")) && !((String) failure.get("error")).contains("开发者底层细节"), "底层异常直接泄露到网页");
+        check("account-01".equals(SaasBridgeDispatcher.decodeNativeState("{\"account_id\":\"account-01\"}").get("account_id")), "原生状态编解码失败");
+    }
     @SuppressWarnings("unchecked") private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
     private static void check(boolean value, String message) { assertions++; if (!value) throw new AssertionError(message); }
 }

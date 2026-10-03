@@ -22,6 +22,10 @@ import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.url.Origin;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -37,6 +41,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private final Tab mTab;
     private final SaasOriginPolicy mPolicy;
     private final SaasBridgeDispatcher mDispatcher;
+    private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
     private final AtomicLong mGeneration = new AtomicLong();
     private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(
             2, 2, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), task -> {
@@ -50,9 +55,15 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private long mPendingBytes;
 
     public SaasBridgeHost(Tab tab, List<String> allowedOrigins, String startupUrl) {
+        this(tab, allowedOrigins, startupUrl, null);
+    }
+
+    public SaasBridgeHost(Tab tab, List<String> allowedOrigins, String startupUrl,
+            @Nullable SaasBridgeDispatcher.NativeBackend nativeBackend) {
         mTab = tab;
         mPolicy = new SaasOriginPolicy(allowedOrigins, startupUrl);
         mDispatcher = new SaasBridgeDispatcher(mPolicy);
+        mNativeBackend = nativeBackend;
         mWorker.allowCoreThreadTimeOut(true);
         tab.addObserver(this);
         bindWebContents();
@@ -176,7 +187,15 @@ public final class SaasBridgeHost extends EmptyTabObserver {
         @Override public void run() {
             try {
                 if (mGeneration.get() != mWorkGeneration) return;
-                String response = mDispatcher.dispatch(mMessage, mOrigin);
+                String response = mDispatcher.dispatch(mMessage, mOrigin,
+                        mNativeBackend == null ? null : new SaasBridgeDispatcher.NativeBackend() {
+                            @Override public boolean supports(String capability) {
+                                return mNativeBackend != null && mNativeBackend.supports(capability);
+                            }
+                            @Override public Object invoke(String method, Map<String, Object> args) {
+                                return invokeOnUiThread(method, args);
+                            }
+                        });
                 PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
                     if (mGeneration.get() != mWorkGeneration) return;
                     try {
@@ -190,6 +209,41 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                     if (mGeneration.get() == mWorkGeneration) revoke();
                 });
             } finally { PostTask.postTask(TaskTraits.UI_DEFAULT, this::release); }
+        }
+
+        private Object invokeOnUiThread(String method, Map<String, Object> args) {
+            CompletableFuture<Object> result = new CompletableFuture<>();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+            PostTask.postTask(TaskTraits.UI_DEFAULT, () -> {
+                if (result.isDone()) return;
+                try {
+                    if (System.nanoTime() >= deadline || mDestroyed ||
+                            mGeneration.get() != mWorkGeneration || mPort != mWorkPort ||
+                            mWorkPort.isClosed() || !mOrigin.equals(trustedOrigin(mContents))) {
+                        result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，标签操作已停止"));
+                        return;
+                    }
+                    if (mNativeBackend == null) throw new SaasBridgeDispatcher.NativeRequestException("当前客户端尚未提供标签管理能力");
+                    result.complete(mNativeBackend.invoke(method, args));
+                } catch (RuntimeException error) { result.completeExceptionally(error); }
+                catch (LinkageError error) {
+                    result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("客户端原生接口版本不匹配，请更新客户端"));
+                }
+            });
+            try { return result.get(15, TimeUnit.SECONDS); }
+            catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                result.cancel(false);
+                throw new SaasBridgeDispatcher.NativeRequestException("标签操作已取消");
+            } catch (TimeoutException error) {
+                result.cancel(false);
+                throw new SaasBridgeDispatcher.NativeRequestException("标签操作等待超时，请重试");
+            } catch (ExecutionException error) {
+                if (error.getCause() instanceof SaasBridgeDispatcher.NativeRequestException) {
+                    throw (SaasBridgeDispatcher.NativeRequestException) error.getCause();
+                }
+                throw new SaasBridgeDispatcher.NativeRequestException("标签操作失败，请检查账号环境后重试");
+            }
         }
     }
 

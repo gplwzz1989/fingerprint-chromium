@@ -6,6 +6,17 @@ import java.util.Map;
 
 /** 原生消息路由；来源参数只能由持有消息端口的 Chromium 宿主提供。 */
 public final class SaasBridgeDispatcher {
+    /** 平台实现只暴露已接入的能力；消息宿主必须在执行前重新检查真实页面授权。 */
+    public interface NativeBackend {
+        boolean supports(String capability);
+        Object invoke(String method, Map<String, Object> args);
+    }
+
+    public static final class NativeRequestException extends IllegalArgumentException {
+        private static final long serialVersionUID = 1L;
+        public NativeRequestException(String message) { super(message); }
+    }
+
     public static final int MAX_MESSAGE_BYTES = 24 * 1024 * 1024;
     private final SaasOriginPolicy policy;
     private final SnapshotCrypto crypto = new SnapshotCrypto();
@@ -16,6 +27,10 @@ public final class SaasBridgeDispatcher {
     }
 
     public String dispatch(String message, String trustedOrigin) {
+        return dispatch(message, trustedOrigin, null);
+    }
+
+    public String dispatch(String message, String trustedOrigin, NativeBackend backend) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("type", "fingerprint-saas-bridge:response");
         response.put("requestId", "");
@@ -34,11 +49,13 @@ public final class SaasBridgeDispatcher {
             if (!"fingerprint-saas-bridge:request".equals(request.get("type"))) throw invalid("原生桥消息类型无效");
             String method = string(request, "method", 64);
             Map<String, Object> args = object(request.get("args"));
-            response.put("result", invoke(method, args, trustedOrigin));
+            response.put("result", invoke(method, args, trustedOrigin, backend));
             response.put("ok", true);
         } catch (SnapshotCrypto.SnapshotCryptoException error) {
             response.put("ok", false); response.put("error", error.getMessage());
         } catch (BridgeException error) {
+            response.put("ok", false); response.put("error", error.getMessage());
+        } catch (NativeRequestException error) {
             response.put("ok", false); response.put("error", error.getMessage());
         } catch (RuntimeException error) {
             response.put("ok", false); response.put("error", "原生桥请求失败，请检查参数后重试");
@@ -64,10 +81,16 @@ public final class SaasBridgeDispatcher {
         }
     }
 
-    private Object invoke(String method, Map<String, Object> args, String origin) {
+    public static Map<String, Object> decodeNativeState(String json) {
+        if (json == null || json.length() > 65536) throw new NativeRequestException("原生标签状态无效");
+        return SnapshotJson.decode(json.getBytes(StandardCharsets.UTF_8), 65536);
+    }
+
+    private Object invoke(String method, Map<String, Object> args, String origin, NativeBackend backend) {
         if ("getCapabilities".equals(method)) {
             Map<String, Object> capabilities = new LinkedHashMap<>();
             for (String name : new String[] {"tabs", "storage", "fingerprint", "files", "http"}) capabilities.put(name, false);
+            capabilities.put("tabs", backend != null && backend.supports("tabs"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -75,6 +98,11 @@ public final class SaasBridgeDispatcher {
         }
         String accountId;
         char[] password;
+        if ("tabs.list".equals(method) || "tabs.create".equals(method) ||
+                "tabs.activate".equals(method) || "tabs.navigate".equals(method) || "tabs.close".equals(method)) {
+            if (backend == null || !backend.supports("tabs")) throw invalid("当前客户端尚未提供标签管理能力");
+            return backend.invoke(method, args);
+        }
         if (!"crypto.encryptSnapshot".equals(method) && !"crypto.decryptSnapshot".equals(method)) {
             throw invalid("当前客户端尚未提供该原生能力");
         }

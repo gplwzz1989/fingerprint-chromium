@@ -1,0 +1,622 @@
+--- a/chrome/browser/ui/android/tab_model/saas_account_state.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_state.h
+@@ -0,0 +1,102 @@
++#ifndef CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STATE_H_
++#define CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STATE_H_
++
++#include <cstdint>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/pickle.h"
++
++namespace chrome::android {
++
++// 分区身份是必需的顶层字段，不放入可能被导航大小预算截断的 extended_info。
++// 零条导航前缀让旧解析器受控拒绝，避免负数数量触发巨量内存申请。
++struct SaasAccountState {
++  static constexpr int kMarker = -0x53414153;
++  static constexpr int kVersion = 1;
++  static constexpr int kMaxEntries = 10000;
++
++  std::string account_id;
++  std::string proxy_rules;
++  std::string fingerprint_seed;
++
++  static bool IsValidAccountId(std::string_view value) {
++    if (value.empty() || value.size() > 128) return false;
++    for (unsigned char c : value) {
++      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
++            (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
++    }
++    return true;
++  }
++
++  static bool IsValidSeed(std::string_view value) {
++    if (value.empty() || value.size() > 10) return false;
++    uint64_t seed = 0;
++    for (unsigned char c : value) {
++      if (c < '0' || c > '9') return false;
++      seed = seed * 10 + (c - '0');
++    }
++    return seed <= 0xffffffffULL;
++  }
++
++  bool IsValid() const {
++    return IsValidAccountId(account_id) && IsValidSeed(fingerprint_seed) &&
++           proxy_rules.size() <= 2048 &&
++           proxy_rules.find_first_of(";,=@\r\n\0", 0, 7) == std::string::npos;
++  }
++
++  static bool WriteHeader(base::Pickle* pickle, bool off_the_record,
++                          int entry_count, int current_entry_index,
++                          const std::optional<SaasAccountState>& state) {
++    if (!pickle || entry_count < 1 || entry_count > kMaxEntries ||
++        current_entry_index < 0 || current_entry_index >= entry_count ||
++        (state && (off_the_record || !state->IsValid()))) return false;
++    pickle->WriteBool(off_the_record);
++    if (state) {
++      pickle->WriteInt(0);
++      pickle->WriteInt(kMarker);
++      pickle->WriteInt(kVersion);
++      pickle->WriteString(state->account_id);
++      pickle->WriteString(state->proxy_rules);
++      pickle->WriteString(state->fingerprint_seed);
++    }
++    pickle->WriteInt(entry_count);
++    pickle->WriteInt(current_entry_index);
++    return true;
++  }
++
++  static bool ReadHeader(base::PickleIterator* iter, bool* off_the_record,
++                         int* entry_count, int* current_entry_index,
++                         std::optional<SaasAccountState>* state) {
++    state->reset();
++    int count;
++    if (!iter->ReadBool(off_the_record) || !iter->ReadInt(&count)) return false;
++    std::optional<SaasAccountState> parsed;
++    if (count == 0) {
++      int marker, version;
++      std::string_view account, proxy, seed;
++      if (*off_the_record || !iter->ReadInt(&marker) || marker != kMarker ||
++          !iter->ReadInt(&version) || version != kVersion ||
++          !iter->ReadStringPiece(&account) || !IsValidAccountId(account) ||
++          !iter->ReadStringPiece(&proxy) || proxy.size() > 2048 ||
++          proxy.find_first_of(";,=@\r\n\0", 0, 7) != std::string_view::npos ||
++          !iter->ReadStringPiece(&seed) || !IsValidSeed(seed) ||
++          !iter->ReadInt(&count)) return false;
++      // 先验证切片长度再分配，损坏的状态不能触发无界字符串分配。
++      parsed = SaasAccountState{std::string(account), std::string(proxy), std::string(seed)};
++    }
++    if (count < 1 || count > kMaxEntries ||
++        !iter->ReadInt(current_entry_index) || *current_entry_index < 0 ||
++        *current_entry_index >= count ||
++        iter->RemainingBytes() / 8 < static_cast<size_t>(count)) return false;
++    *entry_count = count;
++    *state = std::move(parsed);
++    return true;
++  }
++};
++
++}  // namespace chrome::android
++
++#endif  // CHROME_BROWSER_UI_ANDROID_TAB_MODEL_SAAS_ACCOUNT_STATE_H_
+--- a/chrome/browser/ui/android/tab_model/saas_account_environment.h
++++ b/chrome/browser/ui/android/tab_model/saas_account_environment.h
+@@ -12,6 +12,7 @@
+ #include "base/supports_user_data.h"
+ #include "base/values.h"
+ #include "chrome/common/chrome_switches.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_state.h"
+ #include "components/ungoogled/ungoogled_switches.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/site_instance.h"
+@@ -32,19 +33,11 @@
+   ~SaasAccountEnvironment() override = default;
+ 
+   static bool IsValidAccountId(const std::string& value) {
+-    if (value.empty() || value.size() > 128) return false;
+-    for (unsigned char c : value) {
+-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+-            (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
+-    }
+-    return true;
++    return SaasAccountState::IsValidAccountId(value);
+   }
+ 
+   static bool IsValidSeed(const std::string& value) {
+-    uint32_t seed = 0;
+-    if (value.empty() || value.size() > 10) return false;
+-    for (unsigned char c : value) if (c < '0' || c > '9') return false;
+-    return base::StringToUint(value, &seed);
++    return SaasAccountState::IsValidSeed(value);
+   }
+ 
+   static bool ParseProxy(const std::string& value,
+@@ -61,7 +54,9 @@
+       const std::string& account_id,
+       const std::string& proxy_rules,
+       const std::string& fingerprint_seed,
+-      std::string* error) {
++      std::string* error,
++      bool initially_hidden = true,
++      bool no_renderer = false) {
+     net::ProxyConfig::ProxyRules proxy;
+     if (!browser_context || browser_context->IsOffTheRecord() ||
+         !IsValidAccountId(account_id) || !ParseProxy(proxy_rules, &proxy) ||
+@@ -92,7 +87,10 @@
+     content::WebContents::CreateParams params(browser_context);
+     params.site_instance = content::SiteInstance::CreateForFixedStoragePartition(
+         browser_context, GURL("about:blank"), config);
+-    params.initially_hidden = true;
++    params.initially_hidden = initially_hidden;
++    if (no_renderer) {
++      params.desired_renderer_state = content::WebContents::CreateParams::kNoRendererProcess;
++    }
+     auto contents = content::WebContents::Create(params);
+     if (!contents || contents->GetSiteInstance()->GetStoragePartitionConfig() != config) {
+       SetError(error, "未能建立固定持久化分区，账号环境创建已停止");
+@@ -153,6 +151,10 @@
+     state.Set("fingerprint_seed", fingerprint_seed_);
+     state.Set("load_progress", web_contents()->GetLoadProgress());
+     return state;
++  }
++
++  SaasAccountState GetPersistentState() const {
++    return {account_id_, proxy_rules_, fingerprint_seed_};
+   }
+ 
+  private:
+--- a/chrome/browser/tab/web_contents_state.cc
++++ b/chrome/browser/tab/web_contents_state.cc
+@@ -23,6 +23,7 @@
+ #include "base/metrics/histogram_macros.h"
+ #include "base/pickle.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_environment.h"
+ #include "components/sessions/content/content_serialized_navigation_builder.h"
+ #include "components/sessions/core/serialized_navigation_entry.h"
+ #include "components/sessions/core/session_command.h"
+@@ -45,6 +46,8 @@
+ using content::BrowserContext;
+ using content::NavigationController;
+ using content::WebContents;
++using chrome::android::SaasAccountEnvironment;
++using chrome::android::SaasAccountState;
+ 
+ namespace {
+ 
+@@ -60,22 +63,25 @@
+   return base::android::ScopedJavaLocalRef<jobject>::Adopt(env, ret);
+ }
+ 
+-void WriteStateHeaderToPickle(bool off_the_record,
++bool WriteStateHeaderToPickle(bool off_the_record,
+                               int entry_count,
+                               int current_entry_index,
+-                              base::Pickle* pickle) {
+-  pickle->WriteBool(off_the_record);
+-  pickle->WriteInt(entry_count);
+-  pickle->WriteInt(current_entry_index);
++                              base::Pickle* pickle,
++                              const std::optional<SaasAccountState>& account_state) {
++  return SaasAccountState::WriteHeader(pickle, off_the_record, entry_count,
++                                       current_entry_index, account_state);
+ }
+ 
+ base::Pickle WriteSerializedNavigationsAsPickle(
+     bool is_off_the_record,
+     const std::vector<sessions::SerializedNavigationEntry>& navigations,
+-    int current_entry) {
++    int current_entry,
++    const std::optional<SaasAccountState>& account_state = std::nullopt) {
+   base::Pickle pickle;
+-  WriteStateHeaderToPickle(is_off_the_record, navigations.size(), current_entry,
+-                           &pickle);
++  if (!WriteStateHeaderToPickle(is_off_the_record, navigations.size(),
++                                current_entry, &pickle, account_state)) {
++    return pickle;
++  }
+ 
+   // Write out all of the NavigationEntrys.
+   for (const auto& navigation : navigations) {
+@@ -98,9 +104,14 @@
+     JNIEnv* env,
+     bool is_off_the_record,
+     const std::vector<sessions::SerializedNavigationEntry>& navigations,
+-    int current_entry) {
++    int current_entry,
++    const std::optional<SaasAccountState>& account_state = std::nullopt) {
+   base::Pickle pickle = WriteSerializedNavigationsAsPickle(
+-      is_off_the_record, navigations, current_entry);
++      is_off_the_record, navigations, current_entry, account_state);
++  if (pickle.payload_size() == 0 ||
++      pickle.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
++    return {};
++  }
+   ScopedJavaLocalRef<jobject> buffer =
+       CreateByteBufferDirect(env, static_cast<int>(pickle.size()));
+   if (buffer) {
+@@ -130,11 +141,12 @@
+     JNIEnv* env,
+     bool is_off_the_record,
+     const std::vector<content::NavigationEntry*>& navigations,
+-    int current_entry) {
++    int current_entry,
++    const std::optional<SaasAccountState>& account_state = std::nullopt) {
+   std::vector<sessions::SerializedNavigationEntry> serialized =
+       SerializeNavigations(navigations);
+   return WriteSerializedNavigationsAsByteBuffer(env, is_off_the_record,
+-                                                serialized, current_entry);
++                                                serialized, current_entry, account_state);
+ }
+ 
+ std::unique_ptr<content::NavigationEntry> CreatePendingNavigationEntry(
+@@ -199,10 +211,25 @@
+ 
+   content::NavigationController& controller = web_contents->GetController();
+   const int entry_count = controller.GetEntryCount();
++  std::optional<SaasAccountState> account_state;
++  const auto& config = web_contents->GetSiteInstance()->GetStoragePartitionConfig();
++  if (config.partition_domain() == SaasAccountEnvironment::kPartitionDomain) {
++    auto* environment = SaasAccountEnvironment::FromWebContents(web_contents);
++    if (!environment) return {};
++    account_state = environment->GetPersistentState();
++  }
+   // Don't try to persist initial NavigationEntry, as it is not actually
+   // associated with any navigation and will just result in about:blank on
+   // session restore.
+   if (controller.GetLastCommittedEntry()->IsInitialEntry()) {
++    // 账号 Tab 即使尚未提交导航，也必须保存分区身份，否则冻结会丢失隔离。
++    if (account_state) {
++      auto blank_entry = CreatePendingNavigationEntry(
++          web_contents->GetBrowserContext(), std::nullopt, "about:blank",
++          std::nullopt, 0, std::nullopt);
++      return WriteNavigationsAsByteBuffer(
++          env, false, {blank_entry.get()}, 0, account_state);
++    }
+     return ScopedJavaLocalRef<jobject>();
+   }
+ 
+@@ -213,7 +240,7 @@
+ 
+   return WriteNavigationsAsByteBuffer(
+       env, web_contents->GetBrowserContext()->IsOffTheRecord(), navigations,
+-      controller.GetLastCommittedEntryIndex());
++      controller.GetLastCommittedEntryIndex(), account_state);
+ }
+ 
+ ScopedJavaLocalRef<jobject>
+@@ -225,9 +252,10 @@
+   bool is_off_the_record;
+   int current_entry_index;
+   std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<SaasAccountState> account_state;
+   bool success = WebContentsState::ExtractNavigationEntries(
+       buffer, saved_state_version, &is_off_the_record, &current_entry_index,
+-      &navigations);
++      &navigations, &account_state);
+   if (!success) {
+     return ScopedJavaLocalRef<jobject>();
+   }
+@@ -261,7 +289,7 @@
+   navigations.resize(write_index);
+ 
+   return WriteSerializedNavigationsAsByteBuffer(
+-      env, is_off_the_record, navigations, current_entry_index);
++      env, is_off_the_record, navigations, current_entry_index, account_state);
+ }
+ 
+ std::optional<std::u16string> WebContentsState::GetDisplayTitleFromByteBuffer(
+@@ -345,10 +373,11 @@
+   bool is_off_the_record = browser_context->IsOffTheRecord();
+   int current_entry_index;
+   std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<SaasAccountState> account_state;
+   bool success = WebContentsState::ExtractNavigationEntries(
+       buffer, saved_state_version, &is_off_the_record, &current_entry_index,
+-      &navigations);
+-  if (!success) {
++      &navigations, &account_state);
++  if (!success || is_off_the_record != browser_context->IsOffTheRecord()) {
+     return nullptr;
+   }
+ 
+@@ -356,14 +385,23 @@
+       sessions::ContentSerializedNavigationBuilder::ToNavigationEntries(
+           navigations, browser_context);
+ 
+-  WebContents::CreateParams params(browser_context);
+-
+-  params.initially_hidden = initially_hidden;
+-  if (no_renderer) {
+-    params.desired_renderer_state =
+-        WebContents::CreateParams::kNoRendererProcess;
+-  }
+-  std::unique_ptr<WebContents> web_contents(WebContents::Create(params));
++  std::unique_ptr<WebContents> web_contents;
++  if (account_state) {
++    std::string error;
++    web_contents = SaasAccountEnvironment::Create(
++        browser_context, account_state->account_id, account_state->proxy_rules,
++        account_state->fingerprint_seed, &error, initially_hidden, no_renderer);
++    // 固定分区创建失败时不能回退到普通 WebContents。
++    if (!web_contents) return nullptr;
++  } else {
++    WebContents::CreateParams params(browser_context);
++    params.initially_hidden = initially_hidden;
++    if (no_renderer) {
++      params.desired_renderer_state = WebContents::CreateParams::kNoRendererProcess;
++    }
++    web_contents = WebContents::Create(params);
++  }
++  if (!web_contents) return nullptr;
+   web_contents->GetController().Restore(
+       current_entry_index, content::RestoreType::kRestored, &entries);
+   return web_contents;
+@@ -374,12 +412,17 @@
+     int saved_state_version,
+     bool* is_off_the_record,
+     int* current_entry_index,
+-    std::vector<sessions::SerializedNavigationEntry>* navigations) {
++    std::vector<sessions::SerializedNavigationEntry>* navigations,
++    std::optional<SaasAccountState>* account_state) {
++  if (account_state) account_state->reset();
++  navigations->clear();
+   int entry_count;
+   base::Pickle pickle = base::Pickle::WithUnownedBuffer(buffer);
+   base::PickleIterator iter(pickle);
+-  if (!iter.ReadBool(is_off_the_record) || !iter.ReadInt(&entry_count) ||
+-      !iter.ReadInt(current_entry_index)) {
++  std::optional<SaasAccountState> parsed_account;
++  if (pickle.header_size() != sizeof(base::Pickle::Header) ||
++      !SaasAccountState::ReadHeader(&iter, is_off_the_record, &entry_count,
++                                    current_entry_index, &parsed_account)) {
+     LOG(ERROR) << "Failed to restore state from byte array (length="
+                << buffer.size() << ").";
+     return false;
+@@ -404,9 +447,12 @@
+     }
+     base::Pickle tab_navigation_pickle =
+         base::Pickle::WithUnownedBuffer(*tab_entry);
++    if (tab_navigation_pickle.header_size() != sizeof(base::Pickle::Header)) {
++      return false;
++    }
+     base::PickleIterator tab_navigation_pickle_iterator(tab_navigation_pickle);
+     sessions::SerializedNavigationEntry nav;
+-    if (!nav.ReadFromPickle(&tab_navigation_pickle_iterator)) {
++    if (!nav.ReadFromPickle(&tab_navigation_pickle_iterator) || nav.index() != i) {
+       return false;  // If we failed to read a navigation, give up on others.
+     }
+ 
+@@ -419,6 +465,8 @@
+     return false;
+   }
+ 
++  if (!iter.ReachedEnd()) return false;
++  if (account_state) *account_state = std::move(parsed_account);
+   return true;
+ }
+ 
+@@ -480,14 +528,17 @@
+   bool is_context_off_the_record = browser_context->IsOffTheRecord();
+   int current_entry_index;
+   std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<SaasAccountState> account_state;
+   bool success = WebContentsState::ExtractNavigationEntries(
+       buffer, saved_state_version, &is_off_the_record, &current_entry_index,
+-      &navigations);
++      &navigations, &account_state);
+ 
+   bool safeToAppend = success && is_context_off_the_record == is_off_the_record;
+   base::UmaHistogramBoolean(
+       "Tabs.DeserializationResultForAppendPendingNavigation", safeToAppend);
+   if (!safeToAppend) {
++    // 损坏状态无法证明是否属于账号环境，不允许丢弃身份后生成共享 Tab 状态。
++    if (!success || account_state) return {};
+     LOG(WARNING) << "Failed to deserialize navigation entries, clobbering "
+                     "previous navigation state.";
+     return CreateSingleNavigationStateAsByteBuffer(
+@@ -506,10 +557,27 @@
+           new_entry_index, new_entry.get()));
+ 
+   return WriteSerializedNavigationsAsByteBuffer(
+-      env, is_off_the_record, navigations, new_entry_index);
++      env, is_off_the_record, navigations, new_entry_index, account_state);
++}
++
++bool WebContentsState::IsDefaultRestorationFallbackAllowed(
++    base::span<const uint8_t> buffer, int saved_state_version) {
++  bool off_the_record;
++  int current;
++  std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<SaasAccountState> account_state;
++  return ExtractNavigationEntries(buffer, saved_state_version, &off_the_record,
++                                  &current, &navigations, &account_state) &&
++         !account_state.has_value();
+ }
+ 
+ // Static JNI methods.
++
++static jboolean JNI_WebContentsState_IsDefaultRestorationFallbackAllowed(
++    JNIEnv* env, const JavaParamRef<jobject>& state, int saved_state_version) {
++  return WebContentsState::IsDefaultRestorationFallbackAllowed(
++      base::android::JavaByteBufferToSpan(env, state), saved_state_version);
++}
+ 
+ static ScopedJavaLocalRef<jobject>
+ JNI_WebContentsState_RestoreContentsFromByteBuffer(
+--- a/chrome/browser/android/historical_tab_saver.cc
++++ b/chrome/browser/android/historical_tab_saver.cc
+@@ -23,11 +23,13 @@
+ #include "chrome/browser/sessions/tab_restore_service_factory.h"
+ #include "chrome/browser/tab/web_contents_state.h"
+ #include "chrome/browser/ui/android/tab_model/android_live_tab_context_wrapper.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_environment.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+ #include "chrome/common/url_constants.h"
+ #include "components/sessions/content/content_live_tab.h"
+ #include "components/sessions/core/tab_restore_service.h"
++#include "components/sessions/core/serialized_navigation_entry.h"
+ #include "content/public/browser/web_contents.h"
+ 
+ // Must come after all headers that specialize FromJniType() / ToJniType().
+@@ -40,6 +42,40 @@
+ namespace historical_tab_saver {
+ 
+ namespace {
++
++// 最近关闭列表只保留普通导航，不能保存固定账号分区。账号由 SaaS 独立恢复。
++// 无法解析的冻结状态也排除，不能把身份丢失当作普通共享环境写入历史。
++bool ExcludeFromOrdinaryHistory(
++    TabAndroid* tab, const WebContentsStateByteBuffer& state) {
++  if (!tab) return true;
++  if (auto* contents = tab->web_contents()) {
++    return contents->GetSiteInstance()->GetStoragePartitionConfig().partition_domain() ==
++           chrome::android::SaasAccountEnvironment::kPartitionDomain;
++  }
++  if (state.state_version == -1) return true;
++  bool off_the_record;
++  int current;
++  std::vector<sessions::SerializedNavigationEntry> navigations;
++  std::optional<chrome::android::SaasAccountState> account_state;
++  return !WebContentsState::ExtractNavigationEntries(
++             state.backing_buffer, state.state_version, &off_the_record,
++             &current, &navigations, &account_state) || account_state.has_value();
++}
++
++bool FilterOrdinaryHistory(
++    std::vector<TabAndroid*>* tabs,
++    std::vector<WebContentsStateByteBuffer>* states,
++    std::vector<std::optional<tab_groups::TabGroupId>>* groups = nullptr) {
++  if (tabs->size() != states->size() ||
++      (groups && groups->size() != tabs->size())) return false;
++  for (size_t i = tabs->size(); i > 0; --i) {
++    if (!ExcludeFromOrdinaryHistory((*tabs)[i - 1], (*states)[i - 1])) continue;
++    tabs->erase(tabs->begin() + (i - 1));
++    states->erase(states->begin() + (i - 1));
++    if (groups) groups->erase(groups->begin() + (i - 1));
++  }
++  return !tabs->empty();
++}
+ 
+ std::vector<WebContentsStateByteBuffer> AllTabsWebContentsStateByteBuffer(
+     JNIEnv* env,
+@@ -91,6 +127,9 @@
+     TabAndroid* tab_android,
+     WebContentsStateByteBuffer web_contents_state_byte_buffer) {
+   if (!tab_android) {
++    return;
++  }
++  if (ExcludeFromOrdinaryHistory(tab_android, web_contents_state_byte_buffer)) {
+     return;
+   }
+ 
+@@ -126,6 +165,7 @@
+     std::vector<TabAndroid*> tabs,
+     std::vector<WebContentsStateByteBuffer> web_contents_state) {
+   DCHECK(model);
++  if (!FilterOrdinaryHistory(&tabs, &web_contents_state)) return;
+   sessions::TabRestoreService* service =
+       TabRestoreServiceFactory::GetForProfile(model->GetProfile());
+   if (!service) {
+@@ -167,6 +207,8 @@
+     std::vector<TabAndroid*> tabs,
+     std::vector<WebContentsStateByteBuffer> web_contents_state) {
+   DCHECK(model);
++  if (!FilterOrdinaryHistory(&tabs, &web_contents_state,
++                             &per_tab_optional_tab_group_ids)) return;
+   DCHECK_EQ(tab_group_ids.size(), group_titles.size());
+   DCHECK_EQ(tab_group_ids.size(), group_colors.size());
+   DCHECK_EQ(tab_group_ids.size(), tab_group_ids.size());
+--- a/chrome/browser/tab/web_contents_state.h
++++ b/chrome/browser/tab/web_contents_state.h
+@@ -9,6 +9,7 @@
+ #include "base/containers/span.h"
+ #include "base/functional/callback.h"
+ #include "base/memory/raw_span.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_state.h"
+ #include "content/public/browser/web_contents.h"
+ 
+ namespace sessions {
+@@ -119,7 +120,12 @@
+       int saved_state_version,
+       bool* is_off_the_record,
+       int* current_entry_index,
+-      std::vector<sessions::SerializedNavigationEntry>* navigations);
++      std::vector<sessions::SerializedNavigationEntry>* navigations,
++      std::optional<chrome::android::SaasAccountState>* account_state = nullptr);
++
++  // 只有完整、普通分区的导航状态允许恢复失败后加载到默认环境。
++  static bool IsDefaultRestorationFallbackAllowed(
++      base::span<const uint8_t> buffer, int saved_state_version);
+ 
+   // Synthesizes a stub, single-navigation state for a tab that will be loaded
+   // lazily.
+--- a/chrome/browser/tab/java/src/org/chromium/chrome/browser/tab/WebContentsState.java
++++ b/chrome/browser/tab/java/src/org/chromium/chrome/browser/tab/WebContentsState.java
+@@ -245,6 +245,12 @@
+                 .restoreContentsFromByteBuffer(profile, buffer(), version(), isHidden, noRenderer);
+     }
+ 
++    /** 账号或损坏的状态不能因恢复失败而在默认共享环境重新加载账号网址。 */
++    public boolean isDefaultRestorationFallbackAllowed() {
++        return WebContentsStateJni.get()
++                .isDefaultRestorationFallbackAllowed(buffer(), version());
++    }
++
+     /**
+      * Deletes navigation entries from this {@link WebContentsState} matching the predicate.
+      *
+@@ -315,6 +321,8 @@
+     @NativeMethods
+     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+     public interface Natives {
++        boolean isDefaultRestorationFallbackAllowed(ByteBuffer state, int savedStateVersion);
++
+         @Nullable WebContents restoreContentsFromByteBuffer(
+                 @JniType("Profile*") Profile profile,
+                 ByteBuffer buffer,
+--- a/chrome/browser/android/tab_web_contents_delegate_android.cc
++++ b/chrome/browser/android/tab_web_contents_delegate_android.cc
+@@ -40,6 +40,7 @@
+ #include "chrome/browser/safe_browsing/safe_browsing_navigation_observer_manager_factory.h"
+ #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+ #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
++#include "chrome/browser/ui/android/tab_model/saas_account_environment.h"
+ #include "chrome/browser/ui/blocked_content/chrome_popup_navigation_delegate.h"
+ #include "chrome/browser/ui/browser_navigator_params.h"
+ #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+@@ -368,6 +369,14 @@
+     const blink::mojom::WindowFeatures& window_features,
+     bool user_gesture,
+     bool* was_blocked) {
++  if (source &&
++      source->GetSiteInstance()->GetStoragePartitionConfig().partition_domain() ==
++          chrome::android::SaasAccountEnvironment::kPartitionDomain) {
++    // 此入口已创建 Popup WebContents，不能拿缺少 POST 正文的 URL 假装原页导航。
++    // 释放未交给 Java 的弹窗，阻止出现第二个共享账号分区的 Tab。
++    if (was_blocked) *was_blocked = true;
++    return nullptr;
++  }
+   // No code for this yet.
+   DCHECK_NE(disposition, WindowOpenDisposition::SAVE_TO_DISK);
+   // Can't create a new contents for the current tab - invalid case.
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
+@@ -2357,6 +2357,12 @@
+ 
+             WebContents webContents =
+                     mWebContentsState.restoreWebContents(getProfile(), isHidden(), noRenderer);
+ 
++            if (webContents == null && !mWebContentsState.isDefaultRestorationFallbackAllowed()) {
++                // 保留冻结状态，不允许将账号网址加载到默认共享环境；由控制台重新恢复账号。
++                for (TabObserver observer : mObservers) observer.onRestoreFailed(this);
++                return false;
++            }
++
+             UrlConstantResolver urlConstantResolver =
+                     UrlConstantResolverFactory.getForProfile(mProfile);

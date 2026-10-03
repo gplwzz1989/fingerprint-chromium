@@ -203,3 +203,5 @@ upstream-fixes/managed-tab-saas-native-crypto.patch
 upstream-fixes/managed-tab-saas-absolute-files.patch
 upstream-fixes/managed-tab-android-native-port.patch
 upstream-fixes/managed-tab-android-account-environment.patch
+upstream-fixes/managed-tab-android-account-state.patch
+upstream-fixes/managed-tab-android-tab-operations.patch

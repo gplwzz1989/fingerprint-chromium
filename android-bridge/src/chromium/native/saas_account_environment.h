@@ -12,6 +12,7 @@
 #include "base/supports_user_data.h"
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/android/tab_model/saas_account_state.h"
 #include "components/ungoogled/ungoogled_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/site_instance.h"
@@ -32,19 +33,11 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
   ~SaasAccountEnvironment() override = default;
 
   static bool IsValidAccountId(const std::string& value) {
-    if (value.empty() || value.size() > 128) return false;
-    for (unsigned char c : value) {
-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
-    }
-    return true;
+    return SaasAccountState::IsValidAccountId(value);
   }
 
   static bool IsValidSeed(const std::string& value) {
-    uint32_t seed = 0;
-    if (value.empty() || value.size() > 10) return false;
-    for (unsigned char c : value) if (c < '0' || c > '9') return false;
-    return base::StringToUint(value, &seed);
+    return SaasAccountState::IsValidSeed(value);
   }
 
   static bool ParseProxy(const std::string& value,
@@ -61,7 +54,9 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
       const std::string& account_id,
       const std::string& proxy_rules,
       const std::string& fingerprint_seed,
-      std::string* error) {
+      std::string* error,
+      bool initially_hidden = true,
+      bool no_renderer = false) {
     net::ProxyConfig::ProxyRules proxy;
     if (!browser_context || browser_context->IsOffTheRecord() ||
         !IsValidAccountId(account_id) || !ParseProxy(proxy_rules, &proxy) ||
@@ -92,7 +87,10 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
     content::WebContents::CreateParams params(browser_context);
     params.site_instance = content::SiteInstance::CreateForFixedStoragePartition(
         browser_context, GURL("about:blank"), config);
-    params.initially_hidden = true;
+    params.initially_hidden = initially_hidden;
+    if (no_renderer) {
+      params.desired_renderer_state = content::WebContents::CreateParams::kNoRendererProcess;
+    }
     auto contents = content::WebContents::Create(params);
     if (!contents || contents->GetSiteInstance()->GetStoragePartitionConfig() != config) {
       SetError(error, "未能建立固定持久化分区，账号环境创建已停止");
@@ -143,16 +141,25 @@ class SaasAccountEnvironment final : public base::SupportsUserData::Data,
   }
 
   base::Value::Dict GetState() const {
-    base::Value::Dict state;
-    state.Set("id", account_id_);
-    state.Set("account_id", account_id_);
+    auto state = PersistentStateToValue(GetPersistentState());
     state.Set("url", web_contents()->GetVisibleURL().spec());
-    state.Set("storage_partition", account_id_);
-    state.Set("storage_partition_persistent", true);
-    state.Set("proxy_rules", proxy_rules_);
-    state.Set("fingerprint_seed", fingerprint_seed_);
     state.Set("load_progress", web_contents()->GetLoadProgress());
     return state;
+  }
+
+  static base::Value::Dict PersistentStateToValue(const SaasAccountState& saved) {
+    base::Value::Dict state;
+    state.Set("id", saved.account_id);
+    state.Set("account_id", saved.account_id);
+    state.Set("storage_partition", saved.account_id);
+    state.Set("storage_partition_persistent", true);
+    state.Set("proxy_rules", saved.proxy_rules);
+    state.Set("fingerprint_seed", saved.fingerprint_seed);
+    return state;
+  }
+
+  SaasAccountState GetPersistentState() const {
+    return {account_id_, proxy_rules_, fingerprint_seed_};
   }
 
  private:

@@ -41,7 +41,7 @@
 
 | 能力 | 桌面首版 | Android 目标 | 备注 |
 | --- | --- | --- | --- |
-| `tabs` | 已接入 | 待接入 | 单父窗口内的原生 Tab |
+| `tabs` | 已接入 | 已编码，待 APK 验收 | 单父窗口内的原生 Tab |
 | `storage` | 已接入 | 待接入 | Cookie、LocalStorage、SessionStorage 快照 |
 | `fingerprint` | 已接入 | 待接入 | 与账号 Tab 绑定的指纹配置 |
 | `files` | 已接入绝对路径 | SAF 授权 URI | 桌面端支持系统绝对路径；相对路径仍以 `SaasFiles` 为根，不能引用上级目录 |
@@ -58,6 +58,8 @@ Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。T
 
 Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，以精确目标 Origin 把端口交给真实主框架；来源读取 `RenderFrameHost.getLastCommittedOrigin()`，不信任消息自报地址。初始化和后续消息均为 JSON 字符串。网页客户端仅接受来自固定原生来源、`source=null` 的可信初始化事件；这层网页检查不代替原生来源授权。
 
-端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。当前仅加密路由已编码开放，其余能力继续为 false；尚未完成 Android 平台运行验收。
+端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加五个 `tabs` 操作，`storage/fingerprint/files/http` 继续为 false；尚未完成 Android 平台运行验收。
+
+标签操作由宿主切换到 UI 线程，在执行前再次检查端口、文档代次、真实主框架 Origin 和 15 秒等待期限；过期或排队超时的请求不继续修改标签。账号身份由原生固定分区或普通冻结状态读取，不能用普通标签标识冒充账号，也不能关闭控制台。创建与导航只接受 HTTP、HTTPS 和 `about:blank`，不退回默认共享分区；异常关闭自动恢复暂列低优先级。
 
 桌面 iframe 客户端只向 `chrome://fingerprint-manager` 发送请求并接受该宿主来源的回复，不再使用通配目标来源。服务端提供 `frame-ancestors 'self' chrome://fingerprint-manager` 防止第三方嵌入；生产独立静态部署也应保留该响应头，PC Chrome 实际宿主兼容性仍需运行版验收。
