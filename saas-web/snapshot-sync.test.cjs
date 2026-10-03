@@ -33,6 +33,15 @@ test('网页存储强制携带来源，未选项不携带数据', () => {
   assert.throws(() => sync.select({...fixture(), storage_url: 'about:blank'}, 'test-account'), /来源页面/);
 });
 
+test('代理地址、认证引用和凭证密文分离，拒绝明文代理凭据', () => {
+  const value = sync.select({cookies: [], local_storage: {}, session_storage: {}, storage_url: 'https://example.test/account',
+    proxy_rules: 'proxy.example.test:8080', proxy_auth_ref: 'device.proxy', sync_options: {...sync.defaults}}, 'test-account');
+  assert.deepEqual(value.proxy_config, {address: 'proxy.example.test:8080', auth_ref: 'device.proxy'});
+  assert.equal(value.proxy_rules, 'proxy.example.test:8080');
+  assert.throws(() => sync.validate({...fixture(), proxy_rules: 'user:password@proxy.example.test:8080'}, 'test-account'), /明文账号或密码/);
+  assert.throws(() => sync.validate({...fixture(), proxy_config: {address: 'proxy:8080', credential_ciphertext: {algorithm: 'AES-GCM', ciphertext: 'x', password: '明文'}}}, 'test-account'), /凭证密文无效/);
+});
+
 test('拒绝异常加密参数、跨账号内容和不支持的存储结构', async () => {
   const key = await sync.passwordKey('test-encryption-passphrase');
   const envelope = await sync.encrypt(key, 'test-account', fixture());

@@ -18,6 +18,35 @@
     return options;
   }
 
+  function validateProxyConfig(snapshot) {
+    if (typeof snapshot.proxy_rules === 'string' &&
+        (snapshot.proxy_rules.length > 2048 || snapshot.proxy_rules.includes('@') ||
+         snapshot.proxy_rules.includes('=') || snapshot.proxy_rules.includes('\r') ||
+         snapshot.proxy_rules.includes('\n') || snapshot.proxy_rules.includes('\0'))) {
+      fail('代理配置不能包含明文账号或密码');
+    }
+    if (snapshot.proxy_config === undefined) return;
+    const proxy = snapshot.proxy_config;
+    if (!record(proxy) || typeof proxy.address !== 'string' || proxy.address.length > 2048 ||
+        proxy.address.includes('@') || proxy.address.includes('=') || proxy.address.includes('\r') ||
+        proxy.address.includes('\n') || proxy.address.includes('\0')) {
+      fail('代理地址或认证信息无效');
+    }
+    if (proxy.auth_ref !== undefined &&
+        (typeof proxy.auth_ref !== 'string' || proxy.auth_ref.length > 256 ||
+         !/^[A-Za-z0-9._:-]*$/.test(proxy.auth_ref))) {
+      fail('代理认证引用无效');
+    }
+    if (proxy.credential_ciphertext !== undefined &&
+        (!record(proxy.credential_ciphertext) ||
+         typeof proxy.credential_ciphertext.algorithm !== 'string' ||
+         typeof proxy.credential_ciphertext.ciphertext !== 'string' ||
+         proxy.credential_ciphertext.ciphertext.length > 65536 ||
+         'password' in proxy.credential_ciphertext || 'username' in proxy.credential_ciphertext)) {
+      fail('代理凭证密文无效');
+    }
+  }
+
   function validate(snapshot, accountId) {
     if (!record(snapshot) || snapshot.account_id !== accountId || snapshot.schema_version !== 1 ||
         !Array.isArray(snapshot.cookies) || !record(snapshot.local_storage) ||
@@ -32,6 +61,7 @@
       fail('Cookie 内容无效或数量超过支持范围');
     }
     const options = optionsFor(snapshot);
+    validateProxyConfig(snapshot);
     if (options.page && snapshot.storage_url) {
       let url;
       try { url = new URL(snapshot.storage_url); } catch (_) { fail('账号页面地址无效'); }
@@ -63,7 +93,18 @@
       session_storage: options.session_storage ? (raw.session_storage || {}) : {},
     };
     if (options.page) snapshot.storage_url = raw.storage_url;
-    if (options.proxy) snapshot.proxy_rules = raw.proxy_rules || '';
+    if (options.proxy) {
+      const source = record(raw.proxy_config) ? raw.proxy_config : {};
+      snapshot.proxy_config = {
+        address: typeof source.address === 'string' ? source.address : (raw.proxy_rules || ''),
+        auth_ref: typeof source.auth_ref === 'string' ? source.auth_ref : (raw.proxy_auth_ref || ''),
+      };
+      if (record(source.credential_ciphertext)) {
+        snapshot.proxy_config.credential_ciphertext = source.credential_ciphertext;
+      }
+      // 保留旧桥接字段，旧客户端只读取 proxy_rules，不读取认证信息。
+      snapshot.proxy_rules = snapshot.proxy_config.address;
+    }
     if (options.fingerprint) {
       snapshot.fingerprint_seed = raw.fingerprint_seed || '';
       if (raw.fingerprint) snapshot.fingerprint = raw.fingerprint;
@@ -98,6 +139,10 @@
     }
     for (const [name, option] of [['fingerprint', 'fingerprint'], ['fingerprint_seed', 'fingerprint'], ['proxy_rules', 'proxy']]) {
       const selected = localOptions[option] ? local : remote;
+      if (selected[name] !== undefined) merged[name] = selected[name];
+    }
+    for (const name of ['proxy_config']) {
+      const selected = local.proxy_config !== undefined ? local : remote;
       if (selected[name] !== undefined) merged[name] = selected[name];
     }
     if (!options.page) delete merged.storage_url;
@@ -315,14 +360,15 @@
           const options = optionsFor(snapshot);
           let tab = (await tabs()).find((value) => value.account_id === account.account_id);
           checkContext(key, session);
-          if (tab && ((options.proxy && tab.proxy_rules !== (snapshot.proxy_rules || '')) ||
+          const proxyAddress = snapshot.proxy_config?.address ?? snapshot.proxy_rules ?? '';
+          if (tab && ((options.proxy && tab.proxy_rules !== proxyAddress) ||
               (options.fingerprint && tab.fingerprint_seed !== (snapshot.fingerprint_seed || '')))) {
             fail('当前 Tab 的代理或指纹种子与云端不同，请先关闭该账号 Tab 再恢复');
           }
           const url = options.page ? snapshot.storage_url || 'about:blank' : tab?.url || 'about:blank';
           // 先在空白账号环境应用指纹，再导航，避免首个网站请求先发送默认 UA。
           if (!tab) tab = await bridge.tabs.create({accountId: account.account_id, url: 'about:blank',
-            ...(options.proxy ? {proxyRules: snapshot.proxy_rules || ''} : {}),
+            ...(options.proxy ? {proxyRules: proxyAddress} : {}),
             ...(options.fingerprint ? {fingerprintSeed: snapshot.fingerprint_seed || '',
               ...(snapshot.fingerprint ? {fingerprint: snapshot.fingerprint} : {})} : {})});
           checkContext(key, session);

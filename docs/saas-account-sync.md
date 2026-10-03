@@ -72,6 +72,9 @@ storage_url
 fingerprint_seed
 fingerprint
 proxy_rules
+proxy_config.address
+proxy_config.auth_ref
+proxy_config.credential_ciphertext
 cookies
 local_storage
 session_storage
@@ -120,7 +123,7 @@ sync_options
 - 登录密码和快照解密密钥不持久化；重启后恢复 SaaS 会话仍必须重新输入密码，才能读取或写入账号环境快照。
 - 管理器为本地安装保存稳定的设备标识；设备标识不是认证凭据，重新登录同一设备会替换该设备的旧会话。
 - 成员邀请令牌只保存服务端摘要，限时且只能使用一次；管理员必须通过受控渠道把原始令牌交给受邀用户，令牌不得写入日志。
-- 代理密码不应放入当前 `proxy_rules` 明文字符串；后续应拆分为代理地址、认证引用和凭证密文。
+- 代理配置已拆分为 `proxy_config.address`、`proxy_config.auth_ref` 和可选的 `proxy_config.credential_ciphertext`；旧 `proxy_rules` 仅作为兼容地址字段，禁止携带用户名、密码或认证分隔符。凭证密文不能包含明文 `username/password` 字段，服务端和普通日志不接触代理明文。
 - 账号导入、导出、恢复、删除和设备授权都必须写入审计事件。
 
 ## 5. 恢复流程
