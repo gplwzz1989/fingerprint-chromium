@@ -1,0 +1,125 @@
+--- a/third_party/blink/public/mojom/service_worker/embedded_worker.mojom
++++ b/third_party/blink/public/mojom/service_worker/embedded_worker.mojom
+@@ -64,6 +64,10 @@ struct EmbeddedWorkerStartParams {
+   // See https://wicg.github.io/ua-client-hints/ for more details.
+   UserAgentMetadata ua_metadata;
+ 
++  // Account-level hardware value captured from the service worker's storage
++  // partition rather than the renderer process default.
++  uint32 fingerprint_hardware_concurrency = 0;
++
+   // The id this service worker uses as render_frame_id in
+   // network::ResourceRequests it makes.
+   int32 service_worker_route_id;
+
+--- a/content/public/browser/content_browser_client.h
++++ b/content/public/browser/content_browser_client.h
+@@ -972,6 +972,11 @@ class CONTENT_EXPORT ContentBrowserClient {
+       BrowserContext* browser_context,
+       blink::RendererPreferences* out_prefs);
+ 
++  // Returns the account-level hardware value for a managed storage partition.
++  // Zero means that the embedder has no managed override.
++  virtual int GetWorkerFingerprintHardwareConcurrency(
++      const StoragePartitionConfig& config);
++
+   // Requests access to |files| in order to be sent to |destination_url|.
+   // |continuation_callback| is called with a token that should be held until
+   // `open()` operation on the files is finished.
+
+--- a/content/public/browser/content_browser_client.cc
++++ b/content/public/browser/content_browser_client.cc
+@@ -567,6 +567,11 @@ void ContentBrowserClient::UpdateRendererPreferencesForWorker(
+   // |browser_context| may be null (e.g. during shutdown of a service worker).
+ }
+ 
++int ContentBrowserClient::GetWorkerFingerprintHardwareConcurrency(
++    const StoragePartitionConfig& config) {
++  return 0;
++}
++
+ void ContentBrowserClient::RequestFilesAccess(
+     const std::vector<base::FilePath>& files,
+     const GURL& destination_url,
+
+--- a/chrome/browser/chrome_content_browser_client.h
++++ b/chrome/browser/chrome_content_browser_client.h
+@@ -320,6 +320,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
+   void UpdateRendererPreferencesForWorker(
+       content::BrowserContext* browser_context,
+       blink::RendererPreferences* out_prefs) override;
++  int GetWorkerFingerprintHardwareConcurrency(
++      const content::StoragePartitionConfig& config) override;
+   content::AllowServiceWorkerResult AllowServiceWorker(
+       const GURL& scope,
+       const net::SiteForCookies& site_for_cookies,
+
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -3094,6 +3094,16 @@ void ChromeContentBrowserClient::UpdateRendererPreferencesForWorker(
+       out_prefs, Profile::FromBrowserContext(browser_context));
+ }
+ 
++int ChromeContentBrowserClient::GetWorkerFingerprintHardwareConcurrency(
++    const content::StoragePartitionConfig& config) {
++  for (ManagedTabContext* tab : ManagedTabContext::GetAll()) {
++    if (tab->storage_partition_config() == config) {
++      return tab->fingerprint_hardware_concurrency();
++    }
++  }
++  return 0;
++}
++
+ content::AllowServiceWorkerResult
+ ChromeContentBrowserClient::AllowServiceWorker(
+     const GURL& scope,
+
+--- a/content/browser/service_worker/service_worker_version.cc
++++ b/content/browser/service_worker/service_worker_version.cc
+@@ -2445,6 +2445,9 @@ void ServiceWorkerVersion::StartWorkerInternal() {
+   params->user_agent = browser_client->GetUserAgentBasedOnPolicy(
+       context_->wrapper()->browser_context());
+   params->ua_metadata = browser_client->GetUserAgentMetadata();
++  params->fingerprint_hardware_concurrency =
++      browser_client->GetWorkerFingerprintHardwareConcurrency(
++          context_->wrapper()->storage_partition()->GetConfig());
+   params->is_installed = IsInstalled(status_);
+   params->script_url_to_skip_throttling = updated_script_url_;
+   params->main_script_load_params = std::move(main_script_load_params_);
+
+--- a/content/renderer/service_worker/embedded_worker_instance_client_impl.cc
++++ b/content/renderer/service_worker/embedded_worker_instance_client_impl.cc
+@@ -201,6 +201,8 @@ EmbeddedWorkerInstanceClientImpl::BuildStartData(
+   start_data->script_url = params.script_url;
+   start_data->user_agent = blink::WebString::FromUTF8(params.user_agent);
+   start_data->ua_metadata = params.ua_metadata;
++  start_data->fingerprint_hardware_concurrency =
++      params.fingerprint_hardware_concurrency;
+   start_data->script_type = params.script_type;
+   start_data->wait_for_debugger_mode =
+       params.wait_for_debugger
+
+--- a/third_party/blink/public/web/web_embedded_worker_start_data.h
++++ b/third_party/blink/public/web/web_embedded_worker_start_data.h
+@@ -51,6 +51,7 @@ struct WebEmbeddedWorkerStartData {
+   WebURL script_url;
+   WebString user_agent;
+   UserAgentMetadata ua_metadata;
++  uint32_t fingerprint_hardware_concurrency = 0;
+   mojom::ScriptType script_type;
+   // Whether to pause the initialization and wait for debugger to attach
+   // before proceeding. This technique allows debugging worker startup.
+
+--- a/third_party/blink/renderer/modules/exported/web_embedded_worker_impl.cc
++++ b/third_party/blink/renderer/modules/exported/web_embedded_worker_impl.cc
+@@ -199,6 +199,8 @@ void WebEmbeddedWorkerImpl::StartWorkerThread(
+       false /* allow_running_of_insecure_content */,
+       false /* strictly_block_blockable_mixed_content */,
+       GenericFontFamilySettings());
++  worker_settings->SetFingerprintHardwareConcurrency(
++      worker_start_data->fingerprint_hardware_concurrency);
+ 
+   std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params;
+   std::unique_ptr<Vector<uint8_t>> cached_meta_data;
+
+

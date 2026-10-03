@@ -213,4 +213,5 @@ upstream-fixes/managed-tab-android-saf-file-extension.patch
 upstream-fixes/managed-tab-android-secure-storage.patch
 upstream-fixes/managed-tab-dedicated-worker-hardware.patch
 upstream-fixes/managed-tab-shared-worker-hardware.patch
+upstream-fixes/managed-tab-service-worker-hardware.patch
 upstream-fixes/managed-tab-hide-chromium-user-entry.patch

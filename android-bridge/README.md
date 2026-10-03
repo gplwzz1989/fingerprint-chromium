@@ -123,7 +123,7 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 ### 指纹专项进展
 
-后续 Worker 第一阶段：Blink 的 WorkerSettings 保存创建者有效硬件值，Dedicated Worker 从页面捕获，嵌套 Worker 复制快照，SharedWorker 通过创建参数传递同一快照；NavigatorBase 优先读取该快照。PC 与 Android 在修改 UA/硬件值后返回重载提示，已有 Worker 保持原配置，ServiceWorker 和网络 UA-CH 全链路仍未完成。SharedWorker 新补丁已通过现有源码反向校验；实际快照行为测试对象/链接成功，但组件入口 `0xC0000139` 导致 19 项未运行，不计为通过。整体验收保持暂缓。
+后续 Worker 第一阶段：Blink 的 WorkerSettings 保存创建者有效硬件值，Dedicated Worker 从页面捕获，嵌套 Worker 复制快照，SharedWorker/ServiceWorker 按账号 StoragePartition 传递同一快照；NavigatorBase 优先读取该快照。PC 与 Android 在修改 UA/硬件值后返回重载提示，已有 Worker 保持原配置，网络 UA-CH 全链路仍未完成。SharedWorker/ServiceWorker 新补丁已通过现有源码反向校验；实际快照行为测试对象/链接成功，但组件入口 `0xC0000139` 导致 19 项未运行，不计为通过。整体验收保持暂缓。
 
 `saas_fingerprint_config.h` 与 `saas_user_agent_metadata.h` 提供真实参数校验和数据驱动的 UA-CH 构建；`managed-tab-android-fingerprint.patch` 挂接 get/set、创建配置、控制台导航和普通冻结保存。只修改本地能力层，不承载 SaaS 业务。空 UA/硬件 0 清除相应覆盖，字段校验失败不提交半份配置；同步忙时拒绝修改。
 
