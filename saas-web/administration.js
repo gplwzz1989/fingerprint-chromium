@@ -4,6 +4,7 @@
   let inviteGeneration = 0;
   const find = (id) => document.getElementById(id);
   const roles = {owner: '所有者', admin: '管理员', editor: '编辑者', viewer: '查看者'};
+  const roleDescriptions = {owner: '拥有工作区全部管理权限。', admin: '可以管理成员、账号授权和工作区设置。', editor: '可以打开账号环境并执行同步、恢复等写入操作。', viewer: '只能查看已授权账号和工作区信息，不能写入云端快照。'};
   const accountPath = (id) => '/api/v1/accounts/' + encodeURIComponent(id);
   const workspacePath = (id) => '/api/v1/workspaces/' + encodeURIComponent(id);
   function scope() {
@@ -96,6 +97,7 @@
     if (account.workspace_id !== original.workspaceId) throw new Error('账号不属于当前工作区');
     const members = await context.request(workspacePath(original.workspaceId) + '/members');
     checkScope(original);
+    if (!Array.isArray(members)) throw new Error('成员列表格式无效，请刷新后重试');
     activeAccount = {account, original};
     find('account-access-title').textContent = `${account.name} · 访问权限`;
     find('account-access-user').replaceChildren();
@@ -103,7 +105,12 @@
       find('account-access-user').add(new Option(`${member.email} · ${roles[member.role]}`, member.user_id));
     }
     find('account-access-status').textContent = '';
-    await loadAccountAccess();
+    updateRoleHelp();
+    try { await loadAccountAccess(); }
+    catch (error) {
+      find('account-access-status').textContent = context.userMessage(error);
+      throw error;
+    }
     if (!find('account-access-modal').open) find('account-access-modal').showModal();
   }
   async function loadAccountAccess() {
@@ -114,6 +121,7 @@
     const result = await context.request(accountPath(selected.account.account_id) + '/members');
     checkScope(selected.original);
     if (selected !== activeAccount) return;
+    if (!result || !Array.isArray(result.members)) throw new Error('账号授权数据格式无效，请刷新后重试');
     find('account-access-scope').textContent = result.restricted
       ? '当前仅显式授权成员可访问。移除最后一位成员会恢复为工作区开放。'
       : '当前对工作区成员开放。添加第一位显式成员后，其他普通成员将无法访问。';
@@ -131,6 +139,11 @@
       find('account-access-list').append(row);
     }
     find('account-access-status').textContent = result.members.length ? `已加载 ${result.members.length} 位显式授权成员` : '当前没有显式授权成员';
+  }
+
+  function updateRoleHelp() {
+    const role = find('account-access-role').value;
+    find('account-access-role-help').textContent = roleDescriptions[role] || '请确认该成员需要的账号权限范围。';
   }
   async function openAudit(account) {
     const original = scope();
@@ -201,6 +214,7 @@
         await loadAccountAccess(); find('account-access-status').textContent = '账号授权已保存';
       } catch (error) { find('account-access-status').textContent = context.userMessage(error); }
     });
+    find('account-access-role').addEventListener('change', updateRoleHelp);
     find('close-account-access').addEventListener('click', () => find('account-access-modal').close());
     find('close-audit').addEventListener('click', () => find('audit-modal').close());
     for (const id of ['invite-modal', 'accept-invite-modal']) {

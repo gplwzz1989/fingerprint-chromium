@@ -211,6 +211,10 @@
           <section class="panel" id="security-content" hidden>
             <div class="panel-heading"><h2>登录设备</h2><button class="secondary-button" id="refresh-sessions-button" type="button">刷新会话</button></div>
             <p class="panel-copy security-copy" id="security-copy">正在读取设备安全状态…</p>
+            <div class="security-summary" aria-label="当前设备安全摘要">
+              <div><span>当前设备标识</span><strong id="security-device-id">待读取</strong></div>
+              <div><span>会话保护</span><strong id="security-protection-state">待读取</strong></div>
+            </div>
             <div class="table-wrap"><table class="account-table" id="sessions-table" aria-busy="false"><thead><tr><th>设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="sessions-table-body"></tbody></table></div>
             <p class="panel-copy" id="sessions-status" role="status"></p>
           </section>
@@ -321,6 +325,7 @@
       <p class="panel-copy" id="account-access-scope"></p>
       <form id="account-access-form"><label class="field-label" for="account-access-user">工作区成员</label><select class="select-input" id="account-access-user" name="user_id" required></select>
         <label class="field-label" for="account-access-role">账号角色</label><select class="select-input" id="account-access-role" name="role"><option value="viewer">查看者</option><option value="editor">编辑者</option></select>
+        <p class="field-help" id="account-access-role-help">查看者可以读取账号环境；编辑者可以执行同步和恢复。</p>
         <div class="modal-actions"><button class="primary-button" type="submit">保存授权</button></div></form>
       <p class="panel-copy">账号授权不会提升工作区查看者的写入权限。所有者和管理员始终拥有完整访问权限。</p>
       <div id="account-access-list"></div><div class="form-status" id="account-access-status" role="status"></div>

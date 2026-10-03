@@ -180,6 +180,7 @@
   async function loadTabs() {
     const body = find('tabs-table-body'); body.replaceChildren();
     find('tabs-table').setAttribute('aria-busy', 'true');
+    find('refresh-tabs-button').disabled = true;
     find('tabs-status').textContent = '正在读取本机 Tab…';
     const original = scopeToken();
     try {
@@ -205,14 +206,21 @@
       }
       find('tabs-status').textContent = tabs.length ? `本工作区共 ${tabs.length} 个运行环境` : '当前工作区没有已打开的账号 Tab';
     } catch (error) { if (scopeToken() === original) find('tabs-status').textContent = context.userMessage(error); }
-    finally { if (scopeToken() === original) find('tabs-table').setAttribute('aria-busy', 'false'); }
+    finally {
+      if (scopeToken() === original) find('tabs-table').setAttribute('aria-busy', 'false');
+      find('refresh-tabs-button').disabled = false;
+    }
   }
 
   async function loadSessions() {
     const body = find('sessions-table-body'); body.replaceChildren();
     find('sessions-table').setAttribute('aria-busy', 'true');
+    find('refresh-sessions-button').disabled = true;
     find('sessions-status').textContent = '正在读取登录设备…';
     const secureStorage = context.getState().bridge?.capabilities?.secureStorage === true;
+    const currentDevice = context.getState().session?.deviceId || context.deviceId?.() || '设备标识未提供';
+    find('security-device-id').textContent = currentDevice;
+    find('security-protection-state').textContent = secureStorage ? '设备安全存储已启用' : '当前客户端未提供';
     find('security-copy').textContent = secureStorage
       ? '当前客户端使用设备安全存储保护刷新会话；访问令牌只保留在当前页面内存。'
       : '当前客户端未提供设备安全存储，退出后不会自动恢复受保护会话。';
@@ -241,7 +249,10 @@
       }
       find('sessions-status').textContent = sessions.length ? `共 ${sessions.length} 个有效登录会话` : '当前没有有效设备会话';
     } catch (error) { if (scopeToken() === original) find('sessions-status').textContent = context.userMessage(error); }
-    finally { if (scopeToken() === original) find('sessions-table').setAttribute('aria-busy', 'false'); }
+    finally {
+      if (scopeToken() === original) find('sessions-table').setAttribute('aria-busy', 'false');
+      find('refresh-sessions-button').disabled = false;
+    }
   }
 
   async function editFingerprint(tab) {

@@ -217,6 +217,7 @@ button { cursor: pointer; }
 .admin-row { display: flex; padding: 12px 0; flex-wrap: wrap; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
 .admin-row > span { flex: 1; overflow-wrap: anywhere; }
 .admin-row .select-input { min-width: 100px; }
+.field-help { margin: 8px 0 0; color: var(--text-faint); font-size: 10px; line-height: 1.6; }
 .detail-grid { display: grid; margin: 18px 0 24px; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .detail-item { min-width: 0; padding: 13px 14px; background: var(--surface-hover); border: 1px solid var(--line); border-radius: 7px; }
 .detail-item span, .detail-item strong { display: block; overflow-wrap: anywhere; }
@@ -239,6 +240,11 @@ button { cursor: pointer; }
 .session-name-cell strong, .session-name-cell span { display: block; }
 .session-name-cell strong { color: var(--text); font-size: 12px; }
 .session-name-cell > span:not(.role-badge) { color: var(--text-faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.security-summary { display: grid; margin: 0 22px 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.security-summary > div { min-width: 0; padding: 12px 13px; background: var(--surface-hover); border: 1px solid var(--line); border-radius: 6px; }
+.security-summary span, .security-summary strong { display: block; overflow-wrap: anywhere; }
+.security-summary span { color: var(--text-faint); font-size: 10px; }
+.security-summary strong { margin-top: 6px; color: var(--text); font-size: 11px; font-weight: 600; }
 #tabs-content .panel-copy, #security-content .panel-copy { padding: 0 22px 16px; }
 button:disabled { opacity: .45; cursor: wait; }
 .sync-badge { padding: 5px 8px; color: var(--cyan); background: rgba(117, 215, 208, .08); border: 1px solid rgba(117, 215, 208, .16); border-radius: 3px; font-size: 9px; }
@@ -311,6 +317,7 @@ button:disabled { opacity: .45; cursor: wait; }
   .account-selection-toolbar .table-actions { width: 100%; }
   .account-selection-toolbar .secondary-button { flex: 1; }
   .conflict-version-grid, .conflict-choice-grid, .detail-grid { grid-template-columns: 1fr; }
+  .security-summary { grid-template-columns: 1fr; }
   .account-table-toolbar { align-items: stretch; flex-direction: column; }
   .search-field, .table-filter { width: 100%; }
   .modal, .wide-modal { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; }
