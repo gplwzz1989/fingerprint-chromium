@@ -57,6 +57,17 @@ public final class SaasFilePolicy {
         return bytes;
     }
 
+    /** 临时和备份保留原扩展名，避免系统提供方自动补后缀后无法确认重命名。 */
+    public static String recoveryName(String kind, String token, String original) {
+        if (!("pending".equals(kind) || "backup".equals(kind)) || token == null || !token.matches("[A-Za-z0-9-]{1,64}")) {
+            throw error("待恢复文件标识无效");
+        }
+        String name = path(original, false);
+        if (name.contains("/")) throw error("待恢复文件必须使用单个文件名");
+        int dot = name.lastIndexOf('.');
+        return path(".fingerprint-" + kind + "-" + token + (dot > 0 ? name.substring(dot) : ""), false);
+    }
+
     public static void check(SaasBridgeDispatcher.RequestAuthority authority) {
         if (Thread.currentThread().isInterrupted() || authority == null || !authority.isActiveInBackground()) {
             throw error("页面授权已失效，文件操作已停止");

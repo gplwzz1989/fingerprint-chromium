@@ -218,7 +218,8 @@ public final class SaasBridgeHost extends EmptyTabObserver {
 
         private Object invokeOnUiThread(String method, Map<String, Object> args) {
             CompletableFuture<Object> result = new CompletableFuture<>();
-            long timeoutSeconds = method.startsWith("files.") ? 120 : method.startsWith("storage.") ? 35 : 15;
+            long timeoutSeconds = method.startsWith("files.") ? 120 :
+                    (method.startsWith("storage.") || method.equals("http.request")) ? 35 : 15;
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
             SaasBridgeDispatcher.RequestAuthority authority = new SaasBridgeDispatcher.RequestAuthority() {
                 @Override public boolean isActiveInBackground() {
@@ -236,7 +237,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                     if (System.nanoTime() >= deadline || mDestroyed ||
                             mGeneration.get() != mWorkGeneration || mPort != mWorkPort ||
                             mWorkPort.isClosed() || !mOrigin.equals(trustedOrigin(mContents))) {
-                        result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，标签操作已停止"));
+                        result.completeExceptionally(new SaasBridgeDispatcher.NativeRequestException("页面授权已失效，原生操作已停止"));
                         return;
                     }
                     CompletableFuture<Object> operation;
@@ -266,7 +267,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
                 if (error.getCause() instanceof SaasBridgeDispatcher.NativeRequestException) {
                     throw (SaasBridgeDispatcher.NativeRequestException) error.getCause();
                 }
-                throw new SaasBridgeDispatcher.NativeRequestException("标签操作失败，请检查账号环境后重试");
+                throw new SaasBridgeDispatcher.NativeRequestException("原生操作失败，请检查客户端环境后重试");
             }
         }
     }

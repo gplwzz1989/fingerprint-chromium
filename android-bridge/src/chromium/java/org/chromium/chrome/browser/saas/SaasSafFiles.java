@@ -267,7 +267,7 @@ public final class SaasSafFiles {
                         (original.flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0)) {
                     throw SaasFilePolicy.error("文件提供方不支持可恢复覆盖，原文件保持不变");
                 }
-                String pendingName = PREFIX + "pending-" + UUID.randomUUID();
+                String pendingName = SaasFilePolicy.recoveryName("pending", UUID.randomUUID().toString(), name);
                 check();
                 if (!hasGrant(tree, true)) throw SaasFilePolicy.error("目录写入授权已撤销");
                 Uri pendingUri = DocumentsContract.createDocument(resolver, parent.uri,
@@ -302,7 +302,7 @@ public final class SaasSafFiles {
                         (actual == null || !original.uri.equals(actual.uri)))) throw SaasFilePolicy.error("目标文件已发生变化，待恢复文件已保留");
                 if (original != null) {
                     backupAttempted = true;
-                    backup = rename(parent.uri, original, PREFIX + "backup-" + UUID.randomUUID());
+                    backup = rename(parent.uri, original, SaasFilePolicy.recoveryName("backup", UUID.randomUUID().toString(), name));
                 }
                 rename(parent.uri, pending, name);
                 Map<String, Object> value = reply(bytes.length);

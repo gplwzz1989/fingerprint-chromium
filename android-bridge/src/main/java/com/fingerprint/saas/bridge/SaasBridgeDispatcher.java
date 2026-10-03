@@ -99,7 +99,7 @@ public final class SaasBridgeDispatcher {
     }
 
     public static Map<String, Object> decodeNativeReply(String json) {
-        if (json == null || json.length() > 16 * 1024 * 1024) throw new NativeRequestException("原生存储响应超过大小限制");
+        if (json == null || json.length() > 16 * 1024 * 1024) throw new NativeRequestException("原生响应超过大小限制");
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         try { return SnapshotJson.decode(bytes, 16 * 1024 * 1024); }
         finally { java.util.Arrays.fill(bytes, (byte) 0); }
@@ -107,7 +107,7 @@ public final class SaasBridgeDispatcher {
 
     @SuppressWarnings("unchecked")
     public static String encodeNativePayload(Object value) {
-        if (!(value instanceof Map)) throw new NativeRequestException("存储快照格式无效");
+        if (!(value instanceof Map)) throw new NativeRequestException("原生请求参数格式无效");
         byte[] bytes = SnapshotJson.encode((Map<String, Object>) value, 14 * 1024 * 1024);
         try { return new String(bytes, StandardCharsets.UTF_8); }
         finally { java.util.Arrays.fill(bytes, (byte) 0); }
@@ -121,6 +121,7 @@ public final class SaasBridgeDispatcher {
             capabilities.put("storage", backend != null && backend.supports("storage"));
             capabilities.put("fingerprint", backend != null && backend.supports("fingerprint"));
             capabilities.put("files", backend != null && backend.supports("files"));
+            capabilities.put("http", backend != null && backend.supports("http"));
             capabilities.put("crypto", true);
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("version", "1.0"); details.put("origin", origin); details.put("capabilities", capabilities);
@@ -128,6 +129,10 @@ public final class SaasBridgeDispatcher {
         }
         String accountId;
         char[] password;
+        if ("http.request".equals(method)) {
+            if (backend == null || !backend.supports("http")) throw invalid("当前客户端尚未提供原生网络能力");
+            return backend.invoke(method, args);
+        }
         if ("files.list".equals(method) || "files.read".equals(method) || "files.write".equals(method)) {
             if (backend == null || !backend.supports("files")) throw invalid("当前客户端尚未提供文件管理能力");
             return backend.invoke(method, args);

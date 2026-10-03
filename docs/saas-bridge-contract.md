@@ -45,7 +45,7 @@
 | `storage` | 已接入 | 已编码，待 APK 验收 | Cookie、LocalStorage、SessionStorage 快照 |
 | `fingerprint` | 已接入 | 页面配置已编码，Worker/设备待验收 | 与账号 Tab 绑定的指纹配置 |
 | `files` | 已接入绝对路径 | SAF 已编码，待设备验收 | 桌面相对路径以 `SaasFiles` 为根；安卓相对路径以该来源的用户授权目录为根 |
-| `http` | 已接入首版 | 原生网络适配 | 支持自定义方法、请求头、Base64 正文和可选会话凭据；单次响应上限 16 MiB、超时 30 秒 |
+| `http` | 已接入首版 | Chromium 网络已编码，待设备验收 | 桌面响应上限 16 MiB；安卓 10 MiB、30 秒，自动凭据必须绑定独立账号 |
 | `crypto` | 已编码，待运行联调 | 端口宿主已编码，待 APK 验证 | HTTP 页面的原生 PBKDF2/AES-GCM 加密，与 HTTPS WebCrypto 信封兼容 |
 
 文件能力沿用原生桥完整 Origin 白名单，可以读写当前进程系统权限允许的绝对路径，相对路径保留专用目录兼容行为。读写在后台线程执行，单文件上限 64 MiB；写入采用同目录临时文件与替换流程。原生文件辅助函数已通过真实 Windows 文件系统测试，包括中文路径、二进制、空文件和失败保留原内容；客户端桥接运行联调仍待完成。原生 HTTP 默认不携带浏览器 Cookie，调用方明确设置 `includeCredentials` 后才携带。未接入的平台继续报告能力不可用，不使用模拟数据替代。
@@ -58,7 +58,11 @@ Android 原生层只实现 `SaasBridge` 契约，不复制 SaaS 业务逻辑。T
 
 Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，以精确目标 Origin 把端口交给真实主框架；来源读取 `RenderFrameHost.getLastCommittedOrigin()`，不信任消息自报地址。初始化和后续消息均为 JSON 字符串。网页客户端仅接受来自固定原生来源、`source=null` 的可信初始化事件；这层网页检查不代替原生来源授权。
 
-端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加 `tabs/storage/fingerprint`，宿主绑定 SAF 文件适配后增加 `files`，`http` 仍为 false；尚未完成 Android 平台运行验收。
+端口请求上限 24 MiB UTF-8、2 个后台工作线程、4 个等待任务和 64 MiB 未完成请求字符内存预算；运行任务跨导航代次计费，等待任务取消或任务实际完成后才释放。JSON 总深度上限 64，响应包装超限时返回明确错误而不返回截断数据。独立路由只提供加密；绑定真实 TabModel 实现后增加 `tabs/storage/fingerprint/http`，宿主绑定 SAF 文件适配后增加 `files`；尚未完成 Android 平台运行验收。
+
+安卓 `http.request` 的可选 `tabId` 决定账号固定分区；缺省使用独立内存网络分区、禁用 HTTP 磁盘缓存，不读取共享 Cookie。自动携带凭据必须同时提供 `includeCredentials=true` 和真实账号 `tabId`，不能同时提供显式 Cookie 头；默认可通过请求头显式提供 Cookie/Authorization。账号配置的 UA 在没有显式 User-Agent 时使用，原生 HTTP 不承诺网页 UA-CH/Worker 指纹效果。
+
+安卓 HTTP 正文请求上限 8 MiB、响应上限 10 MiB，头最多 100 项/32 KiB；`headersList` 可选数组保留重复响应头，`headers` 重复值用换行分隔，不应直接作为请求头复用。支持有效自定义方法，CONNECT 拒绝，GET/HEAD 不允许指定正文，TRACE 不允许非空正文。传输连接、长度和代理认证头由网络层管理。仅允许无用户名密码的 HTTP/HTTPS，不绕过 TLS；同来源最多 5 次重定向，跨来源拒绝，可直接重新请求目标地址。30 秒总超时、每 Profile 4 个并发，导航/关闭/撤权停止后续操作，不能撤回已经发送的数据或服务端副作用；完整网络与凭据行为待设备验证。
 
 安卓文件 API 使用系统 SAF 树授权，按完整 Origin 保存目录映射；`path` 是目录内相对路径，`files.list({})` 读取授权根目录。首次没有有效目录授权时打开系统选择器，不允许网页提供 URI、绝对路径或上级路径。每级条目由提供方确认父子关系，同名歧义、无法确认关系、虚拟文件直接读写均拒绝；不能绕过 Android 存储权限。
 

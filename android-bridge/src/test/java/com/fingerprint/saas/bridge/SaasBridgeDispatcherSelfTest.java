@@ -67,6 +67,7 @@ public final class SaasBridgeDispatcherSelfTest {
         testNativeRouting(dispatcher);
         testFingerprintRouting(dispatcher);
         testFileRouting(dispatcher);
+        testHttpRouting(dispatcher);
         System.out.println("原生消息路由自测通过：" + assertions + " 项");
     }
 
@@ -205,6 +206,25 @@ public final class SaasBridgeDispatcherSelfTest {
         Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
         check(Boolean.TRUE.equals(flags.get("files")) && Boolean.FALSE.equals(flags.get("tabs")), "文件能力未按实际绑定声明");
         check(!((SaasBridgeDispatcher.RequestAuthority) () -> true).isActiveInBackground(), "默认授权允许后台访问界面对象");
+    }
+    /** 只验证网络分发边界，真实 HTTP 请求由 Chromium 网络层另行验收。 */
+    private static void testHttpRouting(SaasBridgeDispatcher dispatcher) {
+        final int[] calls = {0};
+        SaasBridgeDispatcher.NativeBackend probe = new SaasBridgeDispatcher.NativeBackend() {
+            public boolean supports(String capability) { return "http".equals(capability); }
+            public Object invoke(String method, Map<String, Object> args) { calls[0]++; return args; }
+        };
+        Map<String, Object> request = decode("{\"type\":\"fingerprint-saas-bridge:request\",\"requestId\":\"http-1\",\"method\":\"http.request\",\"args\":{\"url\":\"https://example.test/\"}}");
+        String message = SaasBridgeDispatcher.encodeNativePayload(request);
+        check(Boolean.TRUE.equals(decode(dispatcher.dispatch(message, ORIGIN, probe)).get("ok")), "HTTP 请求未路由");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, ORIGIN)).get("ok")), "未绑定仍执行 HTTP");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(message, "https://other.test", probe)).get("ok")), "HTTP 绕过来源校验");
+        check(calls[0] == 1, "被拒 HTTP 进入平台层");
+        request.put("method", "http.openSocket");
+        check(Boolean.FALSE.equals(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("ok")) && calls[0] == 1, "未知网络能力被执行");
+        request.put("method", "getCapabilities");
+        Map<String, Object> flags = object(object(decode(dispatcher.dispatch(SaasBridgeDispatcher.encodeNativePayload(request), ORIGIN, probe)).get("result")).get("capabilities"));
+        check(Boolean.TRUE.equals(flags.get("http")) && Boolean.FALSE.equals(flags.get("files")), "HTTP 能力声明错误");
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
     private static void check(boolean value, String message) { assertions++; if (!value) throw new AssertionError(message); }

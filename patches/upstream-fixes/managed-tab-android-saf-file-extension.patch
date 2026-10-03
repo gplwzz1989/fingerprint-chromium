@@ -1,0 +1,40 @@
+--- a/chrome/android/java/src/com/fingerprint/saas/bridge/SaasFilePolicy.java
++++ b/chrome/android/java/src/com/fingerprint/saas/bridge/SaasFilePolicy.java
+@@ -57,6 +57,17 @@
+         return bytes;
+     }
+ 
++    /** 临时和备份保留原扩展名，避免系统提供方自动补后缀后无法确认重命名。 */
++    public static String recoveryName(String kind, String token, String original) {
++        if (!("pending".equals(kind) || "backup".equals(kind)) || token == null || !token.matches("[A-Za-z0-9-]{1,64}")) {
++            throw error("待恢复文件标识无效");
++        }
++        String name = path(original, false);
++        if (name.contains("/")) throw error("待恢复文件必须使用单个文件名");
++        int dot = name.lastIndexOf('.');
++        return path(".fingerprint-" + kind + "-" + token + (dot > 0 ? name.substring(dot) : ""), false);
++    }
++
+     public static void check(SaasBridgeDispatcher.RequestAuthority authority) {
+         if (Thread.currentThread().isInterrupted() || authority == null || !authority.isActiveInBackground()) {
+             throw error("页面授权已失效，文件操作已停止");
+--- a/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasSafFiles.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasSafFiles.java
+@@ -267,7 +267,7 @@
+                         (original.flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0)) {
+                     throw SaasFilePolicy.error("文件提供方不支持可恢复覆盖，原文件保持不变");
+                 }
+-                String pendingName = PREFIX + "pending-" + UUID.randomUUID();
++                String pendingName = SaasFilePolicy.recoveryName("pending", UUID.randomUUID().toString(), name);
+                 check();
+                 if (!hasGrant(tree, true)) throw SaasFilePolicy.error("目录写入授权已撤销");
+                 Uri pendingUri = DocumentsContract.createDocument(resolver, parent.uri,
+@@ -302,7 +302,7 @@
+                         (actual == null || !original.uri.equals(actual.uri)))) throw SaasFilePolicy.error("目标文件已发生变化，待恢复文件已保留");
+                 if (original != null) {
+                     backupAttempted = true;
+-                    backup = rename(parent.uri, original, PREFIX + "backup-" + UUID.randomUUID());
++                    backup = rename(parent.uri, original, SaasFilePolicy.recoveryName("backup", UUID.randomUUID().toString(), name));
+                 }
+                 rename(parent.uri, pending, name);
+                 Map<String, Object> value = reply(bytes.length);

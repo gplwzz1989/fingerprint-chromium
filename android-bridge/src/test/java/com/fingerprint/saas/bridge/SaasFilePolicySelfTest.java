@@ -37,6 +37,12 @@ public final class SaasFilePolicySelfTest {
         byte[] actual = {0, 1, 2, -1, -128};
         check(Arrays.equals(actual, SaasFilePolicy.decodeData(Base64.getEncoder().encodeToString(actual))), "二进制往返失败");
         check(SaasFilePolicy.decodeData("").length == 0, "空文件不能写入");
+        check(".fingerprint-pending-abc.json".equals(SaasFilePolicy.recoveryName("pending", "abc", "账号.json")), "临时文件扩展名丢失");
+        check(".fingerprint-backup-abc.gz".equals(SaasFilePolicy.recoveryName("backup", "abc", "data.tar.gz")), "备份扩展名丢失");
+        check(".fingerprint-backup-abc".equals(SaasFilePolicy.recoveryName("backup", "abc", ".config")), "隐藏文件被误判为扩展名");
+        rejects(() -> SaasFilePolicy.recoveryName("other", "abc", "data.json"));
+        rejects(() -> SaasFilePolicy.recoveryName("pending", "../abc", "data.json"));
+        rejects(() -> SaasFilePolicy.recoveryName("pending", "abc", "dir/data.json"));
         for (String encoded : new String[] {"a", "YQ", "YQ=", "YQ==\n", "YR==", "YQ--", "====", "😃=="}) rejects(() -> SaasFilePolicy.decodeData(encoded));
         rejects(() -> SaasFilePolicy.decodeData(null));
         rejects(() -> SaasFilePolicy.decodeData(repeat('A', ((SaasFilePolicy.MAX_FILE_BYTES + 2) / 3) * 4 + 4)));

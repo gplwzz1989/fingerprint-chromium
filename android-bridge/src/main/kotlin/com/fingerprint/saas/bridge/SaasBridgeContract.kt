@@ -41,6 +41,7 @@ data class SaasFileReadResult(
 data class SaasFileWriteResult(
     val path: String,
     val size: Long,
+    val backupPath: String? = null,
 )
 
 data class HttpRequest(
@@ -50,12 +51,15 @@ data class HttpRequest(
     val body: ByteArray? = null,
     val contentType: String? = null,
     val includeCredentials: Boolean = false,
+    // 安卓自动携带凭据必须绑定真实隔离账号，不使用共享 Profile。
+    val tabId: String? = null,
 )
 
 data class HttpResponse(
     val status: Int,
     val headers: Map<String, String>,
     val body: ByteArray,
+    val headersList: List<Pair<String, String>> = emptyList(),
 )
 
 data class SaasSnapshotEnvelope(

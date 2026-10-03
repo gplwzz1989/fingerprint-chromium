@@ -208,3 +208,5 @@ upstream-fixes/managed-tab-android-tab-operations.patch
 upstream-fixes/managed-tab-android-storage.patch
 upstream-fixes/managed-tab-android-fingerprint.patch
 upstream-fixes/managed-tab-android-saf-files.patch
+upstream-fixes/managed-tab-android-native-http.patch
+upstream-fixes/managed-tab-android-saf-file-extension.patch

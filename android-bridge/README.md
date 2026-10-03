@@ -6,7 +6,7 @@
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
 - `SnapshotCrypto.java`、`SnapshotJson.java` 与 `JvmSnapshotCryptoAdapter.kt`：可独立编译的真实快照加密模块，使用 Java 标准 JCA/JCE，无新增运行时依赖。
-- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹操作；宿主绑定真实 SAF 适配器后增加 `files=true`，目录访问仍需系统授权，HTTP 仍不可用。独立路由未绑定平台时仅声明 `crypto=true`；尚未完成完整 Android Java/C++ 编译和设备验收，不能将源码挂接当作已安装可用的 Android 浏览器。
+- `SaasBridgeHost.java` 已编码接入 Chromium 的真实主框架消息端口，`SaasBridgeDispatcher.java` 路由真实加密及已绑定的平台标签/存储/页面指纹/原生 HTTP；宿主绑定真实 SAF 适配器后增加 `files=true`，目录访问仍需系统授权。独立路由未绑定平台时仅声明 `crypto=true`；尚未完成完整 Android Java/C++ 编译和设备验收，不能将源码挂接当作已安装可用的 Android 浏览器。
 - `SaasOriginPolicy.java` 使用可信宿主提供的完整 Origin 白名单，默认 URL 不在模块内硬编码；Android JNI 从现有 C++ 常量和编译参数读取配置，默认来源随该常量更新。
 - 文件能力必须使用 Storage Access Framework 返回的授权 URI；禁止把 Windows 路径模型带入 Android。
 - 会话密钥使用 Android Keystore；应用生命周期恢复必须覆盖进程被系统回收、断网和权限撤销。
@@ -67,7 +67,7 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 `SaasHttpClient.java` 编译为 Java 8 字节码，但真实网络后端需要 JDK11+ 的独立 HttpClient，使用公开反射调用，不读取或修改全局 CookieHandler/Authenticator。真实 loopback 回归 187 项通过，覆盖全局 Cookie 并发变化、显式凭据、重定向、取消、响应限制与控制字符拒绝。
 
-该模块不是 Android 原生 HTTP 的完成实现，未打包进本轮 Chromium 安卓源文件清单，宿主 `http=false`。缺少 JDK11 后端的运行时明确拒绝请求；仍需接入 Chromium/Android 原生网络。当前仅支持列明的七种方法及受限类型化头，不自动携带浏览器 Cookie，`includeCredentials=true` 明确拒绝；不能据此宣称安卓已具备完整自定义网络能力。
+该模块不是 Android 原生 HTTP 的实现，未打包进 Chromium 安卓源文件清单；新安卓网络挂接使用另行编码的 Chromium 网络层，见网络专项，不调用该 JDK 辅助类。缺少 JDK11 后端的运行时明确拒绝请求；JVM 辅助模块仍仅支持列明的七种方法及受限类型化头，不自动携带浏览器 Cookie，`includeCredentials=true` 明确拒绝；不能据 JVM 测试宣称安卓网络已运行验收。
 
 ## 安卓账号环境创建基础
 
@@ -77,13 +77,23 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 正常使用链路已在 `managed-tab-android-tab-operations.patch` 接入 `tabs.list/create/activate/navigate/close`。使用真实 TabModel、TabCreator 和 TabRemover，在 UI 线程重新校验消息端口、文档代次、真实主框架 Origin 与等待期限；控制台和普通标签不能作为账号目标，冻结/归档环境参与重复账号检查。创建先建立固定分区并核对 WebContents 所有者，再加载网页；创建失败清理实际所有者，不退回普通标签。
 
-平台实现成功绑定时提供 `tabs/storage/fingerprint/crypto`；宿主同时绑定 SAF 适配器后提供 `files`，但并不预授予目录访问权限，`http` 尚未接入。未绑定的独立路由仍只提供 `crypto`。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
+平台实现成功绑定时提供 `tabs/storage/fingerprint/http/crypto`；宿主同时绑定 SAF 适配器后提供 `files`，但并不预授予目录访问权限。未绑定的独立路由仍只提供 `crypto`。指纹覆盖限于当前页面配置，Worker 一致性待完成；普通冻结读取使用必需状态头和真实分区元数据，异常关闭自动恢复按低优先级暂缓。
 
 本轮独立复测 474 项通过，包含 33 项消息路由测试；其中 13 项仅为分发边界探针，不模拟 Android 标签。三个平台 Java 文件解析、两个 JNI 生成、环境/状态 JSON 局部 C++ 检查和新补丁反向检查通过。未完成 Android 类型检查、完整编译或设备运行；原生参数测试对象/链接成功但加载入口错误仍未解决，不计为运行通过。
 
 验证边界：实际原生参数函数测试源码保存在 `tests/account-environment-validation.cc`，可复用 `utils/check_cpp_syntax.py` 的现有编译参数。头文件、共享浏览器代码和测试源码语法检查通过；测试对象编译和链接通过，但测试程序启动被系统拒绝，不能宣称参数运行测试或 Android 分区运行验收通过。新增 JNI 生成和源码补丁反向检查通过；没有全量构建或修改系统策略。
 
 ## 完整构建限制
+
+### 原生 HTTP 编码进展
+
+`saas_http_request_config.h`、`saas_native_http.h` 与 TabModel JNI 接入 Chromium 的真实 SimpleURLLoader。无 `tabId` 时使用独立内存网络分区，禁用磁盘 HTTP 缓存，不访问共享 Profile Cookie；指定 `tabId` 时使用真实账号固定分区，可复用账号代理和已配置 UA（显式 User-Agent 优先）。只有 `includeCredentials=true` 且指定真实账号时才自动携带该分区凭据，不能与显式 Cookie 头混用；默认可以显式提供 Cookie/Authorization，不读取全局 JVM CookieHandler。
+
+仅接收无用户名密码的 HTTP/HTTPS URL，支持 PATCH 等有效方法，拒绝 CONNECT，GET/HEAD 不允许指定上传正文，TRACE 不允许非空正文。传输长度、连接和代理认证头由网络层管理，拒绝控制字符与大小写重复头；不关闭 TLS 验证、不弹出网页 HTTP 认证窗口。可绕过网页 CORS，但不能绕过系统网络权限或服务端认证。
+
+请求正文 8 MiB、响应正文 10 MiB，以适配现有 14/16 MiB JNI JSON 边界；请求/响应头最多 100 项、32 KiB，保留重复响应头到可选 `headersList`。同来源重定向最多 5 次，跨来源及协议降级拒绝；HTTP 错误状态保留真实状态和正文。每 Profile 最多 4 个请求，30 秒总等待、100 毫秒授权检查，宿主等待 35 秒；控制台撤权、账号跨文档导航和关闭取消后续网络操作，不承诺撤回已发送的数据或服务端副作用。
+
+网络参数原生运行测试 78 项、JVM/协议 575 项、网页 14 项通过；包含文件策略 57 项，补充临时/备份文件保留扩展名，避免系统提供方自动补后缀导致正常覆盖失败。实际引擎头文件局部 C++ 检查、JNI 生成及 Java 语法解析通过。既有 JVM loopback 187 项不是该 Chromium 后端的网络运行测试；完整 Android 类型检查、网络请求、代理、Cookie 和取消效果仍待 APK/设备验证。没有新增 GN 项、重生成 GN 或全量编译。
 
 ### 授权目录文件进展
 

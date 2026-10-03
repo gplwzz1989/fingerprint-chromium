@@ -24,6 +24,8 @@ export interface SaasFileEntry {
 export interface SaasHttpResponse {
   status: number;
   headers: Record<string, string>;
+  /** 安卓保留重复响应头；其他平台可以不返回。 */
+  headersList?: Array<{name: string; value: string}>;
   bodyBase64: string;
 }
 
@@ -86,6 +88,8 @@ export interface SaasBridge {
       bodyBase64?: string;
       contentType?: string;
       includeCredentials?: boolean;
+      /** 安卓自动携带凭据时必须指定独立账号 Tab，不使用共享 Profile。 */
+      tabId?: string;
     }): Promise<SaasHttpResponse>;
   };
   crypto?: {
