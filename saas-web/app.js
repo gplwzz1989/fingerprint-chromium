@@ -40,6 +40,9 @@
     accountForm: document.querySelector('#account-form'),
     accountModal: document.querySelector('#account-modal'),
     accountStatus: document.querySelector('#account-status'),
+    accountEditForm: document.querySelector('#account-edit-form'),
+    accountEditModal: document.querySelector('#account-edit-modal'),
+    accountEditStatus: document.querySelector('#account-edit-status'),
     workspaceForm: document.querySelector('#workspace-form'),
     workspaceModal: document.querySelector('#workspace-modal'),
     workspaceStatus: document.querySelector('#workspace-status'),
@@ -277,6 +280,17 @@
     await loadAccounts();
   }
 
+  async function updateAccount(account, name, labels, scope) {
+    if (!state.session || state.sessionGeneration !== scope.generation || state.workspaceId !== scope.workspaceId ||
+        !state.accounts.some((value) => value.account_id === account.account_id && value.workspace_id === scope.workspaceId)) {
+      throw new Error('登录会话、工作区或账号权限已变化，请重新操作');
+    }
+    await request(`/api/v1/accounts/${encodeURIComponent(account.account_id)}`, {
+      method: 'PATCH', body: {name, labels},
+    });
+    await loadAccounts();
+  }
+
   async function logout() {
     sessionRecoveryAttempted = true;
     const session = state.session;
@@ -444,6 +458,12 @@
       action.textContent = '打开隔离 Tab';
       action.addEventListener('click', () => openAccount(account));
       actionCell.append(action);
+      if (account.role !== 'viewer') {
+        const edit = document.createElement('button');
+        edit.type = 'button'; edit.className = 'table-action'; edit.textContent = '编辑';
+        edit.addEventListener('click', () => openEditAccount(account));
+        actionCell.append(edit);
+      }
       global.saasConsoleOperations.appendAccountActions(actionCell, account);
       row.append(nameCell, labelsCell, revisionCell, dateCell, actionCell);
       elements.accountTableBody.append(row);
@@ -533,6 +553,16 @@
     modal.showModal();
   }
 
+  function openEditAccount(account) {
+    if (account.role === 'viewer') { showToast('只读账号不能修改目录资料', true); return; }
+    elements.accountEditForm.reset();
+    elements.accountEditForm.elements.account_id.value = account.account_id;
+    elements.accountEditForm.elements.name.value = account.name;
+    elements.accountEditForm.elements.labels.value = Array.isArray(account.labels) ? account.labels.join(', ') : '';
+    elements.accountEditStatus.textContent = '';
+    elements.accountEditModal.showModal();
+  }
+
   elements.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(elements.loginForm);
@@ -569,6 +599,24 @@
     } catch (error) {
       setStatus(elements.accountStatus, userMessage(error));
     }
+  });
+
+  elements.accountEditForm.addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return;
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const account = state.accounts.find((value) => value.account_id === String(form.get('account_id')));
+    const scope = {generation: state.sessionGeneration, workspaceId: state.workspaceId};
+    if (!account) { elements.accountEditStatus.textContent = '账号已从当前工作区移除，请刷新后重试'; return; }
+    const name = String(form.get('name') || '').trim();
+    const labels = String(form.get('labels') || '').split(',').map((item) => item.trim()).filter(Boolean);
+    elements.accountEditStatus.textContent = '正在保存账号资料…';
+    const submit = event.submitter; if (submit) submit.disabled = true;
+    try {
+      await updateAccount(account, name, labels, scope);
+      elements.accountEditModal.close(); showToast('账号资料已保存');
+    } catch (error) { elements.accountEditStatus.textContent = userMessage(error); }
+    finally { if (submit) submit.disabled = false; }
   });
 
   elements.workspaceForm.addEventListener('submit', async (event) => {

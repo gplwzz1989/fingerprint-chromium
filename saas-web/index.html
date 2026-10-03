@@ -247,6 +247,20 @@
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" id="workspace-submit" value="default" type="submit">创建工作区 <span>→</span></button></div>
       </form>
     </dialog>
+    <dialog class="modal" id="account-edit-modal">
+      <form method="dialog" class="modal-card" id="account-edit-form">
+        <button class="modal-close" value="cancel" type="submit" formnovalidate aria-label="关闭">×</button>
+        <div class="card-kicker">账号目录</div><h2>编辑账号资料</h2>
+        <p class="card-description">稳定标识保持不变，只更新工作区内显示名称和标签。</p>
+        <input type="hidden" name="account_id">
+        <label class="field-label" for="account-edit-name">显示名称</label>
+        <input class="text-input" id="account-edit-name" name="name" maxlength="256" required>
+        <label class="field-label" for="account-edit-labels">标签 <span class="optional">可选，用逗号分隔</span></label>
+        <input class="text-input" id="account-edit-labels" name="labels" maxlength="3200">
+        <div class="form-status" id="account-edit-status" role="status" aria-live="polite"></div>
+        <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" value="default" type="submit">保存资料</button></div>
+      </form>
+    </dialog>
 
     <dialog class="modal" id="fingerprint-modal">
       <form method="dialog" class="modal-card" id="fingerprint-form">
