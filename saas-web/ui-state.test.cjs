@@ -25,6 +25,9 @@ test('批量同步保留租约分类和可感知进度', () => {
   assert.match(operations, /lease_conflict/);
   assert.match(operations, /lease_required/);
   assert.match(operations, /aria-valuenow/);
+  assert.match(operations, /downloadSnapshot/);
+  assert.match(operations, /controller\.import/);
+  assert.match(html, /id="snapshot-import-file"/);
 });
 
 test('成员和设备页面暴露加载忙状态及真实错误文案入口', () => {

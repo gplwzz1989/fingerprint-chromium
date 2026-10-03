@@ -245,6 +245,35 @@
         const value = conflicts.get(accountId);
         return value ? {accountId, revision: value.revision} : null;
       },
+      async export(account) {
+        return exclusive(account.account_id, async () => {
+          const session = getSession(), key = getKey();
+          if (!key) fail('请先解锁加密快照');
+          const response = await request(path(account.account_id) + '/snapshot');
+          checkContext(key, session);
+          if (response.account_id !== account.account_id || response.schema_version !== 1 ||
+              !Number.isSafeInteger(response.revision) || !record(response.envelope)) {
+            fail('云端快照格式无效，无法导出');
+          }
+          await decrypt(key, account.account_id, response.envelope);
+          checkContext(key, session);
+          return {schema_version: 1, account_id: account.account_id, revision: response.revision,
+            exported_at: new Date().toISOString(), envelope: response.envelope};
+        });
+      },
+      import(account, document) {
+        return exclusive(account.account_id, async () => {
+          const session = getSession(), key = getKey();
+          if (!key) fail('请先解锁加密快照');
+          if (!record(document) || document.schema_version !== 1 || document.account_id !== account.account_id ||
+              !Number.isSafeInteger(document.revision) || !record(document.envelope)) {
+            fail('导入文件格式无效，或不属于当前账号');
+          }
+          const snapshot = await decrypt(key, account.account_id, document.envelope);
+          checkContext(key, session);
+          return save(account, snapshot, key, session, account.revision);
+        });
+      },
       resolveConflict(account, strategy) {
         return exclusive(account.account_id, async () => {
           const pending = conflicts.get(account.account_id);

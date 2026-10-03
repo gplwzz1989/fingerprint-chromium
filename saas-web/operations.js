@@ -4,6 +4,7 @@
   const leaseNotices = new Map();
   let unlockGeneration = 0;
   let fingerprintTarget = null;
+  let importTarget = null;
   const find = (id) => document.getElementById(id);
   const status = (message) => { find('operation-status').textContent = message; };
   function batchProgress(completed, total, failures = []) {
@@ -89,6 +90,27 @@
       finally { button.disabled = false; }
     });
     return button;
+  }
+
+  function downloadSnapshot(account, payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = `账号快照-${account.account_id}-r${payload.revision}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function exportAccount(account) {
+    const exported = await controller.export(account);
+    downloadSnapshot(account, exported);
+    status(`账号 ${account.name} 的加密快照已导出`);
+  }
+
+  function chooseImportFile(account) {
+    if (!key) throw new Error('请先解锁加密快照');
+    importTarget = account;
+    find('snapshot-import-file').click();
   }
 
   async function runAccount(account, restore) {
@@ -287,6 +309,23 @@
       } catch (error) { status(context.userMessage(error)); }
     });
     find('snapshot-lock-button').addEventListener('click', lock);
+    find('snapshot-import-file').addEventListener('change', async (event) => {
+      const account = importTarget;
+      importTarget = null;
+      const file = event.currentTarget.files?.[0];
+      event.currentTarget.value = '';
+      if (!account || !file) return;
+      try {
+        status(`正在导入账号 ${account.name} 的加密快照…`);
+        const document = JSON.parse(await file.text());
+        const saved = await controller.import(account, document);
+        status(`账号 ${account.name} 的快照已导入，云端版本 ${saved.revision}`);
+        await context.refreshAccounts();
+      } catch (error) {
+        status(context.userMessage(error));
+        if (error?.code === 'snapshot_revision_conflict') showConflict(account);
+      }
+    });
     find('conflict-keep-cloud').addEventListener('click', async () => {
       if (conflictAccount) controller.discardConflict(conflictAccount.account_id);
       conflictAccount = null; find('snapshot-conflict-modal').close();
@@ -323,7 +362,7 @@
 
   global.saasConsoleOperations = {configure, lock, runBatch: batch,
     clear() {
-      lock(); find('fingerprint-form').reset();
+      lock(); importTarget = null; find('fingerprint-form').reset();
       for (const id of ['tabs-table-body', 'sessions-table-body']) find(id).replaceChildren();
       for (const id of ['tabs-status', 'sessions-status', 'operation-status']) find(id).textContent = '';
     },
@@ -332,7 +371,12 @@
       const sync = actionButton('同步', () => runAccount(account, false));
       sync.disabled = account.role === 'viewer';
       if (sync.disabled) sync.title = '该账号为只读权限，不能写入云端快照';
-      cell.append(sync, actionButton('恢复', () => runAccount(account, true)));
+      const restore = actionButton('恢复', () => runAccount(account, true));
+      const exportButton = actionButton('导出', () => exportAccount(account));
+      const importButton = actionButton('导入', () => chooseImportFile(account));
+      importButton.disabled = account.role === 'viewer';
+      if (importButton.disabled) importButton.title = '该账号为只读权限，不能导入云端快照';
+      cell.append(sync, restore, exportButton, importButton);
       global.saasConsoleAdministration.appendAccountActions(cell, account);
     },
     loadView(view) { if (view === 'tabs') loadTabs(); if (view === 'security') loadSessions(); },

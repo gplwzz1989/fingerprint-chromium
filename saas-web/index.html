@@ -119,6 +119,7 @@
             <div class="inline-form"><button class="secondary-button" id="sync-all-button" type="button">同步已打开的账号</button><button class="secondary-button" id="restore-all-button" type="button">恢复当前工作区账号</button></div>
             <div class="form-status" id="operation-status" role="status" aria-live="polite"></div>
             <div class="lease-notice" id="lease-notice" role="status" aria-live="polite" hidden></div>
+            <input id="snapshot-import-file" type="file" accept="application/json,.json" hidden>
             <div class="operation-progress" id="operation-progress" aria-live="polite" hidden>
               <div class="operation-progress-head"><span id="operation-progress-label">0/0 个账号已处理</span><span>批量操作</span></div>
               <div class="progress-track" role="progressbar" aria-label="批量操作进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="operation-progress-bar"></span></div>
