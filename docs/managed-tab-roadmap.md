@@ -93,7 +93,7 @@
 - 存储专项验证：实际 C++ 生成脚本的 23 项边界探针、JVM/协议 489 项、网页 12 项通过；JNI 生成、Java 解析、安卓原生引擎与桌面修复局部 C++ 检查通过。探针不替代真实 CookieManager、Android 类型检查或设备生命周期验证。
 - 安卓指纹 get/set 已编码接入 UA、由 UA 提取的 UA-CH、页面硬件并发数和普通冻结保存。创建时可配置指纹，控制台导航前重新应用；恢复先创建空白环境再导航，避免首个网站请求使用默认 UA。配置更新完整校验后提交，存储忙时拒绝修改，种子/代理仍由创建接口确定。
 - 指纹验证：纯配置 37 项、状态头 59 项、JVM/协议 499 项和网页 13 项通过；原生元数据测试对象/链接成功，但运行存在组件入口加载错误，未计通过。UA/请求头实际效果、Worker 一致性和 APK 平台验证仍待完成，不将配置回读作为指纹效果证明。
-- Worker 第一阶段已编码：Dedicated Worker 在创建时捕获页面有效硬件并发数，嵌套 Worker 复制该快照，SharedWorker 和 ServiceWorker 均按账号 StoragePartition 传递同一快照，读取时优先使用快照。PC/Android 指纹修改返回 `requires_reload`，独立 Web 显示重载提示；已运行 Worker 不被静默改值。SharedWorker/ServiceWorker 变更已保存为独立补丁并通过现有源码反向校验；Worker 请求头/UA-CH 完整一致性与运行效果仍未完成，`worker_fingerprint_verified=false` 保留。
+- Worker 第一阶段已编码：Dedicated Worker 在创建时捕获页面有效硬件并发数，嵌套 Worker 复制该快照，SharedWorker 和 ServiceWorker 均按账号 StoragePartition 传递同一快照；ServiceWorker 同时继承账号级 UA/UA-CH 覆盖，读取时优先使用快照。PC/Android 指纹修改返回 `requires_reload`，独立 Web 显示重载提示；已运行 Worker 不被静默改值。相关变更已保存为独立补丁并通过现有源码反向校验；网络请求的全部 Worker 运行效果仍需验证，`worker_fingerprint_verified=false` 保留。
 - SAF 文件 `list/read/write` 已编码：按真实来源选择并保存目录树授权，路径逐级确认父子关系；16 MiB 单文件/1000 项目录预算。覆盖先独立写入并读回校验，原文件改名为可恢复备份，不永久删除；授权撤销、导航和超时停止后续操作。文件策略 51 项、消息路由 71 项、JVM/协议 563 项与网页 14 项通过，Java 仅语法解析；目录授权和真实提供方行为待设备验收。只增补 Android 源文件清单，不生成 GN、不触发桌面全量编译。
 - 原生 HTTP 已编码接入 Chromium SimpleURLLoader：默认独立内存网络分区、凭据关闭；自动账号凭据必须指定真实账号 Tab 固定分区。支持自定义方法与头，保留重复响应头，同来源重定向最多 5 次；8 MiB 请求/10 MiB 响应、30 秒/4 并发，导航和撤权取消后续操作。原生参数运行 78 项、JVM/协议 575 项与网页 14 项通过，其中 SAF 扩展名兼容补充后文件策略为 57 项；引擎局部 C++ 检查、JNI 生成、Java 解析通过。真实网络/代理/Cookie/取消效果尚待设备验收，不将既有 JVM 网络测试算作该后端运行验证。下一步为 Keystore、Worker 一致性与平台整体验收。
 - 完成 APK/AAB 构建、安装升级、权限撤销、断网恢复和移动端账号隔离测试。
