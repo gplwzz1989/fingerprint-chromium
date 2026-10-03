@@ -44,6 +44,7 @@
 - Keystore 专项：JVM/协议 667 项通过，包含真实安全值加密 79 项、消息路由 90 项；网页 32 项通过，其中会话模块和实际 app.js 函数/提交处理 17 项覆盖异步竞争、缓存清理失败、设备绑定、用户切换、断网/401 和表单快照。两个宿主文件通过 Java 语法解析，补丁反向检查与 Android 源清单格式检查通过；Android 类型检查和系统 Keystore/磁盘效果未验收，没有 GN 重生成、全量编译或整体验收。
 - Worker 后续编码：Dedicated/嵌套 Worker 传递页面有效硬件值的创建快照，优先于进程默认值；修改 UA 或硬件值返回重载提示。三个 Blink 文件、桌面管理器和安卓环境头通过局部编译检查，实际 WorkerSettings 19 项测试源码编译/链接成功，但组件入口 `0xC0000139` 导致未运行，不计为行为通过。SharedWorker/ServiceWorker 与网络 UA-CH 仍未完成，整体验证标记保持 false；没有 GN 或全量构建。
 - SaaS 界面：商业参考、任务/状态矩阵与 shadcn 视觉规范已建立，桌面/安卓初始空状态高保真稿已实际渲染并检查，位于 `docs/design/`。完整流程状态图及生产页面迭代未完成，不把静态设计稿当作可用业务页面。
+- Chromium 内建用户入口：工具栏头像按钮的最终可见性已在 Windows/Android 产品模式锁定为隐藏，命令行显示参数不能覆盖；局部 C++ 检查、补丁反向检查通过。新版 Chrome 尚未重新链接，运行版和 Android 构建仍待后续验证。
 - `saas-web`：Node JavaScript 语法检查通过。
 - Chromium WebUI：TypeScript 静态检查通过。
 - 独立 Web 加密同步：真实 PBKDF2/AES-GCM 往返、账号绑定、错误密码拒绝、同步类别过滤及旧 WebUI 信封兼容测试通过。
