@@ -11,3 +11,8 @@ __pycache__/
 
 # Ignore optional build / cache directory
 /build
+
+# Ignore local browser runtime and test output
+/.playwright-cli
+/output
+/publish
