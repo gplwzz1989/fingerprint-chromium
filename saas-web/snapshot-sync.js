@@ -20,15 +20,14 @@
 
   function validateProxyConfig(snapshot) {
     if (typeof snapshot.proxy_rules === 'string' &&
-        (snapshot.proxy_rules.length > 2048 || snapshot.proxy_rules.includes('@') ||
-         snapshot.proxy_rules.includes('=') || snapshot.proxy_rules.includes('\r') ||
+        (snapshot.proxy_rules.length > 2048 || snapshot.proxy_rules.includes('\r') ||
          snapshot.proxy_rules.includes('\n') || snapshot.proxy_rules.includes('\0'))) {
-      fail('代理配置不能包含明文账号或密码');
+      fail('代理配置格式无效');
     }
     if (snapshot.proxy_config === undefined) return;
     const proxy = snapshot.proxy_config;
     if (!record(proxy) || typeof proxy.address !== 'string' || proxy.address.length > 2048 ||
-        proxy.address.includes('@') || proxy.address.includes('=') || proxy.address.includes('\r') ||
+        proxy.address.includes('\r') ||
         proxy.address.includes('\n') || proxy.address.includes('\0')) {
       fail('代理地址或认证信息无效');
     }
@@ -41,8 +40,7 @@
         (!record(proxy.credential_ciphertext) ||
          typeof proxy.credential_ciphertext.algorithm !== 'string' ||
          typeof proxy.credential_ciphertext.ciphertext !== 'string' ||
-         proxy.credential_ciphertext.ciphertext.length > 65536 ||
-         'password' in proxy.credential_ciphertext || 'username' in proxy.credential_ciphertext)) {
+         proxy.credential_ciphertext.ciphertext.length > 65536)) {
       fail('代理凭证密文无效');
     }
   }
