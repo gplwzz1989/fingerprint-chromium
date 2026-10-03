@@ -298,6 +298,9 @@ button:disabled { opacity: .45; cursor: wait; }
   .conflict-version-grid, .conflict-choice-grid { grid-template-columns: 1fr; }
   .account-table-toolbar { align-items: stretch; flex-direction: column; }
   .search-field, .table-filter { width: 100%; }
+  .modal, .wide-modal { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; }
+  .modal-card { min-height: 100%; padding: 26px 18px 22px; border-radius: 0; }
+  .modal-close { top: 16px; right: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
