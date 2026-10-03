@@ -1,6 +1,7 @@
 (function installConsoleOperations(global) {
   'use strict';
   let context, controller, key = null, operation = false, conflictAccount = null;
+  const leaseNotices = new Map();
   let unlockGeneration = 0;
   let fingerprintTarget = null;
   const find = (id) => document.getElementById(id);
@@ -11,6 +12,7 @@
     panel.hidden = false;
     const percent = total ? Math.round((completed / total) * 100) : 0;
     find('operation-progress-bar').style.width = `${percent}%`;
+    find('operation-progress-bar').parentElement.setAttribute('aria-valuenow', String(percent));
     find('operation-progress-label').textContent = `${completed}/${total} 个账号已处理`;
     const result = find('operation-results'); result.replaceChildren();
     for (const failure of failures) {
@@ -21,10 +23,29 @@
     if (!['lease_conflict', 'lease_required'].includes(error?.code)) return;
     const notice = find('lease-notice');
     if (!notice) return;
-    notice.hidden = false;
-    notice.textContent = error.code === 'lease_conflict'
+    leaseNotices.set(account.account_id, error.code === 'lease_conflict'
       ? `${account.name} 正在被其他设备编辑，请等待租约释放后重试。`
-      : `${account.name} 的编辑租约已失效，请重新发起同步或恢复。`;
+      : `${account.name} 的编辑租约已失效，请重新发起同步或恢复。`);
+    notice.hidden = false;
+    notice.replaceChildren();
+    const title = document.createElement('strong'); title.textContent = '租约状态：'; notice.append(title);
+    const list = document.createElement('ul');
+    for (const message of leaseNotices.values()) { const item = document.createElement('li'); item.textContent = message; list.append(item); }
+    notice.append(list);
+  }
+  function clearLeaseNotice(account) {
+    if (!account) leaseNotices.clear();
+    else leaseNotices.delete(account.account_id);
+    const notice = find('lease-notice');
+    if (!notice) return;
+    notice.hidden = leaseNotices.size === 0;
+    if (!notice.hidden) {
+      notice.replaceChildren();
+      const title = document.createElement('strong'); title.textContent = '租约状态：'; notice.append(title);
+      const list = document.createElement('ul');
+      for (const message of leaseNotices.values()) { const item = document.createElement('li'); item.textContent = message; list.append(item); }
+      notice.append(list);
+    }
   }
   function scopeToken() {
     const state = context.getState();
@@ -43,6 +64,8 @@
     unlockGeneration++;
     key = null;
     find('operation-progress')?.setAttribute('hidden', '');
+    clearLeaseNotice();
+    find('operation-progress-bar')?.parentElement.setAttribute('aria-valuenow', '0');
     controller?.clearConflicts(); conflictAccount = null;
     find('snapshot-conflict-modal').close();
     find('fingerprint-modal').close();
@@ -71,6 +94,7 @@
   async function runAccount(account, restore) {
     if (!context.getState().session) throw new Error('请先登录');
     if (operation) throw new Error('已有批量操作正在执行');
+    clearLeaseNotice(account);
     status(`正在${restore ? '恢复' : '同步'}账号：${account.name}`);
     let result;
     try { result = await controller[restore ? 'restore' : 'upload'](account); }
@@ -80,6 +104,7 @@
       throw error;
     }
     status(`账号 ${account.name} 已${restore ? '恢复' : '同步'}，云端版本 ${result.revision}`);
+    clearLeaseNotice(account);
     await context.refreshAccounts();
   }
 
@@ -125,6 +150,7 @@
     let success = 0;
     const failures = [];
     try {
+      clearLeaseNotice();
       const tabs = restore ? [] : await context.bridge.tabs.list();
       const selected = selectedIds ? new Set(selectedIds) : null;
       const accounts = context.getState().accounts.filter((account) =>
@@ -135,7 +161,7 @@
       for (const account of accounts) {
         if (!context.getState().session || context.getState().sessionGeneration !== sessionGeneration || context.getState().workspaceId !== workspaceId) throw new Error('登录会话或工作区已变化，批量操作已停止');
         status(`正在处理 ${success + failures.length + 1}/${accounts.length}：${account.name}`);
-        try { await controller[restore ? 'restore' : 'upload'](account); success++; batchProgress(success + failures.length, accounts.length, failures); }
+        try { await controller[restore ? 'restore' : 'upload'](account); clearLeaseNotice(account); success++; batchProgress(success + failures.length, accounts.length, failures); }
         catch (error) {
           leaseNotice(account, error);
           failures.push(`${account.name}：${context.userMessage(error)}`);
@@ -153,6 +179,7 @@
 
   async function loadTabs() {
     const body = find('tabs-table-body'); body.replaceChildren();
+    find('tabs-table').setAttribute('aria-busy', 'true');
     find('tabs-status').textContent = '正在读取本机 Tab…';
     const original = scopeToken();
     try {
@@ -178,10 +205,12 @@
       }
       find('tabs-status').textContent = tabs.length ? `本工作区共 ${tabs.length} 个运行环境` : '当前工作区没有已打开的账号 Tab';
     } catch (error) { if (scopeToken() === original) find('tabs-status').textContent = context.userMessage(error); }
+    finally { if (scopeToken() === original) find('tabs-table').setAttribute('aria-busy', 'false'); }
   }
 
   async function loadSessions() {
     const body = find('sessions-table-body'); body.replaceChildren();
+    find('sessions-table').setAttribute('aria-busy', 'true');
     find('sessions-status').textContent = '正在读取登录设备…';
     const secureStorage = context.getState().bridge?.capabilities?.secureStorage === true;
     find('security-copy').textContent = secureStorage
@@ -212,6 +241,7 @@
       }
       find('sessions-status').textContent = sessions.length ? `共 ${sessions.length} 个有效登录会话` : '当前没有有效设备会话';
     } catch (error) { if (scopeToken() === original) find('sessions-status').textContent = context.userMessage(error); }
+    finally { if (scopeToken() === original) find('sessions-table').setAttribute('aria-busy', 'false'); }
   }
 
   async function editFingerprint(tab) {

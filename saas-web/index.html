@@ -21,7 +21,7 @@
         <div class="sidebar-rule"></div>
         <div class="eyebrow">控制面</div>
         <nav class="nav-list">
-          <button class="nav-item is-active" type="button" data-view="overview">
+          <button class="nav-item is-active" type="button" data-view="overview" aria-current="page">
             <span class="nav-icon">⌘</span><span>账号总览</span>
           </button>
           <button class="nav-item" type="button" data-view="tabs">
@@ -118,10 +118,10 @@
             </fieldset>
             <div class="inline-form"><button class="secondary-button" id="sync-all-button" type="button">同步已打开的账号</button><button class="secondary-button" id="restore-all-button" type="button">恢复当前工作区账号</button></div>
             <div class="form-status" id="operation-status" role="status" aria-live="polite"></div>
-            <div class="lease-notice" id="lease-notice" role="status" hidden></div>
-            <div class="operation-progress" id="operation-progress" hidden>
+            <div class="lease-notice" id="lease-notice" role="status" aria-live="polite" hidden></div>
+            <div class="operation-progress" id="operation-progress" aria-live="polite" hidden>
               <div class="operation-progress-head"><span id="operation-progress-label">0/0 个账号已处理</span><span>批量操作</span></div>
-              <div class="progress-track"><span id="operation-progress-bar"></span></div>
+              <div class="progress-track" role="progressbar" aria-label="批量操作进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="operation-progress-bar"></span></div>
               <ul class="operation-results" id="operation-results"></ul>
             </div>
           </section>
@@ -161,7 +161,7 @@
                   <label class="search-field" for="account-search"><span class="search-symbol">⌕</span><span class="sr-only">搜索账号</span><input id="account-search" type="search" placeholder="搜索账号名称、标识或标签" autocomplete="off"></label>
                   <label class="sr-only" for="account-filter">账号权限筛选</label><select class="table-filter" id="account-filter"><option value="all">全部账号</option><option value="editable">可编辑账号</option><option value="viewer">只读账号</option></select>
                 </div>
-                <table class="account-table">
+                <table class="account-table" id="account-table" aria-busy="false">
                   <thead>
                     <tr><th><input id="account-select-all" type="checkbox" aria-label="选择全部账号"> 账号</th><th>标签</th><th>修订</th><th>更新时间</th><th><span class="sr-only">操作</span></th></tr>
                   </thead>
@@ -205,19 +205,19 @@
           </div>
           <section class="panel" id="tabs-content" hidden>
             <div class="panel-heading"><h2>本机运行环境</h2><button class="secondary-button" id="refresh-tabs-button" type="button">刷新 Tab</button></div>
-            <div class="table-wrap"><table class="account-table"><thead><tr><th>账号与页面</th><th>隔离状态</th><th>操作</th></tr></thead><tbody id="tabs-table-body"></tbody></table></div>
+            <div class="table-wrap"><table class="account-table" id="tabs-table" aria-busy="false"><thead><tr><th>账号与页面</th><th>隔离状态</th><th>操作</th></tr></thead><tbody id="tabs-table-body"></tbody></table></div>
             <p class="panel-copy" id="tabs-status" role="status"></p>
           </section>
           <section class="panel" id="security-content" hidden>
             <div class="panel-heading"><h2>登录设备</h2><button class="secondary-button" id="refresh-sessions-button" type="button">刷新会话</button></div>
             <p class="panel-copy security-copy" id="security-copy">正在读取设备安全状态…</p>
-            <div class="table-wrap"><table class="account-table"><thead><tr><th>设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="sessions-table-body"></tbody></table></div>
+            <div class="table-wrap"><table class="account-table" id="sessions-table" aria-busy="false"><thead><tr><th>设备</th><th>有效期</th><th>操作</th></tr></thead><tbody id="sessions-table-body"></tbody></table></div>
             <p class="panel-copy" id="sessions-status" role="status"></p>
           </section>
           <section class="panel" id="members-content" hidden>
             <div class="panel-heading"><h2>工作区成员</h2><button class="secondary-button" id="invite-member-button" type="button">邀请成员</button></div>
             <p class="panel-copy members-copy" id="members-copy">正在读取成员权限…</p>
-            <div class="table-wrap"><table class="account-table"><thead><tr><th>成员</th><th>工作区角色</th><th>操作</th></tr></thead><tbody id="members-table-body"></tbody></table></div>
+            <div class="table-wrap"><table class="account-table" id="members-table" aria-busy="false"><thead><tr><th>成员</th><th>工作区角色</th><th>操作</th></tr></thead><tbody id="members-table-body"></tbody></table></div>
             <p class="panel-copy admin-status" id="members-status" role="status"></p>
           </section>
         </section>
@@ -268,6 +268,20 @@
         <div class="form-status" id="account-edit-status" role="status" aria-live="polite"></div>
         <div class="modal-actions"><button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button><button class="primary-button" value="default" type="submit">保存资料</button></div>
       </form>
+    </dialog>
+    <dialog class="modal wide-modal" id="account-detail-modal">
+      <div class="modal-card">
+        <button class="modal-close" type="button" id="close-account-detail" aria-label="关闭">×</button>
+        <div class="card-kicker">账号环境</div>
+        <h2 id="account-detail-title">账号详情</h2>
+        <p class="panel-copy" id="account-detail-summary"></p>
+        <div class="detail-grid" id="account-detail-meta"></div>
+        <section class="detail-section" aria-labelledby="account-runtime-heading">
+          <div class="detail-section-heading"><h3 id="account-runtime-heading">本机运行状态</h3><span class="sync-badge" id="account-runtime-badge">待读取</span></div>
+          <p class="panel-copy" id="account-runtime-status" role="status" aria-live="polite">尚未读取本机 Tab。</p>
+          <div class="runtime-card" id="account-runtime-card" hidden></div>
+        </section>
+      </div>
     </dialog>
 
     <dialog class="modal" id="fingerprint-modal">

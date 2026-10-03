@@ -10,6 +10,8 @@
     workspaces: [],
     workspaceId: '',
     accounts: [],
+    accountsLoadState: 'idle',
+    accountsLoadError: '',
     bridge: null,
     currentView: 'overview',
     selectedAccountIds: new Set(),
@@ -68,6 +70,14 @@
     bridgeStatusDetail: document.querySelector('#bridge-status-detail'),
     bridgeOriginPolicy: document.querySelector('#bridge-origin-policy'),
     capabilityList: document.querySelector('#capability-list'),
+    accountTable: document.querySelector('#account-table'),
+    accountDetailModal: document.querySelector('#account-detail-modal'),
+    accountDetailTitle: document.querySelector('#account-detail-title'),
+    accountDetailSummary: document.querySelector('#account-detail-summary'),
+    accountDetailMeta: document.querySelector('#account-detail-meta'),
+    accountRuntimeBadge: document.querySelector('#account-runtime-badge'),
+    accountRuntimeStatus: document.querySelector('#account-runtime-status'),
+    accountRuntimeCard: document.querySelector('#account-runtime-card'),
     toast: document.querySelector('#toast'),
   };
 
@@ -103,6 +113,8 @@
     }
     if (!session) {
       state.workspaces = []; state.accounts = []; state.workspaceId = '';
+      state.accountsLoadState = 'idle'; state.accountsLoadError = '';
+      elements.accountDetailModal?.close();
       elements.loginForm.reset();
       global.saasConsoleOperations.clear();
       global.saasConsoleAdministration.clear();
@@ -242,26 +254,42 @@
   async function loadAccounts() {
     if (!state.workspaceId) {
       state.accounts = [];
+      state.accountsLoadState = 'ready';
+      state.accountsLoadError = '';
       render();
       return;
     }
     const workspaceId = state.workspaceId;
     const accounts = [], seenTokens = new Set();
     let pageToken = '';
-    do {
-      const query = new URLSearchParams({page_size: '200'});
-      if (pageToken) query.set('page_token', pageToken);
-      const payload = await request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/accounts?${query}`);
-      accounts.push(...(Array.isArray(payload) ? payload : (payload?.items || [])));
-      pageToken = payload?.next_page_token || '';
-      if (pageToken && seenTokens.has(pageToken)) throw new ApiError(502, '账号分页响应无效，请重试');
-      if (pageToken) seenTokens.add(pageToken);
-    } while (pageToken);
-    if (state.workspaceId !== workspaceId || !state.session) return;
-    state.accounts = accounts;
-    const available = new Set(accounts.map((account) => account.account_id));
-    for (const accountId of state.selectedAccountIds) if (!available.has(accountId)) state.selectedAccountIds.delete(accountId);
+    state.accountsLoadState = 'loading';
+    state.accountsLoadError = '';
     render();
+    try {
+      do {
+        const query = new URLSearchParams({page_size: '200'});
+        if (pageToken) query.set('page_token', pageToken);
+        const payload = await request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/accounts?${query}`);
+        accounts.push(...(Array.isArray(payload) ? payload : (payload?.items || [])));
+        pageToken = payload?.next_page_token || '';
+        if (pageToken && seenTokens.has(pageToken)) throw new ApiError(502, '账号分页响应无效，请重试');
+        if (pageToken) seenTokens.add(pageToken);
+      } while (pageToken);
+      if (state.workspaceId !== workspaceId || !state.session) return;
+      state.accounts = accounts;
+      state.accountsLoadState = 'ready';
+      state.accountsLoadError = '';
+      const available = new Set(accounts.map((account) => account.account_id));
+      for (const accountId of state.selectedAccountIds) if (!available.has(accountId)) state.selectedAccountIds.delete(accountId);
+      render();
+    } catch (error) {
+      if (state.workspaceId === workspaceId && state.session) {
+        state.accountsLoadState = 'error';
+        state.accountsLoadError = userMessage(error);
+        render();
+      }
+      throw error;
+    }
   }
 
   async function createWorkspace(name) {
@@ -392,13 +420,19 @@
 
   function renderAccounts() {
     const visibleAccounts = getVisibleAccounts();
+    const loading = state.accountsLoadState === 'loading';
+    const failed = state.accountsLoadState === 'error';
+    elements.accountTable?.setAttribute('aria-busy', String(loading));
     elements.accountTableBody.replaceChildren();
-    elements.accountEmpty.hidden = visibleAccounts.length > 0;
+    elements.accountEmpty.hidden = loading || (!failed && visibleAccounts.length > 0);
     const hasFilter = visibleAccounts.length !== state.accounts.length;
-    elements.accountEmptyTitle.textContent = hasFilter ? '没有符合条件的账号' : '当前工作区还没有账号';
-    elements.accountEmptyCopy.textContent = hasFilter
+    elements.accountEmptyTitle.textContent = loading ? '正在读取账号目录…' : failed ? '账号目录读取失败' : hasFilter ? '没有符合条件的账号' : '当前工作区还没有账号';
+    elements.accountEmptyCopy.textContent = loading ? '正在从服务端读取当前工作区的真实账号，请稍候。' : failed
+      ? `${state.accountsLoadError || '服务暂时不可用'}。可使用右上角刷新按钮重试。`
+      : hasFilter
       ? '请调整搜索或筛选条件。账号目录保持真实服务端数据，不会填充演示内容。'
       : '添加真实账号目录后，才能从浏览器创建隔离 Tab。这里不会填充演示数据。';
+    document.querySelector('#empty-new-account-button').hidden = loading || failed || hasFilter;
     elements.metricAccounts.textContent = String(state.accounts.length);
     const revisionTotal = state.accounts.reduce((total, account) => total + Number(account.revision || 0), 0);
     elements.metricRevisions.textContent = state.accounts.length ? String(revisionTotal) : '—';
@@ -452,12 +486,15 @@
       const dateCell = document.createElement('td');
       dateCell.textContent = formatDate(account.updated_at);
       const actionCell = document.createElement('td');
+      const detail = document.createElement('button');
+      detail.type = 'button'; detail.className = 'table-action'; detail.textContent = '详情';
+      detail.addEventListener('click', () => openAccountDetail(account));
       const action = document.createElement('button');
       action.type = 'button';
       action.className = 'table-action';
       action.textContent = '打开隔离 Tab';
       action.addEventListener('click', () => openAccount(account));
-      actionCell.append(action);
+      actionCell.append(detail, action);
       if (account.role !== 'viewer') {
         const edit = document.createElement('button');
         edit.type = 'button'; edit.className = 'table-action'; edit.textContent = '编辑';
@@ -482,6 +519,59 @@
         (filter === 'viewer' && account.role === 'viewer');
       return matchesQuery && matchesFilter;
     });
+  }
+
+  async function openAccountDetail(account) {
+    const generation = state.sessionGeneration;
+    const workspaceId = state.workspaceId;
+    if (!state.accounts.some((value) => value.account_id === account.account_id && value.workspace_id === workspaceId)) {
+      showToast('账号已从当前工作区移除，请刷新后重试', true);
+      return;
+    }
+    elements.accountDetailTitle.textContent = account.name;
+    elements.accountDetailSummary.textContent = `${account.account_id} · ${account.role === 'viewer' ? '只读账号' : '可编辑账号'}`;
+    elements.accountDetailMeta.replaceChildren();
+    const metadata = [
+      ['稳定标识', account.account_id],
+      ['账号角色', {owner: '所有者', admin: '管理员', editor: '编辑者', viewer: '查看者'}[account.role] || '成员'],
+      ['云端修订', `r${account.revision ?? 0}`],
+      ['最后更新', formatDate(account.updated_at)],
+      ['标签', Array.isArray(account.labels) && account.labels.length ? account.labels.join('、') : '未设置'],
+    ];
+    for (const [label, value] of metadata) {
+      const item = document.createElement('div'); item.className = 'detail-item';
+      const title = document.createElement('span'); title.textContent = label;
+      const content = document.createElement('strong'); content.textContent = value;
+      item.append(title, content); elements.accountDetailMeta.append(item);
+    }
+    elements.accountRuntimeBadge.textContent = '读取中';
+    elements.accountRuntimeStatus.textContent = state.bridge?.available ? '正在读取当前客户端的真实 Tab 状态…' : '当前页面未连接原生桥，无法读取本机运行状态。';
+    elements.accountRuntimeCard.hidden = true;
+    elements.accountRuntimeCard.replaceChildren();
+    elements.accountDetailModal.showModal();
+    if (!state.bridge?.available) {
+      elements.accountRuntimeBadge.textContent = '未连接';
+      return;
+    }
+    try {
+      const tabs = await global.saasBridgeClient.tabs.list();
+      if (state.sessionGeneration !== generation || state.workspaceId !== workspaceId || !elements.accountDetailModal.open) return;
+      const matches = tabs.filter((tab) => tab.account_id === account.account_id);
+      elements.accountRuntimeBadge.textContent = matches.length ? '运行中' : '未运行';
+      elements.accountRuntimeStatus.textContent = matches.length ? `当前账号有 ${matches.length} 个运行中的原生 Tab。` : '当前账号没有已打开的原生 Tab。';
+      for (const tab of matches) {
+        const item = document.createElement('div'); item.className = 'runtime-item';
+        const title = document.createElement('strong'); title.textContent = tab.title || tab.url || '空白页';
+        const detail = document.createElement('span'); detail.textContent = `${tab.storage_partition_persistent ? '独立持久化分区' : '临时分区'} · ${tab.id}`;
+        item.append(title, detail); elements.accountRuntimeCard.append(item);
+      }
+      elements.accountRuntimeCard.hidden = !matches.length;
+    } catch (error) {
+      if (state.sessionGeneration === generation && state.workspaceId === workspaceId && elements.accountDetailModal.open) {
+        elements.accountRuntimeBadge.textContent = '读取失败';
+        elements.accountRuntimeStatus.textContent = userMessage(error);
+      }
+    }
   }
 
   function renderAccountSelection(visibleAccounts = getVisibleAccounts()) {
@@ -531,7 +621,10 @@
 
   function renderNavigation() {
     document.querySelectorAll('.nav-item').forEach((button) => {
-      button.classList.toggle('is-active', button.dataset.view === state.currentView);
+      const active = button.dataset.view === state.currentView;
+      button.classList.toggle('is-active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
     });
     document.querySelector('#overview-content').hidden = state.currentView !== 'overview';
     document.querySelector('#tabs-content').hidden = state.currentView !== 'tabs';
@@ -637,8 +730,10 @@
   elements.workspaceSelect.addEventListener('change', async (event) => {
     global.saasConsoleOperations.clear();
     global.saasConsoleAdministration.clear();
+    elements.accountDetailModal.close();
     state.workspaceId = event.target.value;
     state.accounts = [];
+    state.accountsLoadState = 'loading'; state.accountsLoadError = '';
     state.selectedAccountIds.clear();
     render();
     sessionStorage.setItem('fingerprint-saas.workspace-id.v1', state.workspaceId);
@@ -652,6 +747,11 @@
 
   document.querySelector('#new-account-button').addEventListener('click', () => openModal(elements.accountModal, elements.accountStatus));
   document.querySelector('#empty-new-account-button').addEventListener('click', () => openModal(elements.accountModal, elements.accountStatus));
+  document.querySelector('#close-account-detail').addEventListener('click', () => elements.accountDetailModal.close());
+  elements.accountDetailModal.addEventListener('close', () => {
+    elements.accountRuntimeCard.replaceChildren();
+    elements.accountRuntimeCard.hidden = true;
+  });
   document.querySelector('#new-workspace-button').addEventListener('click', () => openModal(elements.workspaceModal, elements.workspaceStatus));
   document.querySelector('#logout-button').addEventListener('click', () => logout());
   document.querySelector('#refresh-button').addEventListener('click', async () => {

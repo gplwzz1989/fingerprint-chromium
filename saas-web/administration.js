@@ -40,6 +40,7 @@
   }
   async function loadMembers() {
     find('members-table-body').replaceChildren();
+    find('members-table').setAttribute('aria-busy', 'true');
     find('members-status').textContent = '正在读取工作区成员…';
     try {
       const original = scope();
@@ -49,6 +50,7 @@
       find('members-copy').textContent = isManager(original)
         ? '所有者和管理员可以调整成员角色；移除成员会立即撤销其工作区访问。'
         : '当前账号只能查看成员列表，角色变更由工作区管理员执行。';
+      if (!Array.isArray(values)) throw new Error('成员列表格式无效，请刷新后重试');
       if (!values.length) {
         find('members-status').textContent = '当前工作区暂无其他成员，可邀请成员加入协作。';
         return;
@@ -78,6 +80,7 @@
       }
       find('members-status').textContent = `共 ${values.length} 位成员。角色变更由服务端逐次校验。`;
     } catch (error) { find('members-status').textContent = context.userMessage(error); }
+    finally { find('members-table').setAttribute('aria-busy', 'false'); }
   }
   function openInvite() {
     const original = scope();
@@ -107,6 +110,7 @@
     const selected = activeAccount;
     if (!selected) return;
     checkScope(selected.original);
+    find('account-access-status').textContent = '正在读取账号授权…';
     const result = await context.request(accountPath(selected.account.account_id) + '/members');
     checkScope(selected.original);
     if (selected !== activeAccount) return;
@@ -126,6 +130,7 @@
       }, 'account-access-status'));
       find('account-access-list').append(row);
     }
+    find('account-access-status').textContent = result.members.length ? `已加载 ${result.members.length} 位显式授权成员` : '当前没有显式授权成员';
   }
   async function openAudit(account) {
     const original = scope();
