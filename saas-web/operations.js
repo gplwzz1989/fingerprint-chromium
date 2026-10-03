@@ -156,6 +156,10 @@
   async function loadSessions() {
     const body = find('sessions-table-body'); body.replaceChildren();
     find('sessions-status').textContent = '正在读取登录设备…';
+    const secureStorage = context.getState().bridge?.capabilities?.secureStorage === true;
+    find('security-copy').textContent = secureStorage
+      ? '当前客户端使用设备安全存储保护刷新会话；访问令牌只保留在当前页面内存。'
+      : '当前客户端未提供设备安全存储，退出后不会自动恢复受保护会话。';
     const original = scopeToken();
     try {
       checkScope(original);
@@ -164,9 +168,14 @@
       for (const session of sessions) {
         const row = document.createElement('tr');
         const name = document.createElement('td'), expiry = document.createElement('td'), actions = document.createElement('td');
-        name.textContent = `${session.device_name || '未命名设备'}${session.current ? '（当前设备）' : ''}`;
+        const nameWrap = document.createElement('div'); nameWrap.className = 'session-name-cell';
+        const title = document.createElement('strong'); title.textContent = session.device_name || '未命名设备';
+        const device = document.createElement('span'); device.textContent = session.device_id || '设备标识未提供';
+        nameWrap.append(title, device);
+        if (session.current) { const badge = document.createElement('span'); badge.className = 'role-badge role-editor'; badge.textContent = '当前设备'; nameWrap.append(badge); }
+        name.append(nameWrap);
         expiry.textContent = new Date(session.expires_at).toLocaleString('zh-CN');
-        actions.append(actionButton('撤销会话', async () => {
+        actions.append(actionButton(session.current ? '退出当前设备' : '撤销会话', async () => {
           checkScope(original);
           if (session.current) { await context.logout(); return; }
           await context.request('/api/v1/sessions/' + encodeURIComponent(session.session_id), {method: 'DELETE'});
@@ -174,7 +183,7 @@
         }));
         row.append(name, expiry, actions); body.append(row);
       }
-      find('sessions-status').textContent = `共 ${sessions.length} 个有效登录会话`;
+      find('sessions-status').textContent = sessions.length ? `共 ${sessions.length} 个有效登录会话` : '当前没有有效设备会话';
     } catch (error) { if (scopeToken() === original) find('sessions-status').textContent = context.userMessage(error); }
   }
 

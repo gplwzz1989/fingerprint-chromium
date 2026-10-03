@@ -214,6 +214,11 @@ button { cursor: pointer; }
 .role-editor { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
 .role-viewer { color: #52525b; background: #fafafa; }
 .members-copy { margin: 0; padding: 0 22px 16px; }
+.security-copy { margin: 0; padding: 0 22px 16px; }
+.session-name-cell { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.session-name-cell strong, .session-name-cell span { display: block; }
+.session-name-cell strong { color: var(--text); font-size: 12px; }
+.session-name-cell > span:not(.role-badge) { color: var(--text-faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 #tabs-content .panel-copy, #security-content .panel-copy { padding: 0 22px 16px; }
 button:disabled { opacity: .45; cursor: wait; }
 .sync-badge { padding: 5px 8px; color: var(--cyan); background: rgba(117, 215, 208, .08); border: 1px solid rgba(117, 215, 208, .16); border-radius: 3px; font-size: 9px; }
