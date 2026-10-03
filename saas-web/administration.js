@@ -46,6 +46,13 @@
       const values = await context.request(workspacePath(original.workspaceId) + '/members');
       checkScope(original);
       find('invite-member-button').disabled = !isManager(original);
+      find('members-copy').textContent = isManager(original)
+        ? '所有者和管理员可以调整成员角色；移除成员会立即撤销其工作区访问。'
+        : '当前账号只能查看成员列表，角色变更由工作区管理员执行。';
+      if (!values.length) {
+        find('members-status').textContent = '当前工作区暂无其他成员，可邀请成员加入协作。';
+        return;
+      }
       for (const member of values) {
         const row = document.createElement('tr'), name = document.createElement('td'), role = document.createElement('td'), actions = document.createElement('td');
         name.textContent = `${member.display_name || member.email} · ${member.email}`;
@@ -60,7 +67,13 @@
           }, 'members-status'), button('移除成员', async () => {
             checkScope(original); await context.request(path, {method: 'DELETE'}); await loadMembers();
           }, 'members-status'));
-        } else { role.textContent = roles[member.role] || '成员'; actions.textContent = '不可修改'; }
+        } else {
+          const badge = document.createElement('span');
+          badge.className = `role-badge role-${member.role || 'member'}`;
+          badge.textContent = roles[member.role] || '成员';
+          role.append(badge);
+          actions.textContent = member.user_id === original.userId ? '当前账号' : '不可修改';
+        }
         row.append(name, role, actions); find('members-table-body').append(row);
       }
       find('members-status').textContent = `共 ${values.length} 位成员。角色变更由服务端逐次校验。`;
