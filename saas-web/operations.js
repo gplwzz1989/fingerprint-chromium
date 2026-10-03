@@ -5,6 +5,18 @@
   let fingerprintTarget = null;
   const find = (id) => document.getElementById(id);
   const status = (message) => { find('operation-status').textContent = message; };
+  function batchProgress(completed, total, failures = []) {
+    const panel = find('operation-progress');
+    if (!panel) return;
+    panel.hidden = false;
+    const percent = total ? Math.round((completed / total) * 100) : 0;
+    find('operation-progress-bar').style.width = `${percent}%`;
+    find('operation-progress-label').textContent = `${completed}/${total} 个账号已处理`;
+    const result = find('operation-results'); result.replaceChildren();
+    for (const failure of failures) {
+      const item = document.createElement('li'); item.textContent = failure; result.append(item);
+    }
+  }
   function scopeToken() {
     const state = context.getState();
     return state.session ? `${state.sessionGeneration}:${state.workspaceId}` : null;
@@ -21,6 +33,7 @@
   function lock() {
     unlockGeneration++;
     key = null;
+    find('operation-progress')?.setAttribute('hidden', '');
     controller?.clearConflicts(); conflictAccount = null;
     find('snapshot-conflict-modal').close();
     find('fingerprint-modal').close();
@@ -108,16 +121,19 @@
         (!selected || selected.has(account.account_id)) &&
         (restore || (account.role !== 'viewer' && tabs.some((tab) => tab.account_id === account.account_id))));
       if (!accounts.length) throw new Error(selected ? '所选账号没有可执行的同步任务' : '当前没有可执行的账号');
+      batchProgress(0, accounts.length);
       for (const account of accounts) {
         if (!context.getState().session || context.getState().sessionGeneration !== sessionGeneration || context.getState().workspaceId !== workspaceId) throw new Error('登录会话或工作区已变化，批量操作已停止');
         status(`正在处理 ${success + failures.length + 1}/${accounts.length}：${account.name}`);
-        try { await controller[restore ? 'restore' : 'upload'](account); success++; }
+        try { await controller[restore ? 'restore' : 'upload'](account); success++; batchProgress(success + failures.length, accounts.length, failures); }
         catch (error) {
           failures.push(`${account.name}：${context.userMessage(error)}`);
+          batchProgress(success + failures.length, accounts.length, failures);
           if (!restore && controller.getConflict(account.account_id)) break;
         }
       }
       status(`完成 ${success}/${accounts.length}。${failures.join('；')}`);
+      batchProgress(success + failures.length, accounts.length, failures);
       await context.refreshAccounts();
       const conflict = accounts.find((account) => controller.getConflict(account.account_id));
       if (conflict) showConflict(conflict);

@@ -197,6 +197,11 @@ button { cursor: pointer; }
 .activity-panel { margin-top: 18px; }
 .sync-panel { margin-bottom: 22px; padding-bottom: 12px; }
 .sync-panel .panel-copy, .sync-panel .form-status { margin: 12px 22px; }
+.operation-progress { margin: 14px 22px 8px; padding: 12px; background: var(--surface-hover); border: 1px solid var(--line); border-radius: 7px; }
+.operation-progress-head { display: flex; justify-content: space-between; color: var(--text-soft); font-size: 11px; }
+.progress-track { height: 6px; margin-top: 10px; overflow: hidden; background: var(--line); border-radius: 999px; }
+.progress-track span { display: block; width: 0; height: 100%; background: var(--amber); border-radius: inherit; transition: width .2s ease; }
+.operation-results { margin: 10px 0 0; padding-left: 18px; color: var(--danger); font-size: 11px; line-height: 1.6; }
 .inline-form { display: flex; margin: 12px 22px; align-items: center; flex-wrap: wrap; gap: 10px; }
 .inline-form .text-input { width: min(340px, 100%); margin: 0; }
 .inline-form .field-label { margin: 0; }

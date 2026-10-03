@@ -118,6 +118,11 @@
             </fieldset>
             <div class="inline-form"><button class="secondary-button" id="sync-all-button" type="button">同步已打开的账号</button><button class="secondary-button" id="restore-all-button" type="button">恢复当前工作区账号</button></div>
             <div class="form-status" id="operation-status" role="status" aria-live="polite"></div>
+            <div class="operation-progress" id="operation-progress" hidden>
+              <div class="operation-progress-head"><span id="operation-progress-label">0/0 个账号已处理</span><span>批量操作</span></div>
+              <div class="progress-track"><span id="operation-progress-bar"></span></div>
+              <ul class="operation-results" id="operation-results"></ul>
+            </div>
           </section>
           <div class="metric-grid">
             <article class="metric-card metric-primary">
