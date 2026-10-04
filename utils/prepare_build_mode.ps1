@@ -8,6 +8,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if ($Mode -eq 'android-arm64') {
+  throw 'Android 构建配置必须在 WSL 内维护。请使用 build-configs/build-roots.json 登记的活跃输出目录，并在确认参数差异后更新配置；此入口不会写入旧 Android 输出。'
+}
+
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $SourceRoot) {
   $SourceRoot = Join-Path $repositoryRoot 'build\src'

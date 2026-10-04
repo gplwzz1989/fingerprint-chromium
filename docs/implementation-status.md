@@ -1,5 +1,20 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-05 T06 Android 独立配置与 WSL 真实编译验证通过
+
+- 用户明确同意此前提交的具体参数修复方案。已补齐 `build-configs/android-arm64.gn` 中实际 Linux 工具路径和全部既有生效参数，原地更新活跃 `/home/gaoyang/chromium-build/AndroidDevelopment/args.gn`，移除对 PC `common.gn` 的导入；JDK 登记改为实际源码内 Linux 23.0.2，SDK/NDK、nightly Rust、功能开关及优化值不变。
+- 新增 `utils/prepare_android_build.py`：仅 WSL 可用，检查实际工具、版本、SDK/NDK、Android Rust 标准库、独立 GN 和源码根目录；默认只检查模板一致性，显式 `--apply` 才原地写入已确认内容，相同内容不写入。不运行 GN/Ninja、不修改环境变量或下载工具。PowerShell Android 模式已在写入前拒绝。
+- 原地 GN 重生成成功：57,663 个目标、4,068 个输入文件。逐项比较前后 1,203 项生效参数，无变化；完整目标的 56,547 条命令 SHA-256 相同（`e22394ba302831fd3628a793c90eb967f075bbe01a5569f681153b33b793144f`）。本次配置变更造成的额外 C/C++、Rust 编译或生成/链接命令变化为 0，不代表既有源码变更的待执行量为 0。
+- 真实编译验证：从 Ninja 图提取 `obj/base/base/check.o` 的 Android ARM64/API35 完整命令，实际编译现有 `base/check.cc` 返回 0，仅将验证对象/依赖文件写到原对象目录的独立文件；产物 30,520 字节，ELF 机器类型 AArch64。原对象和依赖缓存未覆盖；未启动新全量构建。第一次验证命令筛选包含宿主依赖而未执行编译，改为精确目标筛选后通过。
+- 当前验证边界为工具链/配置/实际单编译单元通过，完整 APK、完整链接和设备验收未完成。原 PC/Android 输出、混合 GN 历史缓存和其他任务变更保留；本次提交仅包含本修复范围。
+
+## 2026-10-04 T06 Android 工具链修复：参数确认前的入口保护记录
+
+- 已原地修改 `utils/prepare_build_mode.ps1`：Android 模式在目录创建/配置同步前返回中文错误，停止将不完整模板写入旧 `out/AndroidArm64`；PC Release 行为保持不变。构建指引已改为现有 WSL 活跃输出，并明确实际 JDK 23.0.2、Linux nightly Rust/bindgen 与独立 Linux GN 的调用关系。
+- 修正上一轮审查边界：nightly Rust 是源码支持的自定义工具链，现有包包含 Android ARM64 标准库；另一个已有 Chromium Rust 包不含该标准库，不能仅替换路径解决问题。本阶段不切换 Rust、不启用/关闭其他功能或检查。
+- 只读命令图统计基线：`chrome_public_apk` 包含 36,768 个不同 C/C++ 源文件、41,768 个 C/C++ 编译单元、173 个 Rust 编译单元、11 个 bindgen 动作、12,439 个其他生成动作、2,130 个归档动作和 26 个链接动作；本阶段未执行 Ninja 干跑、GN 重生成或编译。当时提交的模板/登记/WSL 配置入口方案及预计影响见 `docs/build-modes.md` 的修复表，后续确认与验证见本文最新记录。
+- 验证：PowerShell 语法检查通过，Android 入口实际执行并在写入前拒绝；7 个相关配置/构建图的哈希及时间戳未变化。已有其他流程的 Android 构建未被停止或修改，本阶段的局部通过不代表该构建、APK 或设备验收通过。
+
 ## 2026-10-04 WSL Android 原地续编与持续监控
 
 - 用户要求直接使用既有 WSL 工具链，并提交、推送本次修改；Ubuntu 已核实为 Running。旧 Android 输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 有编译历史和依赖缓存，保留其原参数与产物继续构建，不复制到 PC 或新输出。
