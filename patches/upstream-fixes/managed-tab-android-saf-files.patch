@@ -139,7 +139,7 @@
 @@ -42,6 +43,7 @@
      private final SaasOriginPolicy mPolicy;
      private final SaasBridgeDispatcher mDispatcher;
-     private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+     private final SaasBridgeDispatcher.@Nullable NativeBackend mNativeBackend;
 +    private final SaasSafFiles mFiles;
      private final AtomicLong mGeneration = new AtomicLong();
      private final ThreadPoolExecutor mWorker = new ThreadPoolExecutor(

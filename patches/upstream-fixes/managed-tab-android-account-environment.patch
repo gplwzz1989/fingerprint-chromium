@@ -283,7 +283,7 @@ diff --git a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc b/chrom
 +  return java_contents;
 +}
 +
-+static bool JNI_TabModelJniBridge_IsSaasAccountWebContents(
++static jboolean JNI_TabModelJniBridge_IsSaasAccountWebContents(
 +    JNIEnv* env, const JavaParamRef<jobject>& java_contents) {
 +  auto* contents = WebContents::FromJavaWebContents(java_contents);
 +  return contents && contents->GetSiteInstance()->GetStoragePartitionConfig()

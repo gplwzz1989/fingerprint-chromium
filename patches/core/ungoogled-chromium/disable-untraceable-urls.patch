@@ -30,4 +30,13 @@
 -extern const char kFinancialServer[];
  
  extern const int kFinancialPort;
+
+--- a/chrome/browser/android/rlz/rlz_ping_handler.cc
++++ b/chrome/browser/android/rlz/rlz_ping_handler.cc
+@@ -78,5 +78,5 @@ void RlzPingHandler::Ping(
+   DCHECK_EQ(id.length(), 50u);
+ 
+   GURL request_url(base::StringPrintf(
+-      "https://%s%s?", rlz_lib::kFinancialServer, rlz_lib::kFinancialPingPath));
++      "https://%s%s?", "about:blank", rlz_lib::kFinancialPingPath));
  

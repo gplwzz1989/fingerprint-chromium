@@ -42,7 +42,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     private final Tab mTab;
     private final SaasOriginPolicy mPolicy;
     private final SaasBridgeDispatcher mDispatcher;
-    private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+    private final SaasBridgeDispatcher.@Nullable NativeBackend mNativeBackend;
     private final SaasSafFiles mFiles;
     private final SaasSecureStorage mSecureStorage;
     private final AtomicLong mGeneration = new AtomicLong();
@@ -62,7 +62,7 @@ public final class SaasBridgeHost extends EmptyTabObserver {
     }
 
     public SaasBridgeHost(Tab tab, List<String> allowedOrigins, String startupUrl,
-            @Nullable SaasBridgeDispatcher.NativeBackend nativeBackend) {
+            SaasBridgeDispatcher.@Nullable NativeBackend nativeBackend) {
         mTab = tab;
         mPolicy = new SaasOriginPolicy(allowedOrigins, startupUrl);
         mDispatcher = new SaasBridgeDispatcher(mPolicy);

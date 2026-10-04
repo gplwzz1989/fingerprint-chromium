@@ -62,7 +62,7 @@
  
 +int ChromeContentBrowserClient::GetWorkerFingerprintHardwareConcurrency(
 +    const content::StoragePartitionConfig& config) {
-+  for (ManagedTabContext* tab : ManagedTabContext::GetAll()) {
++  for (chrome::ManagedTabContext* tab : chrome::ManagedTabContext::GetAll()) {
 +    if (tab->storage_partition_config() == config) {
 +      return tab->fingerprint_hardware_concurrency();
 +    }
@@ -121,5 +121,4 @@
  
    std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params;
    std::unique_ptr<Vector<uint8_t>> cached_meta_data;
-
 

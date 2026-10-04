@@ -138,7 +138,7 @@
 +++ b/chrome/android/java/src/org/chromium/chrome/browser/saas/SaasBridgeHost.java
 @@ -44,6 +44,7 @@
      private final SaasBridgeDispatcher mDispatcher;
-     private final @Nullable SaasBridgeDispatcher.NativeBackend mNativeBackend;
+     private final SaasBridgeDispatcher.@Nullable NativeBackend mNativeBackend;
      private final SaasSafFiles mFiles;
 +    private final SaasSecureStorage mSecureStorage;
      private final AtomicLong mGeneration = new AtomicLong();

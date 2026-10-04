@@ -50,7 +50,7 @@
 +std::optional<blink::UserAgentOverride>
 +ChromeContentBrowserClient::GetManagedTabUserAgentOverride(
 +    const content::StoragePartitionConfig& config) {
-+  for (ManagedTabContext* tab : ManagedTabContext::GetAll()) {
++  for (chrome::ManagedTabContext* tab : chrome::ManagedTabContext::GetAll()) {
 +    if (tab->storage_partition_config() == config) {
 +      const auto& override = tab->fingerprint_user_agent_override();
 +      if (!override.ua_string_override.empty()) return override;
@@ -80,5 +80,4 @@
    params->is_installed = IsInstalled(status_);
    params->script_url_to_skip_throttling = updated_script_url_;
    params->main_script_load_params = std::move(main_script_load_params_);
-
 

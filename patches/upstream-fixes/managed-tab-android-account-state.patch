@@ -356,7 +356,7 @@
    web_contents->GetController().Restore(
        current_entry_index, content::RestoreType::kRestored, &entries);
    return web_contents;
-@@ -374,12 +412,17 @@
+@@ -374,12 +412,18 @@
      int saved_state_version,
      bool* is_off_the_record,
      int* current_entry_index,
@@ -371,17 +371,20 @@
 -  if (!iter.ReadBool(is_off_the_record) || !iter.ReadInt(&entry_count) ||
 -      !iter.ReadInt(current_entry_index)) {
 +  std::optional<SaasAccountState> parsed_account;
-+  if (pickle.header_size() != sizeof(base::Pickle::Header) ||
++  if (buffer.size() < sizeof(base::Pickle::Header) ||
++      buffer.size() - pickle.payload_size() != sizeof(base::Pickle::Header) ||
 +      !SaasAccountState::ReadHeader(&iter, is_off_the_record, &entry_count,
 +                                    current_entry_index, &parsed_account)) {
      LOG(ERROR) << "Failed to restore state from byte array (length="
                 << buffer.size() << ").";
      return false;
-@@ -404,9 +447,12 @@
+@@ -404,9 +448,14 @@
      }
      base::Pickle tab_navigation_pickle =
          base::Pickle::WithUnownedBuffer(*tab_entry);
-+    if (tab_navigation_pickle.header_size() != sizeof(base::Pickle::Header)) {
++    if (tab_entry->size() < sizeof(base::Pickle::Header) ||
++        tab_entry->size() - tab_navigation_pickle.payload_size() !=
++            sizeof(base::Pickle::Header)) {
 +      return false;
 +    }
      base::PickleIterator tab_navigation_pickle_iterator(tab_navigation_pickle);

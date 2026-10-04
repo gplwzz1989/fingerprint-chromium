@@ -97,7 +97,7 @@
 +      fingerprint_hardware_concurrency,
        ToWebContentSecurityPolicies(std::move(info->content_security_policies)),
        FetchClientSettingsObjectFromMojomToWeb(
-           info->outside_fetch_client_settings_object),
+       info->outside_fetch_client_settings_object),
 
 --- a/content/renderer/worker/shared_worker_factory_impl.cc
 +++ b/content/renderer/worker/shared_worker_factory_impl.cc
@@ -192,4 +192,26 @@
        std::move(content_settings), std::move(browser_interface_broker),
        pause_worker_context_on_start, std::move(worker_main_script_load_params),
 
-
+--- a/content/browser/worker_host/shared_worker_host.cc
++++ b/content/browser/worker_host/shared_worker_host.cc
+@@ -5,4 +5,5 @@
+ #include "content/browser/worker_host/shared_worker_host.h"
+ 
+ #include <algorithm>
++#include <cstdint>
+ #include <utility>
+@@ -355,3 +356,6 @@ void SharedWorkerHost::Start(
+   auto options = blink::mojom::WorkerOptions::New(
+       instance_.script_type(), instance_.credentials_mode(), instance_.name());
++  const uint32_t fingerprint_hardware_concurrency =
++      GetContentClient()->browser()->GetWorkerFingerprintHardwareConcurrency(
++          GetProcessHost()->GetStoragePartition()->GetConfig());
+   blink::mojom::SharedWorkerInfoPtr info(blink::mojom::SharedWorkerInfo::New(
+@@ -358,5 +362,6 @@
+       instance_.url(), std::move(options),
+       mojo::Clone(content_security_policies_),
+       std::move(outside_fetch_client_settings_object),
+-      instance_.same_site_cookies(), instance_.extended_lifetime()));
++      instance_.same_site_cookies(), instance_.extended_lifetime(),
++      fingerprint_hardware_concurrency));
+ 

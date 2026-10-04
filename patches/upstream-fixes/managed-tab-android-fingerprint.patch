@@ -473,7 +473,7 @@
                           chrome::android::SaasAccountEnvironment::kPartitionDomain;
 +}
 +
-+static bool JNI_TabModelJniBridge_PrepareSaasAccountNavigation(
++static jboolean JNI_TabModelJniBridge_PrepareSaasAccountNavigation(
 +    JNIEnv* env, const JavaParamRef<jobject>& java_contents) {
 +  auto* contents = WebContents::FromJavaWebContents(java_contents);
 +  auto* account = chrome::android::SaasAccountEnvironment::FromWebContents(contents);

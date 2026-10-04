@@ -842,7 +842,7 @@
 +  base::android::ScopedJavaGlobalRef<jobject> request(java_request);
 +  auto authority = base::BindRepeating(
 +      [](const base::android::ScopedJavaGlobalRef<jobject>& request) {
-+        return Java_TabModelJniBridge_isSaasStorageRequestActive(AttachCurrentThread(), request);
++        return Java_TabModelJniBridge_isSaasStorageRequestActive(AttachCurrentThread(), request) != 0;
 +      }, request);
 +  auto complete = base::BindOnce(
 +      [](base::android::ScopedJavaGlobalRef<jobject> request, base::Value::Dict reply) {

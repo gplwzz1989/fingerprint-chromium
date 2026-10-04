@@ -458,3 +458,12 @@
  
    // Sets the `is_active` field of the specified TemplateURL to `kTrue` or
    // `kFalse`. Called when a user explicitly activates/deactivates the search
+
+--- a/components/search_engines/android/template_url_service_android.cc
++++ b/components/search_engines/android/template_url_service_android.cc
+@@ -421,3 +421,4 @@ void TemplateURLServiceAndroid::OnTemplateURLServiceLoaded(
+       template_url_service_->ResetTemplateURL(
+           regulatory_api_turl, regulatory_api_turl->short_name(),
+-          regulatory_api_turl->keyword(), regulatory_api_turl->url());
++          regulatory_api_turl->keyword(), regulatory_api_turl->url(),
++          regulatory_api_turl->suggestions_url());
