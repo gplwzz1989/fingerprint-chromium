@@ -10,7 +10,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", help="Chromium 源码根目录下的相对路径")
-    parser.add_argument("--out", default="build/src/out/Development")
+    parser.add_argument("--out", default="build/src/out/Release")
     parser.add_argument("--define", action="append", default=[])
     parser.add_argument("--compile", action="store_true", help="只编译指定文件的目标对象，不链接")
     parser.add_argument("--input-override", help="使用相同参数验证独立测试源文件")

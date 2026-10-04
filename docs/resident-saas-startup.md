@@ -18,7 +18,7 @@ const char kFingerprintSaasStartupUrl[] = "http://127.0.0.1:8787/";
 
 单个对象文件并不能直接改变已生成的 `chrome.exe` 或 APK。重新链接是让地址进入可执行产物的必要步骤，但不意味着其余源文件全量重编译。
 
-Windows 上复用现有 Development 参数，验证和编译常量文件：
+Windows 上复用现有 Release 参数，验证和编译常量文件：
 
 ```powershell
 python -X utf8 utils/check_cpp_syntax.py chrome/common/chrome_switches.cc

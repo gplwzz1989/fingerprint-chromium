@@ -14,6 +14,7 @@ google_default_client_id=""
 google_default_client_secret=""
 safe_browsing_mode=0
 treat_warnings_as_errors=false
+fatal_linker_warnings=false
 use_official_google_api_keys=false
 use_unofficial_version_number=false
 

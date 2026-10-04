@@ -6,7 +6,7 @@
 - Chromium 修改同步 `build/src/` 对应源码和可重放补丁，Android 实现与对应补丁保持一致，新增补丁登记 `patches/series`；源码/局部测试通过不等于最新二进制或设备验收通过。
 - Chromium 平台修改按总览第 5.4 节判断：PC 原生窗口/WebUI/TabStrip 与 Android Java/TabModel/JNI/SAF/Keystore 分别定位；共享引擎、默认地址和桥契约评估两端影响，不凭补丁名判断。移动 SaaS 布局仍改 `saas-web/`；现有 Windows x64 GN/局部检查不代表 Android 配置或编译通过，Android 输出与验收独立且不能覆盖 PC 输出。
 - 完整保留 `build/` 和 `publish/` 及 Chromium 源码、构建图、对象、生成文件、依赖记录和缓存，不通过清理触发大规模重新编译。
-- 避免无必要的 GN/Ninja 重生成和大规模重编译：`saas-web/`、`saas-server/`、文档和设计稿修改不得触发 GN 或 Chromium 编译；只有 GN 输入、原生 Chromium 源码/补丁或工具链确实变化时才评估 GN。不要为 UI 调试运行 `prepare_build_mode.ps1`、`gn gen`、输出清理或源码重解包；Development 与 Release 输出始终分离。
+- 避免无必要的 GN/Ninja 重生成和大规模重编译：`saas-web/`、`saas-server/`、文档和设计稿修改不得触发 GN 或 Chromium 编译；只有 GN 输入、原生 Chromium 源码/补丁或工具链确实变化时才评估 GN。不要为 UI 调试运行 `prepare_build_mode.ps1`、`gn gen`、输出清理或源码重解包；PC 仅保留 Release 活跃配置，历史 Development 输出与缓存独立保留，不覆盖或复用为 Release。
 - Chromium 原生修改先做局部静态检查或最小 Ninja 目标，所有编码任务完成前不启动 `chrome`/Release 全量构建；全量构建前必须先报告参数、构建图和预计范围，并获得用户明确要求。禁止删除 `obj/`、`.ninja_deps`、`.ninja_log` 或整个 `out/` 来“解决”增量问题。
 - 构建配置同步必须内容不变则不覆盖文件，避免仅因时间戳触发 GN；Windows PC 构建固定复用 D 盘 Visual Studio/Windows SDK/Clang、`DEPOT_TOOLS_WIN_TOOLCHAIN=0`、D 盘临时目录和 `PYTHONUTF8=1`，不自动下载或安装到 C 盘。
 - SaaS 打包使用 `utils/package_saas.ps1`，保持既有 `-OutputPath` 文件名；成功生成新包后旧包移入回收站，覆盖同一路径，不累积日期版本。项目内 SaaS 归档放在 `output/`，不混入 Chromium 输出。
@@ -25,4 +25,4 @@
 - 文件量预估优先只读核对现有构建图、依赖记录、命令变化与缓存；区分源码变化和参数变化造成的影响。评估不得先改参数、运行 GN 重生成或实际编译后再补报。使用 Ninja 干跑前必须确认不会执行生成器；无法可靠估计时明确标记未知并给出保守范围及依据，禁止把无输出或工具失败当作零重编译。
 - 取得用户确认后，只实施已确认的参数、平台、输出目录和范围；出现新的参数差异、扩大平台范围或超出已报告的重编译范围时，停止相关修改，重新预估并确认。参数修改许可不自动授权全量编译、缓存清理或工具安装。
 - 参数及独立缓存/输出路径保存在 Git 中供历史对比；经批准变更同步更新相关配置、项目总览和阶段记录。保留已有生效参数与模板之间的差异，禁止未经确认以“统一配置”为由覆盖实际 `args.gn`。内容未变化不覆盖文件、不更新时间戳。
-- PC Development、PC Release、Android 各 ABI/模式分别保留配置、构建图、对象和依赖缓存，不互相覆盖。禁止删除缓存、重解包源码、替换工具链或切换模式来绕过审批；后续代理必须在操作前遵守本节，不能自行解除强制锁。
+- PC Release、Android 各 ABI/模式与历史 PC Development 的构建图、对象和依赖缓存分别保留，不互相覆盖；Development 不再提供活跃配置或模式入口。禁止删除缓存、重解包源码、替换工具链或切换模式来绕过审批；后续代理必须在操作前遵守本节，不能自行解除强制锁。

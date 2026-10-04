@@ -1,0 +1,13 @@
+diff --git a/build/config/compiler/BUILD.gn b/build/config/compiler/BUILD.gn
+--- a/build/config/compiler/BUILD.gn
++++ b/build/config/compiler/BUILD.gn
+@@ -2276,5 +2276,9 @@ config("default_warnings") {
+   # an error by default eventually; see
+   # https://github.com/rust-lang/rust/issues/71668
+   rustflags = [ "-Dunsafe_op_in_unsafe_fn" ]
++
++  # 按已确认的项目配置忽略编译告警；真正的编译错误仍然阻断构建。
++  cflags += [ "-w" ]
++  rustflags += [ "-Awarnings" ]
+ }
+ # prevent_unsafe_narrowing ----------------------------------------------------

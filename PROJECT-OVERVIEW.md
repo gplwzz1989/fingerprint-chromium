@@ -33,7 +33,8 @@
 - Development 的 `chrome.exe` / `chrome.dll` 最近写入日期仍为 **2026-10-02**；Release 与 `publish/` 对应二进制为 **2026-09-30**。本次没有编译或重新链接 Chromium，不能声称最新补丁已经进入这些运行文件。
 - 两套输出均保留 `args.gn`、`.ninja_deps`、`.ninja_log`、对象与生成文件；本次不执行 GN、Ninja 清理、源码重解包或系统环境变更。
 - PC / Android 编译参数已在 `AGENTS.md` 设置强制锁：任何参数、工具链或输出/缓存路径变更，必须先给出旧值/新值、预计重编译源文件/编译单元数量及依据，取得用户针对本次变更的明确确认。现有参数与缓存不因设置规则而改变；规则不等于操作系统文件权限锁。
-- 参数已纳入 Git：保留 `build-configs/` 模板和路径清单，另跟踪 PC Development / Release 的实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。其余构建产物与缓存不提交，Android 暂无实际输出参数文件。
+- 参数已纳入 Git：PC 仅保留 Release 活跃模板和路径清单，另跟踪 Release 实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。Development 模板已移入回收站，其原输出、`args.gn` 和缓存作为历史构建状态保留，实际参数不再由 Git 跟踪。其余构建产物与缓存不提交，Android 独立配置保留，暂无实际输出参数文件。
+- 用户本次已确认告警处理变更：共享编译配置添加 C/C++ `-w`、Rust `-Awarnings`；PC/Android 关闭告警转错误和链接告警阻断，实际错误继续失败。源码、补丁和配置已同步，10 项编译器/链接器独立探针及配置语法检查通过；对应构建图尚未重生成，旧 Ninja 命令仍保留原告警配置。本次不执行 GN 重生成、Ninja 或全量构建，详见阶段记录。
 - 旧记录中的 WSL 启动错误 `HCS_E_HYPERV_NOT_INSTALLED` 和组件入口加载失败本次没有复验，仅作为后续构建排障线索。已知 Visual Studio / Windows SDK 位于 D 盘，不能把旧失败笼统归因为 SDK 未安装。
 
 ## 3. 文件夹结构与职责
@@ -206,7 +207,7 @@ Android：同一 saas-web → bridge-contract.js → 主框架原生消息端口
 
 1. 先读本文件，再读目标模块契约。最小修改、保留中文注释和未完成改动，不用假数据替代业务；生成文件采用 UTF-8，优先无 BOM。
 2. SaaS 业务修改优先留在独立 Web / Go 服务。前端当前不需要 Node 构建或额外 UI 框架；浏览器直接加载静态资源。
-3. 日常使用 Development 和已有编译参数，局部验证工具为 `utils/check_cpp_syntax.py`。该工具不等于完整编译/链接；不主动改变 GN 公共参数或执行 Release 全量构建。
+3. PC 统一使用 Release 和已有编译参数，局部验证工具 `utils/check_cpp_syntax.py` 默认读取 `out/Release` 的现有规则。该工具不等于完整编译/链接；不主动改变 GN 公共参数或执行 Release 全量构建。Development 仅保留历史产物和缓存，不再提供模板或准备入口。
 4. Android 构建、SDK/NDK、GN/Ninja 与平台测试按构建任务处理，不读取逆向工具说明、不调用逆向工具链。
 5. Go 验证在 `saas-server/` 执行 `go test ./...` 与 `go vet ./...`；真实数据库专项仅使用独立 `SAAS_TEST_DATABASE_URL`。跳过集成测试须明确记载，不把包级通过当作数据库通过。
 6. Web 验证执行 `node --check` 和 `node --test saas-web/*.test.cjs`；测试探针只属于测试，不进入最终运行包。Android 独立测试入口见 `android-bridge/README.md`，JVM 通过不等于设备通过。
@@ -238,7 +239,7 @@ pwsh -File utils/package_saas.ps1 -OutputPath 'output/saas/fingerprint-saas.zip'
 
 ## 8. 后续优先顺序
 
-1. 在保留现有缓存的前提下核对 Development 构建图、工具链和实际增量范围，安排最新 Chrome 链接；不再沿用“图只有 558 字节”的旧结论。
+1. 在保留现有缓存的前提下核对 Release 构建图、工具链和实际增量范围，安排最新 Chrome 链接；历史 Development 状态不作为新构建入口。
 2. 对最新 PC 二进制做常驻控制台、来源白名单、同账号幂等 Tab、单页跳转、跨账号隔离、文件/HTTP、Worker 请求头与硬件实际效果验收。
 3. 联调真实 HTTPS 服务、PostgreSQL 与多设备加密同步，覆盖租约、权限、版本冲突、失权和断网恢复。
 4. 准备 Android 可运行构建环境，完成完整 Java/C++ 类型检查、APK/AAB 和设备测试，重点验证 SAF、Keystore、分区网络与生命周期撤权。

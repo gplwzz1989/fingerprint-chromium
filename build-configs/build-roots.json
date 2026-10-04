@@ -1,11 +1,6 @@
 {
   "version": 1,
   "pc": {
-    "development": {
-      "output_dir": "build/src/out/Development",
-      "temp_dir": "D:/tools/chrome-finger-pc-development-temp",
-      "cache_dir": "D:/tools/chrome-finger-pc-development-cache"
-    },
     "release": {
       "output_dir": "build/src/out/Release",
       "temp_dir": "D:/tools/chrome-finger-pc-release-temp",

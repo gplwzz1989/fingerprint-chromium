@@ -1,5 +1,21 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-04 PC 仅保留 Release 配置
+
+- 按用户明确要求移除 `build-configs/development.gn`，原文件放入 Windows 回收站；`prepare_build_mode.ps1` 移除 `development` 模式，`build-roots.json` 移除 PC 开发版活跃路径，保留 Release 与 Android 独立配置。
+- `utils/check_cpp_syntax.py` 默认输出改为 `build/src/out/Release`；同步项目规则、总览与当前构建指引。PC `common.gn` 和展开副本仅更新两行模式描述，Release 参数、Android 参数、工具链及独立缓存路径值不变。
+- `build/src/out/Development/args.gn` 停止由 Git 跟踪，但其磁盘文件与原 Development 构建图、对象、依赖缓存、二进制均保留；下文 Development 验证和两模式记录属于历史事实，不作为后续构建入口。
+- 本次不执行配置准备脚本、不覆盖实际 Release 参数、不进行 GN 重生成或 Chromium 编译，因此未触发源码重编译；Release 图是否包含最新告警参数仍沿用上一节的待重生成边界。
+- 验证：PowerShell 入口语法和旧开发模式拒绝检查通过，Python 语法与 Release 默认目录检查通过，路径清单仅保留 PC Release 且 Android 不变；Release/Android 参数值及原有构建图、依赖记录和缓存文件内容校验通过。入口拒绝检查在参数绑定阶段退出，未执行配置同步。
+
+## 2026-10-04 已确认的告警处理配置
+
+- 用户已确认所有告警忽略、真正错误继续阻断：共享 `default_warnings` 增加 C/C++ `-w` 和 Rust `-Awarnings`，同步展开源码、独立补丁及 `patches/series`；保留已有 Rust 明确错误级别的检查，不使用会降低所有错误级别检查的 `--cap-lints`。
+- PC `common.gn` 与展开副本增加 `fatal_linker_warnings=false`，Release 现有实际参数仅增加同一项；Development 继续导入共用副本，保留模板与实际参数的其他差异。Android ARM64 独立模板增加 `treat_warnings_as_errors=false`、`fatal_linker_warnings=false`，使 Java/D8/R8 等现有构建规则不再因告警升级而失败。Java和链接工具仍可输出非阻断提示。
+- 本次确认仅授权上述告警配置，未改变工具链、ABI、优化、组件或链接模式，也不授权后续其他参数变化或全量构建。此前只读图分析的 PC `chrome` 参考范围约 4.3 万源文件、4.4 万 C/C++ 编译单元；新增 Rust 与链接配置的准确增量未确定，Android 无现成构建图，影响量未知。
+- 配置将在对应构建图下一次重生成后进入实际命令；本次不执行 GN 重生成或 Ninja 构建，不启动 Chromium 全量构建，不修改或清理现有构建图、对象、依赖缓存和发布文件。
+- 局部验证：现有 Clang/Rust/LLD 的 10 项独立探针通过，覆盖告警抑制、链接告警非阻断、C++ 未声明标识符、Rust 类型错误、链接缺失符号及 Rust 明确错误级别检查保留；5 个配置文件的 GN 语法解析和补丁反向应用检查通过。验证未使用 Chromium 全量目标，Android 完整编译与设备验收仍未执行。
+
 ## 2026-10-04 编译参数强制锁
 
 - 新增修复原则：PC / Android Chromium 优先局部定位和最小修复，禁止擅改全局或编译参数解决局部问题；确需变更必须先说明原因、局部方案不足及预计重编译文件量，取得用户明确确认后实施。
@@ -110,7 +126,7 @@
 - HTTPS 反向代理及客户端多设备同步、冲突恢复运行测试；服务端 PostgreSQL 集成验证已通过。
 - IndexedDB、Cache Storage、Service Worker 的同步范围和一致性实现。
 - Android 独立 SDK/NDK 构建输出、已编码消息宿主和 JNI 的完整 Java/C++ 编译、Worker 指纹一致性、Keystore/原生 HTTP/SAF 的平台权限与隔离验证、APK/AAB 和设备回归；已完成的 JVM 与端口互通不代表这些平台项完成，整体验收按用户要求暂缓。
-- Development 当前已有实际构建图文件，仍需核对缓存与依赖可用性、统一构建并重新链接；PC 新 Chrome 尚未链接，单文件编译、局部语法检查和干跑不能作为新运行版验收。
+- PC 新 Chrome 尚未链接；后续核对 Release 缓存与依赖并统一构建，Development 仅作为历史构建状态保留。单文件编译、局部语法检查和干跑不能作为新运行版验收。
 - Release 全量编译、发布目录、安装升级和整体回归测试。
 - SaaS 首轮商业页面编码、响应式布局、搜索/筛选/选择/批量操作和关键加载/失败/只读状态已完成；剩余为高保真图扩展、运行版桥接、多设备联调和发布验收，不计入本轮编码缺口。
 
@@ -139,7 +155,7 @@ Android 环境另有独立限制：WSL 返回 `HCS_E_HYPERV_NOT_INSTALLED`，现
 
 此前状态头原生运行测试 51 项通过；账号参数测试重新编译和链接成功，运行仍遇到入口加载错误，未计为通过。JVM/消息/加密整合 461 项及网页 11 项当轮复测通过。现有源码部分的新增补丁反向检查与 JNI 生成通过；本地缺少的 `TabImpl.java` 调用保护已按真实上游 `144.0.7559.132` 核对补丁上下文，尚未应用到本地文件或完成 Android 整体编译，不能视为完整恢复链或 APK 验收通过。
 
-1. 核对已恢复的 Development 构建图和保留缓存，评估实际编译范围后统一构建并重新链接，使最新 SaaS WebUI 和原生桥进入可运行二进制。
+1. 核对 Release 构建图和保留缓存，评估实际编译范围后统一构建并重新链接，使最新 SaaS WebUI 和原生桥进入可运行二进制。
 2. 运行白名单页面、普通页面、双 Tab 存储隔离、文件读写和 HTTP 桥接测试。
 3. 完成单 Tab 跳转、快照恢复和 SaaS 服务端真实数据库集成验证。
 4. 完成 Android 工具链和平台适配后，再做移动端构建。

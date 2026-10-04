@@ -1,5 +1,5 @@
-# Chromium 指纹多账号管理器的两套构建模式共用参数。
-# 模式差异放在 development.gn 和 release.gn，避免开发与发版配置漂移。
+# Chromium 指纹多账号管理器的 PC Release 基础参数。
+# Release 模式参数放在 release.gn，与基础参数分离维护。
 
 declare_args() {
   # 逗号分隔的完整 Origin 列表；协议、主机和端口必须精确匹配。
@@ -24,6 +24,7 @@ google_default_client_id = ""
 google_default_client_secret = ""
 safe_browsing_mode = 0
 treat_warnings_as_errors = false
+fatal_linker_warnings = false
 use_official_google_api_keys = false
 use_unofficial_version_number = false
 

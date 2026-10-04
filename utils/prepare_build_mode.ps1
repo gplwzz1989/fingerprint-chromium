@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('development', 'release', 'android-arm64')]
+  [ValidateSet('release', 'android-arm64')]
   [string] $Mode,
 
   [string] $SourceRoot = ''
@@ -19,7 +19,6 @@ $commonConfig = Join-Path $configRoot 'common.gn'
 $modeConfig = Join-Path $configRoot ($Mode + '.gn')
 $sourceConfigRoot = Join-Path $SourceRoot 'build-configs'
 $outName = switch ($Mode) {
-  'development' { 'Development'; break }
   'release' { 'Release'; break }
   'android-arm64' { 'AndroidArm64'; break }
 }
