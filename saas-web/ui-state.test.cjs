@@ -19,6 +19,7 @@ test('账号工作台保留真实加载、详情和运行状态入口', () => {
   assert.match(app, /accountOpenFlights/);
   assert.match(app, /已切换到账号/);
   assert.match(app, /refreshRuntimeTabs/);
+  assert.match(app, /runtimeTabsLoadError/);
   assert.match(app, /runtime-badge/);
   assert.match(html, /运行状态/);
 });

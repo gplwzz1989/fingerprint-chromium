@@ -13,6 +13,7 @@
     accountsLoadState: 'idle',
     accountsLoadError: '',
     runtimeTabs: [],
+    runtimeTabsLoadError: '',
     bridge: null,
     currentView: 'overview',
     selectedAccountIds: new Set(),
@@ -114,7 +115,7 @@
       catch (_) { showToast('网页会话缓存不可用，请检查存储权限', true); }
     }
     if (!session) {
-      state.workspaces = []; state.accounts = []; state.workspaceId = ''; state.runtimeTabs = [];
+      state.workspaces = []; state.accounts = []; state.workspaceId = ''; state.runtimeTabs = []; state.runtimeTabsLoadError = '';
       state.accountsLoadState = 'idle'; state.accountsLoadError = '';
       if (typeof accountOpenFlights !== 'undefined') accountOpenFlights.clear();
       elements.accountDetailModal?.close();
@@ -258,6 +259,7 @@
     if (!state.workspaceId) {
       state.accounts = [];
       state.runtimeTabs = [];
+      state.runtimeTabsLoadError = '';
       state.accountsLoadState = 'ready';
       state.accountsLoadError = '';
       render();
@@ -281,7 +283,11 @@
       } while (pageToken);
       if (state.workspaceId !== workspaceId || !state.session) return;
       state.accounts = accounts;
-      await refreshRuntimeTabs();
+      try { await refreshRuntimeTabs(); }
+      catch (error) {
+        state.runtimeTabs = [];
+        state.runtimeTabsLoadError = userMessage(error);
+      }
       state.accountsLoadState = 'ready';
       state.accountsLoadError = '';
       const available = new Set(accounts.map((account) => account.account_id));
@@ -300,8 +306,10 @@
   async function refreshRuntimeTabs() {
     if (!state.bridge?.available || state.bridge.capabilities?.tabs !== true || !state.workspaceId) {
       state.runtimeTabs = [];
+      state.runtimeTabsLoadError = '';
       return;
     }
+    state.runtimeTabsLoadError = '';
     const generation = state.sessionGeneration;
     const workspaceId = state.workspaceId;
     const allowed = new Set(state.accounts
@@ -358,7 +366,7 @@
     renderBridge();
     if (state.session && state.workspaceId && state.accountsLoadState === 'ready') {
       try { await refreshRuntimeTabs(); }
-      catch (error) { showToast(userMessage(error), true); }
+      catch (error) { state.runtimeTabs = []; state.runtimeTabsLoadError = userMessage(error); }
       renderAccounts();
     }
     const wasEnabled = sessionPersistence.isEnabled();
@@ -526,8 +534,9 @@
       const runtimeTab = state.runtimeTabs.find((tab) => tab.account_id === account.account_id);
       const runtimeCell = document.createElement('td');
       const runtimeBadge = document.createElement('span');
-      runtimeBadge.className = `runtime-badge ${runtimeTab ? 'is-running' : ''}`;
-      runtimeBadge.textContent = runtimeTab ? '运行中' : (state.bridge?.available ? '未运行' : '未连接');
+      runtimeBadge.className = `runtime-badge ${state.runtimeTabsLoadError ? 'is-error' : (runtimeTab ? 'is-running' : '')}`;
+      runtimeBadge.textContent = state.runtimeTabsLoadError ? '读取失败' :
+        (runtimeTab ? '运行中' : (state.bridge?.available ? '未运行' : '未连接'));
       runtimeCell.append(runtimeBadge);
 
       const revisionCell = document.createElement('td');

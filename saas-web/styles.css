@@ -179,6 +179,8 @@ button { cursor: pointer; }
 .runtime-badge::before { width: 5px; height: 5px; background: var(--text-faint); border-radius: 50%; content: ''; }
 .runtime-badge.is-running { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
 .runtime-badge.is-running::before { background: #15803d; }
+.runtime-badge.is-error { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.runtime-badge.is-error::before { background: #b45309; }
 .revision { color: var(--amber); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .table-action { padding: 6px 9px; color: var(--cyan); background: transparent; border: 1px solid rgba(117, 215, 208, .25); border-radius: 4px; font-size: 10px; }
 .table-action:hover { background: rgba(117, 215, 208, .1); border-color: var(--cyan); }
