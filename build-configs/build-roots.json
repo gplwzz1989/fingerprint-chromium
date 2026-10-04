@@ -9,7 +9,7 @@
   },
   "android": {
     "arm64": {
-      "output_dir": "build/src/out/AndroidArm64",
+      "output_dir": "/home/gaoyang/chromium-build/AndroidDevelopment",
       "temp_dir": "/home/gaoyang/chrome-finger-android-arm64-temp",
       "cache_dir": "/home/gaoyang/chrome-finger-android-arm64-cache",
       "sdk_dir": "/home/gaoyang/Android/Sdk",

@@ -1,5 +1,12 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-04 WSL Android 原地续编与持续监控
+
+- 用户要求直接使用既有 WSL 工具链，并提交、推送本次修改；Ubuntu 已核实为 Running。旧 Android 输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 有编译历史和依赖缓存，保留其原参数与产物继续构建，不复制到 PC 或新输出。
+- 新 `out/AndroidArm64` 的只读预检失败于 Linux `bindgen` 缺失：其图指向包含 Windows `.exe` 的仓库工具目录。WSL 中已有可执行 Linux Rust/bindgen；根因是构建入口未复用既有工具路径，不是 WSL 工具链未安装。
+- `build-configs/build-roots.json` 的 Android 输出登记改为既有 Linux 目录；未改变其 `args.gn`、工具链版本、优化或功能参数。原地 GN 重生成通过：57,663 个目标、4,069 个文件；现有图变化需要重新核对实际增量范围。
+- 本聊天每 5 分钟监控已启用，跟踪既有输出的进程、日志和退出码；实际错误先局部修复并验证，仅提交本次修改后推送，再继续构建。原有用户改动与全部 PC/Android 缓存保留；编译和设备验收尚未通过。
+
 ## 2026-10-04 Android 编译宿主改为 WSL
 
 - 按用户要求，Android ARM64 的 GN/Ninja、SDK/NDK/JDK、Gradle 和 APK/AAB 编译统一改为在 WSL Linux 发行版内执行；Windows PowerShell 仅用于检查 WSL 状态和查看结果，不再作为 Android 编译入口。
