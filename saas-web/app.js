@@ -81,6 +81,8 @@
     accountRuntimeBadge: document.querySelector('#account-runtime-badge'),
     accountRuntimeStatus: document.querySelector('#account-runtime-status'),
     accountRuntimeCard: document.querySelector('#account-runtime-card'),
+    workspaceTabStrip: document.querySelector('#workspace-tab-strip'),
+    runtimeTabList: document.querySelector('#runtime-tab-list'),
     toast: document.querySelector('#toast'),
   };
 
@@ -367,6 +369,7 @@
     if (state.session && state.workspaceId && state.accountsLoadState === 'ready') {
       try { await refreshRuntimeTabs(); }
       catch (error) { state.runtimeTabs = []; state.runtimeTabsLoadError = userMessage(error); }
+      renderRuntimeTabStrip();
       renderAccounts();
     }
     const wasEnabled = sessionPersistence.isEnabled();
@@ -678,6 +681,59 @@
     }
   }
 
+  function renderRuntimeTabStrip() {
+    if (!elements.runtimeTabList) return;
+    elements.runtimeTabList.replaceChildren();
+    elements.workspaceTabStrip.hidden = !state.session;
+    const accounts = new Map(state.accounts.map((account) => [account.account_id, account]));
+    for (const tab of state.runtimeTabs) {
+      const account = accounts.get(tab.account_id);
+      const item = document.createElement('div');
+      item.className = 'workspace-tab';
+      item.title = tab.title || tab.url || tab.account_id;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'workspace-tab-switch';
+      button.title = `切换到 ${account?.name || tab.account_id}`;
+      button.setAttribute('aria-label', `切换到 ${account?.name || tab.account_id}`);
+      const mark = document.createElement('span');
+      mark.className = 'workspace-tab-mark';
+      mark.textContent = (account?.name || tab.account_id).slice(0, 1).toUpperCase();
+      const title = document.createElement('span');
+      title.className = 'workspace-tab-title';
+      title.textContent = account?.name || tab.account_id;
+      button.append(mark, title);
+      button.addEventListener('click', async () => {
+        try {
+          await global.saasBridgeClient.tabs.activate(tab.id);
+          showToast(`已切换到账号 ${account?.name || tab.account_id} 的隔离 Tab`);
+        } catch (error) { showToast(userMessage(error), true); }
+      });
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'workspace-tab-close';
+      close.textContent = '×';
+      close.title = '关闭环境 Tab';
+      close.setAttribute('aria-label', `关闭 ${account?.name || tab.account_id} 环境`);
+      close.addEventListener('click', async () => {
+        close.disabled = true;
+        try {
+          const result = await global.saasBridgeClient.tabs.close(tab.id);
+          if (result === false) throw new Error('账号环境 Tab 未能关闭');
+          await refreshRuntimeTabs();
+          renderRuntimeTabStrip();
+          renderAccounts();
+          showToast(`已关闭账号 ${account?.name || tab.account_id} 的环境 Tab`);
+        } catch (error) {
+          close.disabled = false;
+          showToast(userMessage(error), true);
+        }
+      });
+      item.append(button, close);
+      elements.runtimeTabList.append(item);
+    }
+  }
+
   function renderNavigation() {
     document.querySelectorAll('.nav-item').forEach((button) => {
       const active = button.dataset.view === state.currentView;
@@ -697,6 +753,7 @@
     renderWorkspaces();
     renderAccounts();
     renderBridge();
+    renderRuntimeTabStrip();
     renderNavigation();
   }
 

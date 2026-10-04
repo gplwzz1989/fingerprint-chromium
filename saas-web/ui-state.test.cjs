@@ -20,8 +20,10 @@ test('账号工作台保留真实加载、详情和运行状态入口', () => {
   assert.match(app, /已切换到账号/);
   assert.match(app, /refreshRuntimeTabs/);
   assert.match(app, /runtimeTabsLoadError/);
+  assert.match(app, /renderRuntimeTabStrip/);
   assert.match(app, /runtime-badge/);
   assert.match(html, /运行状态/);
+  assert.match(html, /workspace-tab-strip/);
 });
 
 test('批量同步保留租约分类和可感知进度', () => {

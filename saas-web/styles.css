@@ -109,7 +109,7 @@ button { cursor: pointer; }
 .intro-points > div { display: flex; padding-bottom: 12px; gap: 14px; align-items: center; color: var(--text-soft); border-bottom: 1px solid var(--line); font-size: 12px; }
 .point-index { color: var(--amber); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 
-.login-card, .modal-card { position: relative; padding: 33px 32px 28px; background: rgba(25, 32, 42, .91); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: var(--shadow); }
+.login-card, .modal-card { position: relative; padding: 33px 32px 28px; background: #fff; border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: var(--shadow); }
 .login-card::before, .modal-card::before { position: absolute; inset: -1px auto auto -1px; width: 60px; height: 2px; content: ""; background: var(--amber); border-radius: 9px 0 0; }
 .card-kicker, .panel-kicker { margin-bottom: 14px; color: var(--amber); }
 .login-card h2, .modal-card h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.03em; }
@@ -135,13 +135,25 @@ button { cursor: pointer; }
 
 [hidden] { display: none !important; }
 .app-view { padding-top: 45px; }
+.workspace-tab-strip { display: flex; min-width: 0; margin-bottom: 30px; padding: 6px; gap: 5px; align-items: stretch; background: #f0f0f2; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.workspace-tab-list { display: flex; min-width: 0; flex: 1; gap: 5px; overflow: hidden; }
+.workspace-tab { display: flex; min-width: 0; max-width: 210px; flex: 1 1 160px; align-items: center; background: #e2e2e5; border: 1px solid transparent; border-radius: 7px; }
+.workspace-tab.is-fixed { max-width: 250px; flex-basis: 210px; background: #fff; border-color: var(--line-strong); }
+.workspace-tab-switch { display: flex; min-width: 0; flex: 1; padding: 9px 8px; gap: 8px; align-items: center; color: var(--text-soft); background: transparent; border: 0; text-align: left; }
+.workspace-tab-switch:hover { color: var(--text); }
+.workspace-tab-mark { display: grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; color: #fff; background: #18181b; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.workspace-tab:not(.is-fixed) .workspace-tab-mark { background: #15803d; }
+.workspace-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+.workspace-tab-state { margin-right: 9px; color: var(--text-faint); font-size: 9px; white-space: nowrap; }
+.workspace-tab-close { width: 26px; height: 26px; flex: 0 0 26px; color: var(--text-faint); background: transparent; border: 0; border-radius: 5px; font-size: 15px; line-height: 1; }
+.workspace-tab-close:hover { color: var(--danger); background: #f4f4f5; }
 .page-heading { display: flex; margin-bottom: 33px; gap: 24px; align-items: end; justify-content: space-between; }
 .page-heading h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 42px; font-weight: 400; letter-spacing: -.05em; }
 .page-heading p { margin: 10px 0 0; color: var(--text-soft); font-size: 12px; }
 .heading-controls { display: flex; gap: 9px; align-items: center; }
 .metric-grid { display: grid; margin-bottom: 18px; grid-template-columns: repeat(3, 1fr); gap: 13px; }
 .metric-card { min-height: 130px; padding: 20px 21px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
-.metric-primary { background: linear-gradient(135deg, rgba(243, 170, 91, .13), rgba(23, 29, 38, .96) 60%); border-color: rgba(243, 170, 91, .3); }
+.metric-primary { background: linear-gradient(135deg, #fff7ed, #fff 68%); border-color: #fed7aa; }
 .metric-label { color: var(--text-soft); font-size: 11px; }
 .metric-value { margin: 14px 0 4px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 32px; font-weight: 600; letter-spacing: -.08em; }
 .metric-status { font-family: inherit; font-size: 23px; letter-spacing: -.03em; }
@@ -161,7 +173,7 @@ button { cursor: pointer; }
 .search-field input::placeholder { color: var(--text-faint); }
 .table-filter { height: 36px; padding: 0 30px 0 10px; color: var(--text-soft); background: #fff; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; }
 .account-table { width: 100%; border-collapse: collapse; text-align: left; }
-.account-table th { padding: 10px 22px; color: var(--text-faint); background: rgba(0, 0, 0, .12); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
+.account-table th { padding: 10px 22px; color: var(--text-faint); background: #fafafa; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .account-table td { padding: 16px 22px; color: var(--text-soft); border-bottom: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
 .account-table th input, .account-select { width: 15px; height: 15px; margin: 0 9px 0 0; accent-color: var(--amber); vertical-align: middle; }
 .account-table tbody tr:hover { background: rgba(255, 255, 255, .025); }
