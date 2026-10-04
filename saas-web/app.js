@@ -18,6 +18,7 @@
   };
   let refreshFlight = null;
   let sessionRecoveryAttempted = false;
+  const accountOpenFlights = new Map();
   let sessionMarkerStorage;
   try { sessionMarkerStorage = global.localStorage; } catch (_) { sessionMarkerStorage = null; }
   const sessionPersistence = global.saasSessionPersistence.create({bridge: global.saasBridgeClient,
@@ -114,6 +115,7 @@
     if (!session) {
       state.workspaces = []; state.accounts = []; state.workspaceId = '';
       state.accountsLoadState = 'idle'; state.accountsLoadError = '';
+      if (typeof accountOpenFlights !== 'undefined') accountOpenFlights.clear();
       elements.accountDetailModal?.close();
       elements.loginForm.reset();
       global.saasConsoleOperations.clear();
@@ -364,17 +366,30 @@
         throw new Error('登录会话、工作区或账号权限已变化，请重新操作');
       }
     };
-    try {
+    const current = accountOpenFlights.get(account.account_id);
+    if (current) return current;
+    const flight = (async () => {
       checkAccountScope();
       const tabs = await global.saasBridgeClient.tabs.list();
       checkAccountScope();
       const existing = tabs.find((tab) => tab.account_id === account.account_id);
-      if (existing) await global.saasBridgeClient.tabs.activate(existing.id);
-      else await global.saasBridgeClient.tabs.create({ accountId: account.account_id });
-      showToast(`已请求创建账号 ${account.name} 的隔离 Tab`);
-    } catch (error) {
-      showToast(userMessage(error), true);
-    }
+      if (existing) {
+        await global.saasBridgeClient.tabs.activate(existing.id);
+        showToast(`已切换到账号 ${account.name} 的隔离 Tab`);
+        return;
+      }
+      await global.saasBridgeClient.tabs.create({ accountId: account.account_id });
+      checkAccountScope();
+      // 创建请求可能与另一个入口并发；创建后再次读取，确保最终只激活一个账号 Tab。
+      const created = (await global.saasBridgeClient.tabs.list())
+        .find((tab) => tab.account_id === account.account_id);
+      if (created) await global.saasBridgeClient.tabs.activate(created.id);
+      showToast(`已打开账号 ${account.name} 的隔离 Tab`);
+    })();
+    accountOpenFlights.set(account.account_id, flight);
+    try { return await flight; }
+    catch (error) { showToast(userMessage(error), true); }
+    finally { if (accountOpenFlights.get(account.account_id) === flight) accountOpenFlights.delete(account.account_id); }
   }
 
   function formatDate(value) {
@@ -731,6 +746,7 @@
     global.saasConsoleOperations.clear();
     global.saasConsoleAdministration.clear();
     elements.accountDetailModal.close();
+    accountOpenFlights.clear();
     state.workspaceId = event.target.value;
     state.accounts = [];
     state.accountsLoadState = 'loading'; state.accountsLoadError = '';

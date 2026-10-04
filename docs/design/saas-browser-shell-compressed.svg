@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title description">
+  <title id="title">指纹云控多账号 Tab 压缩与激活状态高保真设计</title>
+  <desc id="description">设计状态示意：多个账号环境使用同一父窗口，Tab 栏无滚动条，标题按可用宽度压缩并省略。</desc>
+  <defs>
+    <style>text{font-family:"Geist","Noto Sans SC","Microsoft YaHei",sans-serif;fill:#18181b;font-size:13px}.muted{fill:#71717a}.faint{fill:#a1a1aa}.tiny{font-size:10px}.small{font-size:12px}.label{font-weight:650}.title{font-size:22px;font-weight:700}.line{stroke:#e4e4e7;stroke-width:1}.icon{stroke:#71717a;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}.white{fill:#fff}.green{fill:#15803d}.orange{fill:#c2410c}.tabtext{font-size:11px;font-weight:600}</style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="5" stdDeviation="10" flood-color="#18181b" flood-opacity=".09"/></filter>
+  </defs>
+  <rect width="1600" height="1000" fill="#f5f5f5"/>
+  <rect width="1600" height="58" fill="#e8e8ea"/>
+  <rect x="0" y="0" width="42" height="58" fill="#f7f7f8"/><path d="M15 22h12v11H15zM18 18h6m-3 15v5" class="icon"/>
+  <!-- 11 tabs, each width 126px; no horizontal scrollbar -->
+  <g transform="translate(42 5)">
+    <rect width="126" height="48" rx="9" fill="#fff" stroke="#d4d4d8"/><circle cx="20" cy="24" r="8" fill="#18181b"/><text x="35" y="28" class="tabtext">SaaS 首页</text><text x="111" y="28" class="muted">×</text>
+    <g transform="translate(130)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#f97316"/><text x="35" y="28" class="tabtext">账号环境 01</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(260)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#14b8a6"/><text x="35" y="28" class="tabtext">账号环境 02</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(390)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#f43f5e"/><text x="35" y="28" class="tabtext">账号环境 03</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(520)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#8b5cf6"/><text x="35" y="28" class="tabtext">账号环境 04</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(650)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#0ea5e9"/><text x="35" y="28" class="tabtext">账号环境 05</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(780)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#22c55e"/><text x="35" y="28" class="tabtext">账号环境 06</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(910)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#eab308"/><text x="35" y="28" class="tabtext">账号环境 07</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(1040)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#ec4899"/><text x="35" y="28" class="tabtext">账号环境 08</text><text x="111" y="28" class="muted">×</text></g>
+    <g transform="translate(1170)"><rect width="126" height="48" rx="9" fill="#dedee1"/><circle cx="20" cy="24" r="7" fill="#64748b"/><text x="35" y="28" class="tabtext">账号环境 09</text><text x="111" y="28" class="muted">×</text></g>
+    <text x="1320" y="31" font-size="24" class="muted">＋</text>
+  </g>
+  <rect y="58" width="1600" height="48" fill="#fafafa"/><path d="M25 82l7-7 7 7m-7-7v15M75 75l-7 7 7 7m-7-7h16M119 75a10 10 0 1 0 8 17" class="icon"/><rect x="160" y="67" width="1270" height="30" rx="15" fill="#fff" stroke="#e4e4e7"/><circle cx="181" cy="82" r="6" fill="#a1a1aa"/><text x="198" y="87" class="muted small">当前激活：账号环境 07 · account-07.example</text><path d="M1490 75h20v15h-20z" class="icon"/>
+  <!-- explanation rail -->
+  <rect y="106" width="1600" height="894" fill="#fff"/>
+  <rect x="60" y="148" width="660" height="760" rx="14" fill="#fff" stroke="#e4e4e7" filter="url(#shadow)"/>
+  <text x="96" y="198" class="title">Tab 栏行为</text><text x="96" y="229" class="muted">Tab 数量增加时，所有标签共享可用宽度，不出现横向滚动。</text>
+  <g transform="translate(96 270)"><circle cx="10" cy="10" r="10" fill="#18181b"/><text x="34" y="15" class="label">固定首页</text><text x="150" y="15" class="muted small">第一个 Tab 永远是 SaaS，关闭按钮不显示</text></g>
+  <g transform="translate(96 322)"><circle cx="10" cy="10" r="10" fill="#15803d"/><text x="34" y="15" class="label">一账号一 Tab</text><text x="150" y="15" class="muted small">再次点击账号只执行 activate，不执行 create</text></g>
+  <g transform="translate(96 374)"><circle cx="10" cy="10" r="10" fill="#c2410c"/><text x="34" y="15" class="label">最小宽度 72px</text><text x="150" y="15" class="muted small">标题收缩、超出省略；完整标题由悬浮提示提供</text></g>
+  <g transform="translate(96 426)"><circle cx="10" cy="10" r="10" fill="#64748b"/><text x="34" y="15" class="label">关闭不等于删除</text><text x="150" y="15" class="muted small">关闭账号 Tab 不影响账号目录、快照和权限</text></g>
+  <rect x="96" y="500" width="588" height="144" rx="10" fill="#fafafa" stroke="#e4e4e7"/><text x="120" y="533" class="label">Tab 宽度算法</text><text x="120" y="564" class="mono small">width = clamp(72px, availableWidth / tabCount, 220px)</text><text x="120" y="592" class="muted small">关闭滚动容器；tab flex-shrink: 1；标题 white-space: nowrap。</text><text x="120" y="620" class="muted small">激活 Tab 保持高对比边界，不强行放大导致其他 Tab 溢出。</text>
+  <rect x="96" y="688" width="588" height="166" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/><text x="120" y="723" class="green label">当前状态</text><text x="120" y="754" class="small">账号环境 07 已打开 · 当前激活</text><text x="120" y="781" class="muted small">从 SaaS 列表点击同一账号时，窗口直接切换到此 Tab。</text><text x="120" y="808" class="muted small">不会出现第二个“账号环境 07”，不会新增父窗口。</text>
+  </g>
+  <rect x="760" y="148" width="780" height="760" rx="14" fill="#fafafa" stroke="#e4e4e7"/>
+  <text x="796" y="198" class="title">激活态页面</text><text x="796" y="229" class="muted">这是账号环境 Tab 的网站承载区；账号管理、同步和权限仍回到 SaaS 首页。</text>
+  <rect x="796" y="270" width="708" height="420" rx="10" fill="#fff" stroke="#e4e4e7"/>
+  <rect x="796" y="270" width="708" height="54" rx="10" fill="#fafafa"/><circle cx="828" cy="297" r="12" fill="#22c55e"/><text x="856" y="303" class="label">账号环境 07</text><text x="990" y="303" class="muted small">隔离分区 · 运行中</text><rect x="1326" y="282" width="150" height="30" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1401" y="302" text-anchor="middle" class="tiny label">返回 SaaS 管理</text>
+  <rect x="820" y="354" width="660" height="28" rx="5" fill="#f4f4f5"/><text x="838" y="373" class="muted tiny">网站内容区域 / 真实账号页面</text><rect x="820" y="410" width="300" height="16" rx="8" fill="#e4e4e7"/><rect x="820" y="445" width="580" height="12" rx="6" fill="#f4f4f5"/><rect x="820" y="474" width="480" height="12" rx="6" fill="#f4f4f5"/><rect x="820" y="535" width="200" height="72" rx="8" fill="#fafafa" stroke="#e4e4e7"/><rect x="1040" y="535" width="200" height="72" rx="8" fill="#fafafa" stroke="#e4e4e7"/>
+  <rect x="796" y="728" width="708" height="126" rx="10" fill="#fff" stroke="#e4e4e7"/><text x="820" y="760" class="label">回到业务系统</text><text x="820" y="789" class="muted small">账号授权、环境同步、代理/指纹配置、审计和设备管理全部在 SaaS 首页处理。</text><text x="820" y="817" class="muted small">浏览器壳只提供 Tab、导航、存储和指纹等受保护的原生能力。</text>
+</svg>

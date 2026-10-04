@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title description">
+  <title id="title">指纹云控浏览器壳与固定 SaaS 首页高保真设计</title>
+  <desc id="description">设计状态示意：首个 Tab 为不可关闭的 SaaS 首页，账号环境在同一父窗口中以浏览器 Tab 运行。</desc>
+  <defs>
+    <style>
+      text{font-family:"Geist","Noto Sans SC","Microsoft YaHei",sans-serif;fill:#18181b;font-size:13px}
+      .muted{fill:#71717a}.faint{fill:#a1a1aa}.tiny{font-size:10px}.small{font-size:12px}.label{font-weight:650}.title{font-size:24px;font-weight:700}.section{font-size:17px;font-weight:700}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.line{stroke:#e4e4e7;stroke-width:1}.icon{stroke:#71717a;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}.white{fill:#fff}.active{fill:#18181b}.green{fill:#15803d}.amber{fill:#b45309}
+    </style>
+    <linearGradient id="tabActive" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#fafafa"/></linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#18181b" flood-opacity=".08"/></filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#f5f5f5"/>
+  <!-- Browser tab strip -->
+  <rect width="1600" height="48" fill="#e9e9eb"/>
+  <rect x="0" y="0" width="48" height="48" fill="#f6f6f7"/>
+  <path d="M18 18h12v11H18zM21 14h6m-3 15v5" class="icon"/>
+  <rect x="48" y="4" width="210" height="40" rx="9" fill="url(#tabActive)" stroke="#d4d4d8"/>
+  <circle cx="70" cy="24" r="9" fill="#18181b"/><path d="M67 30v-9m6 9v-13m6 13v-6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <text x="90" y="29" class="label">指纹云控 SaaS</text><text x="237" y="29" class="muted">×</text>
+  <rect x="262" y="4" width="185" height="40" rx="9" fill="#dedee1"/>
+  <circle cx="284" cy="24" r="8" fill="#f97316"/><text x="300" y="29" class="label">账号环境 01</text><text x="425" y="29" class="muted">×</text>
+  <rect x="451" y="4" width="185" height="40" rx="9" fill="#dedee1"/>
+  <circle cx="473" cy="24" r="8" fill="#14b8a6"/><text x="489" y="29" class="label">账号环境 02</text><text x="614" y="29" class="muted">×</text>
+  <rect x="640" y="4" width="185" height="40" rx="9" fill="#dedee1"/>
+  <circle cx="662" cy="24" r="8" fill="#f43f5e"/><text x="678" y="29" class="label">账号环境 03</text><text x="803" y="29" class="muted">×</text>
+  <rect x="829" y="4" width="185" height="40" rx="9" fill="#dedee1"/>
+  <circle cx="851" cy="24" r="8" fill="#8b5cf6"/><text x="867" y="29" class="label">账号环境 04</text><text x="992" y="29" class="muted">×</text>
+  <rect x="1018" y="4" width="185" height="40" rx="9" fill="#dedee1"/>
+  <circle cx="1040" cy="24" r="8" fill="#0ea5e9"/><text x="1056" y="29" class="label">账号环境 05</text><text x="1181" y="29" class="muted">×</text>
+  <text x="1222" y="30" font-size="24" class="muted">＋</text>
+  <rect x="1378" y="0" width="74" height="48" fill="#e9e9eb"/><path d="M1400 20h18m-9-9v18" class="icon"/><path d="M1488 17h12m-12 7h12m-12 7h12" class="icon"/>
+  <!-- Address row -->
+  <rect y="48" width="1600" height="48" fill="#f8f8f9"/>
+  <path d="M25 72l7-7 7 7m-7-7v15" class="icon"/><path d="M77 65l-7 7 7 7m-7-7h16" class="icon"/><path d="M121 65a10 10 0 1 0 8 17" class="icon"/><path d="M129 65v7h-7" class="icon"/>
+  <rect x="160" y="57" width="1240" height="30" rx="15" fill="#fff" stroke="#e4e4e7"/>
+  <circle cx="180" cy="72" r="6" fill="#a1a1aa"/><text x="197" y="77" class="muted small">saas.local / workspace / accounts</text>
+  <path d="M1470 66h16v14h-16zm28 0h16v14h-16z" class="icon"/><circle cx="1538" cy="72" r="8" fill="#18181b"/>
+
+  <!-- App shell -->
+  <rect y="96" width="1600" height="904" fill="#fff"/>
+  <rect y="96" width="76" height="904" fill="#fafafa"/>
+  <path d="M76 96v904" class="line"/>
+  <rect x="18" y="117" width="40" height="40" rx="11" fill="#18181b"/><path d="M29 147v-16m9 16v-25m9 25v-11" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <g class="muted small" text-anchor="middle"><path d="M29 204h18v15H29z" class="icon"/><text x="38" y="238">首页</text><circle cx="38" cy="281" r="10" class="icon"/><text x="38" y="315">账号</text><path d="M28 357h20v16H28z" class="icon"/><text x="38" y="395">同步</text><path d="M29 436h18v18H29z" class="icon"/><text x="38" y="477">成员</text></g>
+  <rect x="8" y="257" width="60" height="78" rx="10" fill="#ececee"/><circle cx="38" cy="280" r="10" fill="#18181b"/><path d="M33 281h10m-5-5v10" stroke="#fff" stroke-width="1.6"/><text x="38" y="315" text-anchor="middle" class="label">账号</text>
+
+  <!-- SaaS workspace -->
+  <rect x="76" y="96" width="260" height="904" fill="#fbfbfc"/><path d="M336 96v904" class="line"/>
+  <text x="104" y="138" class="section">账号管理</text><text x="104" y="162" class="muted small">业务操作都在 SaaS 内完成</text>
+  <rect x="96" y="184" width="220" height="38" rx="8" fill="#fff" stroke="#e4e4e7"/><circle cx="115" cy="203" r="6" class="icon"/><path d="m120 208 5 5" class="icon"/><text x="134" y="208" class="muted small">搜索账号名称</text>
+  <text x="104" y="260" class="label">平台</text><rect x="96" y="276" width="220" height="38" rx="8" fill="#fff" stroke="#e4e4e7"/><text x="112" y="300">全部平台</text><text x="292" y="300" class="muted">79</text>
+  <rect x="96" y="325" width="220" height="40" rx="8" fill="#efeff1"/><circle cx="116" cy="345" r="8" fill="#18181b"/><text x="136" y="350" class="label">全部账号</text><text x="292" y="350" class="muted">12</text>
+  <text x="104" y="412" class="label">分组</text><text x="104" y="440" class="muted small">所有分组</text><text x="104" y="478" class="muted small">增长测试</text><text x="104" y="516" class="muted small">内容运营</text><text x="104" y="554" class="muted small">共享账号</text>
+  <path d="M96 600h220" class="line"/><text x="104" y="630" class="label">当前窗口</text><circle cx="112" cy="658" r="4" fill="#15803d"/><text x="126" y="663" class="muted small">SaaS 首页 · 固定</text><circle cx="112" cy="692" r="4" fill="#f97316"/><text x="126" y="697" class="muted small">5 个账号环境运行中</text>
+
+  <g transform="translate(374 126)"><text x="0" y="0" class="muted small">工作区 / 增长团队</text><text x="0" y="46" class="title">账号管理</text><text x="0" y="75" class="muted">统一管理账号目录、权限和环境同步；浏览器 Tab 只负责承载真实环境。</text><rect x="1060" y="18" width="126" height="38" rx="8" fill="#18181b"/><text x="1123" y="42" text-anchor="middle" class="white label">＋ 添加账号</text></g>
+  <rect x="374" y="234" width="1182" height="82" rx="10" fill="#fafafa" stroke="#e4e4e7"/><text x="400" y="263" class="label">环境同步</text><text x="400" y="288" class="muted small">快照已解锁 · 选择同步类别后，导出/导入和批量操作均在这里完成</text><rect x="1270" y="254" width="112" height="34" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1326" y="276" text-anchor="middle" class="small label">导入快照</text><rect x="1392" y="254" width="112" height="34" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1448" y="276" text-anchor="middle" class="small label">批量操作</text>
+  <rect x="374" y="338" width="1182" height="74" rx="10" fill="#fff" stroke="#e4e4e7"/><text x="400" y="368" class="section">账号环境</text><text x="400" y="392" class="muted small">点击“打开”会激活已有 Tab；不存在时才创建新 Tab。</text><rect x="1260" y="356" width="150" height="36" rx="8" fill="#fff" stroke="#d4d4d8"/><text x="1335" y="379" text-anchor="middle" class="small label">只看运行中</text><rect x="1422" y="356" width="110" height="36" rx="8" fill="#18181b"/><text x="1477" y="379" text-anchor="middle" class="white small label">＋ 新建环境</text>
+  <rect x="374" y="434" width="1182" height="330" rx="10" fill="#fff" stroke="#e4e4e7" filter="url(#shadow)"/>
+  <rect x="374" y="434" width="1182" height="48" rx="10" fill="#fafafa"/><text x="400" y="464" class="muted tiny">选择</text><text x="486" y="464" class="muted tiny">账号环境</text><text x="850" y="464" class="muted tiny">状态</text><text x="1010" y="464" class="muted tiny">云端修订</text><text x="1160" y="464" class="muted tiny">更新时间</text><text x="1398" y="464" class="muted tiny">操作</text>
+  <g transform="translate(374 482)"><path d="M0 0h1182" class="line"/><rect x="24" y="20" width="15" height="15" rx="3" fill="#fff" stroke="#a1a1aa"/><circle cx="82" cy="28" r="16" fill="#f1f5f9"/><text x="112" y="24" class="label">账号环境 01</text><text x="112" y="45" class="muted tiny mono">account-01</text><rect x="476" y="13" width="72" height="28" rx="14" fill="#f0fdf4"/><circle cx="494" cy="27" r="4" fill="#15803d"/><text x="505" y="31" class="green tiny">运行中</text><text x="636" y="31" class="mono">r12</text><text x="786" y="31" class="muted small">刚刚</text><rect x="1018" y="12" width="86" height="30" rx="7" fill="#fff" stroke="#bbf7d0"/><text x="1061" y="31" text-anchor="middle" class="green tiny">切换 Tab</text><rect x="1114" y="12" width="76" height="30" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1152" y="31" text-anchor="middle" class="tiny">详情</text><path d="M0 64h1182" class="line"/></g>
+  <g transform="translate(374 546)"><rect x="24" y="20" width="15" height="15" rx="3" fill="#fff" stroke="#a1a1aa"/><circle cx="82" cy="28" r="16" fill="#fff7ed"/><text x="112" y="24" class="label">账号环境 02</text><text x="112" y="45" class="muted tiny mono">account-02</text><rect x="476" y="13" width="72" height="28" rx="14" fill="#fff7ed"/><circle cx="494" cy="27" r="4" fill="#b45309"/><text x="505" y="31" class="amber tiny">未运行</text><text x="636" y="31" class="mono">r8</text><text x="786" y="31" class="muted small">昨天</text><rect x="1018" y="12" width="86" height="30" rx="7" fill="#18181b"/><text x="1061" y="31" text-anchor="middle" class="white tiny">打开环境</text><rect x="1114" y="12" width="76" height="30" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1152" y="31" text-anchor="middle" class="tiny">详情</text><path d="M0 64h1182" class="line"/></g>
+  <g transform="translate(374 610)"><rect x="24" y="20" width="15" height="15" rx="3" fill="#fff" stroke="#a1a1aa"/><circle cx="82" cy="28" r="16" fill="#ecfeff"/><text x="112" y="24" class="label">账号环境 03</text><text x="112" y="45" class="muted tiny mono">account-03</text><rect x="476" y="13" width="72" height="28" rx="14" fill="#fafafa"/><text x="505" y="31" class="muted tiny">待读取</text><text x="636" y="31" class="mono">—</text><text x="786" y="31" class="muted small">—</text><rect x="1018" y="12" width="86" height="30" rx="7" fill="#18181b"/><text x="1061" y="31" text-anchor="middle" class="white tiny">打开环境</text><rect x="1114" y="12" width="76" height="30" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1152" y="31" text-anchor="middle" class="tiny">详情</text></g>
+  <rect x="374" y="808" width="1182" height="82" rx="10" fill="#fafafa" stroke="#e4e4e7"/><text x="400" y="838" class="label">运行中 Tab</text><text x="400" y="863" class="muted small">当前窗口 5 个账号环境；点击列表项只激活 Tab，不创建重复环境。</text><rect x="1344" y="828" width="160" height="34" rx="7" fill="#fff" stroke="#d4d4d8"/><text x="1424" y="850" text-anchor="middle" class="small label">查看运行环境</text>
+</svg>

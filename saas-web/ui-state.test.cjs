@@ -16,6 +16,8 @@ test('账号工作台保留真实加载、详情和运行状态入口', () => {
   assert.match(app, /accountsLoadState/);
   assert.match(app, /openAccountDetail/);
   assert.match(app, /saasBridgeClient\.tabs\.list\(\)/);
+  assert.match(app, /accountOpenFlights/);
+  assert.match(app, /已切换到账号/);
 });
 
 test('批量同步保留租约分类和可感知进度', () => {
