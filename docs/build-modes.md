@@ -6,6 +6,10 @@ PC 与 Android 的输出、临时目录、依赖缓存和平台工具路径统�
 
 所有编译参数受根目录 `AGENTS.md` 的强制锁约束。下文配置准备、模式切换和 GN 命令仅为操作参考，不构成修改许可；覆盖现有参数前必须报告具体差异和预计重编译源文件/编译单元数量，并取得用户本次确认。已存在的模板与实际 `args.gn` 差异不得自动统一，配置批准也不代替全量编译批准。
 
+Git 同时跟踪配置模板和当前 PC 输出中的实际参数：`build/src/out/Development/args.gn`、`build/src/out/Release/args.gn` 及其导入副本 `build/src/build-configs/common.gn`。仅这三个现有小文件例外加入；`build/` 的其他源码、构建图、对象和缓存继续忽略。Android 目前只有 `build-configs/android-arm64.gn` 模板，没有实际输出参数，不伪造运行配置。
+
+历史对比可使用 `git log -p -- build-configs build/src/out/Development/args.gn build/src/out/Release/args.gn build/src/build-configs/common.gn`。比较操作为只读；从 Git 恢复或覆盖实际参数仍须遵守强制锁，不能因存在历史版本而直接还原并触发重编译。
+
 ## 开发验证模式
 
 配置文件：`build-configs/development.gn`

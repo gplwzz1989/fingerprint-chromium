@@ -33,6 +33,7 @@
 - Development 的 `chrome.exe` / `chrome.dll` 最近写入日期仍为 **2026-10-02**；Release 与 `publish/` 对应二进制为 **2026-09-30**。本次没有编译或重新链接 Chromium，不能声称最新补丁已经进入这些运行文件。
 - 两套输出均保留 `args.gn`、`.ninja_deps`、`.ninja_log`、对象与生成文件；本次不执行 GN、Ninja 清理、源码重解包或系统环境变更。
 - PC / Android 编译参数已在 `AGENTS.md` 设置强制锁：任何参数、工具链或输出/缓存路径变更，必须先给出旧值/新值、预计重编译源文件/编译单元数量及依据，取得用户针对本次变更的明确确认。现有参数与缓存不因设置规则而改变；规则不等于操作系统文件权限锁。
+- 参数已纳入 Git：保留 `build-configs/` 模板和路径清单，另跟踪 PC Development / Release 的实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。其余构建产物与缓存不提交，Android 暂无实际输出参数文件。
 - 旧记录中的 WSL 启动错误 `HCS_E_HYPERV_NOT_INSTALLED` 和组件入口加载失败本次没有复验，仅作为后续构建排障线索。已知 Visual Studio / Windows SDK 位于 D 盘，不能把旧失败笼统归因为 SDK 未安装。
 
 ## 3. 文件夹结构与职责

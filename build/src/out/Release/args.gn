@@ -1,0 +1,36 @@
+build_with_tflite_lib=false
+chrome_pgo_phase=0
+clang_use_chrome_plugins=false
+disable_fieldtrial_testing_config=true
+enable_hangout_services_extension=false
+enable_mdns=false
+enable_remoting=false
+enable_reporting=false
+enable_service_discovery=false
+enable_widevine=false
+exclude_unwind_tables=true
+google_api_key=""
+google_default_client_id=""
+google_default_client_secret=""
+safe_browsing_mode=0
+treat_warnings_as_errors=false
+use_official_google_api_keys=false
+use_unofficial_version_number=false
+
+# 默认使用组件化编译；正式 Release 通过 is_official_build=true 自动关闭组件化编译。
+# Release 首次构建使用静态链接；开发默认配置仍保留组件化编译。
+is_official_build = true
+is_debug = false
+is_component_build = false
+is_clang = true
+use_lld = true
+use_thin_lto = true
+thin_lto_enable_optimizations = true
+target_cpu = "x64"
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+clang_base_path = "D:/codex-tools/chromium-clang-144"
+enable_rust = true
+pdf_enable_rust_png = true
+pdf_use_skia = true
