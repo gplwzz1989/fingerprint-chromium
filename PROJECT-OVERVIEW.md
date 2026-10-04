@@ -58,7 +58,7 @@ chrome-finger/
 │  ├─ core/                    ungoogled / 基础行为补丁
 │  ├─ extra/fingerprint/      基础指纹补丁
 │  └─ upstream-fixes/          受管理 Tab、SaaS 桥、Android、Worker 等补丁
-├─ build-configs/              common.gn、development.gn、release.gn
+├─ build-configs/              PC/Android GN 参数与独立输出、缓存、工具链路径清单
 ├─ utils/                      下载、裁剪、域替换、补丁应用、局部 C++ 检查及 SaaS 打包
 ├─ devutils/                   补丁/配置校验与维护工具
 ├─ docs/                       进度、路线、契约、设计、历史测试及上游说明

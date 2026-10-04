@@ -2,6 +2,8 @@
 
 当前 Windows PC 构建固定使用两套 GN 参数，开发验证和发版编译不共用输出目录。`common.gn` 含 Windows 工具链路径和 x64 目标，不直接作为 Android 构建配置；Android 须使用独立平台参数、ABI 和输出，不能覆盖这里的 PC 输出。两端定位、构建与验收边界见 [项目总览第 5.4 节](../PROJECT-OVERVIEW.md#54-pc-与-android-的分工差异和联动)。
 
+PC 与 Android 的输出、临时目录、依赖缓存和平台工具路径统一记录在 Git 跟踪的 `build-configs/build-roots.json`。当前 Android 只登记 ARM64 配置和 D 盘预定路径，不代表 SDK/NDK 已安装，也不创建 Android 输出或触发编译。
+
 ## 开发验证模式
 
 配置文件：`build-configs/development.gn`
@@ -54,3 +56,20 @@ $out = Join-Path $src 'out\Release'
 ```
 
 注意：首次切换模式或修改 GN 参数前，必须先说明构建图变化和预计成本；日常开发不得因为小改动自动切换到 Release 或重新生成 GN。
+
+## Android ARM64 配置
+
+配置文件：`build-configs/android-arm64.gn`
+
+- 独立 `target_os = "android"`、`target_cpu = "arm64"`
+- 独立 `out/AndroidArm64` 输出目录
+- 不导入 Windows PC 的 `common.gn`
+- 独立 D 盘 SDK、NDK、JDK、临时目录和缓存路径见 `build-configs/build-roots.json`
+
+仅准备配置文件时可使用：
+
+```powershell
+& (Join-Path $repo 'utils\prepare_build_mode.ps1') -Mode android-arm64
+```
+
+该命令只创建配置目录并复制 `args.gn`，不会执行 `gn gen`、Ninja、SDK/NDK 安装或 APK 编译。Android 完整构建须另行确认工具链、ABI 和设备验收范围。

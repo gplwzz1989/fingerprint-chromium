@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('development', 'release')]
+  [ValidateSet('development', 'release', 'android-arm64')]
   [string] $Mode,
 
   [string] $SourceRoot = ''
@@ -18,13 +18,20 @@ $configRoot = Join-Path $repositoryRoot 'build-configs'
 $commonConfig = Join-Path $configRoot 'common.gn'
 $modeConfig = Join-Path $configRoot ($Mode + '.gn')
 $sourceConfigRoot = Join-Path $SourceRoot 'build-configs'
-$outName = if ($Mode -eq 'development') { 'Development' } else { 'Release' }
+$outName = switch ($Mode) {
+  'development' { 'Development'; break }
+  'release' { 'Release'; break }
+  'android-arm64' { 'AndroidArm64'; break }
+}
 $outRoot = Join-Path $SourceRoot ('out\' + $outName)
 
-foreach ($path in @($commonConfig, $modeConfig)) {
+foreach ($path in @($modeConfig)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "构建配置不存在：$path"
   }
+}
+if ($Mode -ne 'android-arm64' -and -not (Test-Path -LiteralPath $commonConfig -PathType Leaf)) {
+  throw "构建配置不存在：$commonConfig"
 }
 
 New-Item -ItemType Directory -Force -Path $sourceConfigRoot | Out-Null
@@ -47,9 +54,12 @@ function Sync-ConfigFile {
   return $true
 }
 
-$commonDestination = Join-Path $sourceConfigRoot 'common.gn'
 $argsDestination = Join-Path $outRoot 'args.gn'
-$commonChanged = Sync-ConfigFile -Source $commonConfig -Destination $commonDestination
+$commonChanged = $false
+if ($Mode -ne 'android-arm64') {
+  $commonDestination = Join-Path $sourceConfigRoot 'common.gn'
+  $commonChanged = Sync-ConfigFile -Source $commonConfig -Destination $commonDestination
+}
 $argsChanged = Sync-ConfigFile -Source $modeConfig -Destination $argsDestination
 
 if ($commonChanged -or $argsChanged) {

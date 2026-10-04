@@ -11,6 +11,7 @@
 - 本次复测：网页 36 项回归、全部业务 JavaScript 语法检查、服务端 `go test -v ./...` 与 `go vet ./...` 通过；PostgreSQL 专项因未配置独立 `SAAS_TEST_DATABASE_URL` 跳过，不把历史数据库通过记录算成本次通过。Android/JVM 与原生局部检查本次未复跑。
 - 现场修正：Development 的 `build.ninja` 现为 6,903,783 字节，包含实际构建图；旧记录“仅 558 字节”已过时。图存在不证明完整增量构建可用，Development 二进制仍为 2026-10-02，Release / publish 二进制为 2026-09-30，最新源码未重新链接。
 - 构建配置核对：Development 为 `is_component_build=true`、关闭 ThinLTO、`is_debug=false`；Release 为静态组件、开启 ThinLTO，仅用于发版。`prepare_build_mode.ps1` 已改为内容哈希相同则不覆盖 `build/src/build-configs/common.gn` 和输出 `args.gn`，避免无实际配置变化时仅因时间戳触发 GN 重生成。
+- PC/Android 构建隔离配置已纳入 Git：`build-configs/build-roots.json` 登记独立输出、临时目录、缓存和 D 盘 Android SDK/NDK/JDK/Gradle 路径；`build-configs/android-arm64.gn` 独立声明 Android ARM64 参数，不复用 Windows PC `common.gn`。只登记配置，未创建 Android 输出、未安装工具、未执行 GN 或编译。
 - 整理：42 个历史页面快照/截图/日志所在 `.playwright-cli/` 移入 Windows 回收站；最终验证截图、原有效文档和全部 `build/`、`publish/` 及 Chromium 相关源码/缓存/编译产物保留。
 - 打包：新增独立 SaaS 固定名称打包入口 `utils/package_saas.ps1`，真实编译服务并收录前端运行资源。项目内未发现既有 SaaS 包，首次默认 `output/saas/fingerprint-saas.zip`；外部已有包通过 `-OutputPath` 保持原名，后续覆盖同一路径，旧包送回收站。
 - 下一步：在用户明确允许后，使用固定 D 盘工具链环境核对 Development 增量范围，再安排最新 PC 链接及白名单/隔离/Worker 联调；当前不启动 Chromium 编译。

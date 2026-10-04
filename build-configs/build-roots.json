@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "pc": {
+    "development": {
+      "output_dir": "build/src/out/Development",
+      "temp_dir": "D:/tools/chrome-finger-pc-development-temp",
+      "cache_dir": "D:/tools/chrome-finger-pc-development-cache"
+    },
+    "release": {
+      "output_dir": "build/src/out/Release",
+      "temp_dir": "D:/tools/chrome-finger-pc-release-temp",
+      "cache_dir": "D:/tools/chrome-finger-pc-release-cache"
+    }
+  },
+  "android": {
+    "arm64": {
+      "output_dir": "build/src/out/AndroidArm64",
+      "temp_dir": "D:/tools/chrome-finger-android-arm64-temp",
+      "cache_dir": "D:/tools/chrome-finger-android-arm64-cache",
+      "sdk_dir": "D:/tools/chrome-finger-android-sdk",
+      "ndk_dir": "D:/tools/chrome-finger-android-ndk",
+      "java_home": "D:/Program Files/Java/jdk-11.0.30",
+      "gradle_cache_dir": "D:/tools/chrome-finger-android-gradle-cache"
+    }
+  }
+}

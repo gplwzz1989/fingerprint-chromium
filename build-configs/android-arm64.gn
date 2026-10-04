@@ -1,0 +1,14 @@
+# Android ARM64 独立构建参数；不复用 Windows PC 的 common.gn。
+target_os = "android"
+target_cpu = "arm64"
+
+is_official_build = false
+is_debug = false
+is_component_build = false
+use_thin_lto = false
+thin_lto_enable_optimizations = false
+
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+enable_rust = true
