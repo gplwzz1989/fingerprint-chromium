@@ -217,3 +217,4 @@ upstream-fixes/managed-tab-shared-worker-hardware.patch
 upstream-fixes/managed-tab-service-worker-hardware.patch
 upstream-fixes/managed-tab-service-worker-uach.patch
 upstream-fixes/managed-tab-hide-chromium-user-entry.patch
+upstream-fixes/android-wsl-devtools-esbuild.patch

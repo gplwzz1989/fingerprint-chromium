@@ -1,0 +1,27 @@
+diff --git a/third_party/devtools-frontend/src/scripts/devtools_paths.py b/third_party/devtools-frontend/src/scripts/devtools_paths.py
+--- a/third_party/devtools-frontend/src/scripts/devtools_paths.py
++++ b/third_party/devtools-frontend/src/scripts/devtools_paths.py
+@@ -8,0 +9,1 @@
++import os
+@@ -81,1 +81,20 @@
+-    return path.join(devtools_root_path(), 'third_party', 'esbuild', 'esbuild')
++    esbuild = path.join(devtools_root_path(), 'third_party', 'esbuild', 'esbuild')
++    if platform.system() == 'Linux':
++        try:
++            with open(esbuild, 'rb') as stream:
++                is_elf = stream.read(4) == b'\x7fELF'
++        except OSError:
++            is_elf = False
++        if not is_elf:
++            directory = path.dirname(esbuild)
++            for name in sorted(os.listdir(directory), reverse=True):
++                if not name.startswith('esbuild-linux-backup-'):
++                    continue
++                candidate = path.join(directory, name)
++                try:
++                    with open(candidate, 'rb') as stream:
++                        if stream.read(4) == b'\x7fELF':
++                            return candidate
++                except OSError:
++                    continue
++    return esbuild
