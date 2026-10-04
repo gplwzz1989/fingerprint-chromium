@@ -29,7 +29,31 @@ foreach ($path in @($commonConfig, $modeConfig)) {
 
 New-Item -ItemType Directory -Force -Path $sourceConfigRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
-Copy-Item -LiteralPath $commonConfig -Destination (Join-Path $sourceConfigRoot 'common.gn') -Force
-Copy-Item -LiteralPath $modeConfig -Destination (Join-Path $outRoot 'args.gn') -Force
 
-Write-Output "已准备 $Mode 构建模式：$outRoot"
+function Sync-ConfigFile {
+  param(
+    [Parameter(Mandatory = $true)][string] $Source,
+    [Parameter(Mandatory = $true)][string] $Destination
+  )
+
+  if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+    $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+    $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+    if ($sourceHash -eq $destinationHash) {
+      return $false
+    }
+  }
+  Copy-Item -LiteralPath $Source -Destination $Destination -Force
+  return $true
+}
+
+$commonDestination = Join-Path $sourceConfigRoot 'common.gn'
+$argsDestination = Join-Path $outRoot 'args.gn'
+$commonChanged = Sync-ConfigFile -Source $commonConfig -Destination $commonDestination
+$argsChanged = Sync-ConfigFile -Source $modeConfig -Destination $argsDestination
+
+if ($commonChanged -or $argsChanged) {
+  Write-Output "已更新 $Mode 构建配置：$outRoot"
+} else {
+  Write-Output "$Mode 构建配置未变化：$outRoot"
+}

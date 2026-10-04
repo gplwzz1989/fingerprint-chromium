@@ -10,9 +10,10 @@
 - 当前阶段：SaaS Web / Go 控制面主要功能及桌面、Android 原生能力已编码；最新 Chromium 链接、Android 完整构建、设备与多设备运行、生产发布验收尚未完成。
 - 本次复测：网页 36 项回归、全部业务 JavaScript 语法检查、服务端 `go test -v ./...` 与 `go vet ./...` 通过；PostgreSQL 专项因未配置独立 `SAAS_TEST_DATABASE_URL` 跳过，不把历史数据库通过记录算成本次通过。Android/JVM 与原生局部检查本次未复跑。
 - 现场修正：Development 的 `build.ninja` 现为 6,903,783 字节，包含实际构建图；旧记录“仅 558 字节”已过时。图存在不证明完整增量构建可用，Development 二进制仍为 2026-10-02，Release / publish 二进制为 2026-09-30，最新源码未重新链接。
+- 构建配置核对：Development 为 `is_component_build=true`、关闭 ThinLTO、`is_debug=false`；Release 为静态组件、开启 ThinLTO，仅用于发版。`prepare_build_mode.ps1` 已改为内容哈希相同则不覆盖 `build/src/build-configs/common.gn` 和输出 `args.gn`，避免无实际配置变化时仅因时间戳触发 GN 重生成。
 - 整理：42 个历史页面快照/截图/日志所在 `.playwright-cli/` 移入 Windows 回收站；最终验证截图、原有效文档和全部 `build/`、`publish/` 及 Chromium 相关源码/缓存/编译产物保留。
 - 打包：新增独立 SaaS 固定名称打包入口 `utils/package_saas.ps1`，真实编译服务并收录前端运行资源。项目内未发现既有 SaaS 包，首次默认 `output/saas/fingerprint-saas.zip`；外部已有包通过 `-OutputPath` 保持原名，后续覆盖同一路径，旧包送回收站。
-- 下一步：核对保留的 Development 构建图与实际增量范围，安排最新 PC 链接及白名单/隔离/Worker 联调，再推进真实多设备、Android 平台和 Release 发布验收。本轮只做整理、SaaS 归档及局部复测，不启动 Chromium 构建。
+- 下一步：在用户明确允许后，使用固定 D 盘工具链环境核对 Development 增量范围，再安排最新 PC 链接及白名单/隔离/Worker 联调；当前不启动 Chromium 编译。
 
 ## 当前阶段
 
@@ -90,7 +91,7 @@
 - 原生桥：`management_ui_handler.cc` 使用现有开发版编译参数完成 C++ 局部语法编译。现有生成头尚无新的 Origin 白名单标记，局部检查显式补充与 `common.gn` 一致的宏定义，不修改生成文件或 GN；最终构建仍需生成正式头并链接。
 - 新增 SaaS 桥接补丁可通过反向应用检查，并已加入 `patches/series`。
 - 指纹配置编辑表单已在现有指纹管理器 WebUI 中实现，包含 User-Agent、硬件并发数和指纹种子输入；尚未在包含最新源码的运行版中回归。
-- 未主动修改或执行 GN，未启动 Release 全量编译；局部 Ninja 目标在构建前自动尝试重生成时因工具链预检失败而停止。
+- 本轮曾执行 Development GN 重生成并启动过 Ninja 依赖验证，随后按用户要求停止；未完成链接、未生成新 Chromium 二进制，也未执行 Release 全量编译。
 
 ## 尚未完成
 
@@ -115,7 +116,7 @@
 
 `disable-gcm.patch` 已修正 1 处 hunk 行数，Git 格式解析通过；`build-compatibility.patch` 已修正 15 处行数，补丁读取检查通过，但仍有 GPU 和 Blink 两段纯上下文块使 Git 完整格式解析失败。修正只涉及 hunk 计数，没有修改正文或 GN。历史核对确认 Blink 段为撤销依赖后遗留的上下文，GPU 段首次提交即缺少增删标记，暂未猜测修复或删除；从净源码完整重放仍待验证。
 
-此前 Development 前端局部目标在 Ninja 自动重生成时因工具链发现失败而停止。已核实 Visual Studio 2022 和 Windows SDK 10.0.26100.0 分别安装在 D 盘 Visual Studio 目录与 `D:\Windows Kits\10`；它们并未缺失。局部验证应复用已有工具路径，避免通过自动 GN 重生成改变构建图。
+此前 Development 前端局部目标在 Ninja 自动重生成时因工具链发现失败而停止。已核实 Visual Studio 2022 和 Windows SDK 10.0.26100.0 分别安装在 D 盘 Visual Studio 目录与 `D:\Windows Kits\10`；它们并未缺失。局部验证必须复用 `DEPOT_TOOLS_WIN_TOOLCHAIN=0`、D 盘 Visual Studio/SDK、D 盘临时目录和 `PYTHONUTF8=1`，避免自动下载工具链或因系统代码页读取环境文件失败。
 
 此前核对 `build/src/out/Development/build.ninja` 仅 558 字节，只包含 GN 重生成入口；2026-10-04 现场核对已为 6,903,783 字节并含完整构建图，此项旧阻塞已变化。此前临时 driver 对 `chrome.dll` 的干跑列出 54340 个待执行步骤，这些步骤没有执行，PC 新 Chrome 没有完成链接。当前仍需核对缓存/依赖并安排统一构建，不能仅据图文件存在宣称构建已通过，也不能归因为 Windows SDK 缺失或将干跑步骤数记为已完成编译。限流任务的 CGO 编译器缺口属于 Go 竞态检测环境，与上述 Chromium 构建状态不同。
 
