@@ -4,6 +4,8 @@
 
 PC 与 Android 的输出、临时目录、依赖缓存和平台工具路径统一记录在 Git 跟踪的 `build-configs/build-roots.json`。当前 Android 只登记 ARM64 配置和 D 盘预定路径，不代表 SDK/NDK 已安装，也不创建 Android 输出或触发编译。
 
+所有编译参数受根目录 `AGENTS.md` 的强制锁约束。下文配置准备、模式切换和 GN 命令仅为操作参考，不构成修改许可；覆盖现有参数前必须报告具体差异和预计重编译源文件/编译单元数量，并取得用户本次确认。已存在的模板与实际 `args.gn` 差异不得自动统一，配置批准也不代替全量编译批准。
+
 ## 开发验证模式
 
 配置文件：`build-configs/development.gn`
