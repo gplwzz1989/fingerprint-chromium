@@ -6,6 +6,9 @@
 - Chromium 修改同步 `build/src/` 对应源码和可重放补丁，Android 实现与对应补丁保持一致，新增补丁登记 `patches/series`；源码/局部测试通过不等于最新二进制或设备验收通过。
 - Chromium 平台修改按总览第 5.4 节判断：PC 原生窗口/WebUI/TabStrip 与 Android Java/TabModel/JNI/SAF/Keystore 分别定位；共享引擎、默认地址和桥契约评估两端影响，不凭补丁名判断。移动 SaaS 布局仍改 `saas-web/`；现有 Windows x64 GN/局部检查不代表 Android 配置或编译通过，Android 输出与验收独立且不能覆盖 PC 输出。
 - 完整保留 `build/` 和 `publish/` 及 Chromium 源码、构建图、对象、生成文件、依赖记录和缓存，不通过清理触发大规模重新编译。
+- 避免无必要的 GN/Ninja 重生成和大规模重编译：`saas-web/`、`saas-server/`、文档和设计稿修改不得触发 GN 或 Chromium 编译；只有 GN 输入、原生 Chromium 源码/补丁或工具链确实变化时才评估 GN。不要为 UI 调试运行 `prepare_build_mode.ps1`、`gn gen`、输出清理或源码重解包；Development 与 Release 输出始终分离。
+- Chromium 原生修改先做局部静态检查或最小 Ninja 目标，所有编码任务完成前不启动 `chrome`/Release 全量构建；全量构建前必须先报告参数、构建图和预计范围，并获得用户明确要求。禁止删除 `obj/`、`.ninja_deps`、`.ninja_log` 或整个 `out/` 来“解决”增量问题。
+- 构建配置同步必须内容不变则不覆盖文件，避免仅因时间戳触发 GN；Windows PC 构建固定复用 D 盘 Visual Studio/Windows SDK/Clang、`DEPOT_TOOLS_WIN_TOOLCHAIN=0`、D 盘临时目录和 `PYTHONUTF8=1`，不自动下载或安装到 C 盘。
 - SaaS 打包使用 `utils/package_saas.ps1`，保持既有 `-OutputPath` 文件名；成功生成新包后旧包移入回收站，覆盖同一路径，不累积日期版本。项目内 SaaS 归档放在 `output/`，不混入 Chromium 输出。
 - 历史文件仅在确认无引用、非运行数据且非 Chromium 产物后移入回收站；禁止永久删除。
 
