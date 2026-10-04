@@ -2,6 +2,8 @@
 
 这里保存与 `saas-web/bridge-contract.d.ts` 对齐的 Android 契约和适配边界。当前阶段不复制 Chromium 桌面输出，也不伪造 Android 编译结果。
 
+开发前阅读 [项目总览第 5.4 节](../PROJECT-OVERVIEW.md#54-pc-与-android-的分工差异和联动)，明确 PC / Android 共享契约、独立宿主与平台源码的关系。移动 SaaS 页面仍在 `saas-web/`；Android 原生问题定位 Java/TabModel/JNI/分区及系统能力，不照搬 PC 的 WebUI、窗口、Windows 路径或构建参数。JVM 与桌面局部检查不等于 Android 完整编译或设备验收。
+
 ## 当前状态
 
 - `SaasBridgeContract.kt`：平台无关的 Kotlin 接口和数据结构，文件与 HTTP 字段和桌面 Web 契约保持对应。
@@ -14,9 +16,9 @@
 ## 接入顺序
 
 1. 完成已编码的 Android Chromium 消息宿主、Origin 校验及 JNI 的完整编译和设备验收。
-2. 接入 `tabs`、`storage`、`fingerprint` 三项已稳定桌面契约。
-3. 增加 Keystore 会话、应用恢复和账号目录隔离测试。
-4. 最后实现 SAF 文件能力和可取消的原生 HTTP，并执行权限撤销与审计测试。
+2. 验证已编码的 `tabs`、`storage`、`fingerprint` 在 Android 的真实模型、分区及引擎链路，桌面通过不替代 Android 通过。
+3. 完成已编码 Keystore 安全存储、应用恢复和账号分区隔离的平台测试。
+4. 完成已编码 SAF 文件能力和可取消原生 HTTP 的设备联调，并执行权限撤销与审计测试，不把 JVM 网络辅助模块当作 Android 后端。
 
 ## 快照加密模块
 

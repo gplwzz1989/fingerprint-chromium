@@ -4,6 +4,8 @@
 
 ## 运行要求
 
+项目目标、目录关系和当前验证边界见 [统一项目总览](../PROJECT-OVERVIEW.md)。独立服务与前端打包使用 `pwsh -File utils/package_saas.ps1`（从项目根目录运行）；默认固定输出 `output/saas/fingerprint-saas.zip`，已有其他文件名时通过 `-OutputPath` 沿用原路径，新包完成后旧包送回收站并替换。解压后设置 `SAAS_WEB_DIR` 为包内 `saas-web` 的绝对路径，其他配置仍按下文设置；归档不包含 Chromium，也不代表浏览器集成验收完成。
+
 - Go 1.24 或更高版本
 - PostgreSQL 14 或更高版本
 - 反向代理提供 HTTPS
