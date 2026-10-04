@@ -14,6 +14,8 @@
 
 - 只有明确属于 Android 逆向、APK 分析、抓包或动态调试的任务，才读取 `C:\Users\Administrator\.codex\android-reverse-tools.md` 并使用逆向工具链。
 - Android 构建、编译、GN/Ninja、SDK/NDK 配置、平台适配和测试不属于逆向任务，不读取逆向工具说明，也不调用 JADX、APKTool、Frida 或其他逆向流程。
+- Android 构建统一在 WSL Linux 发行版内执行：Android 的 GN/Ninja、SDK/NDK/JDK、Gradle 和 APK/AAB 命令不得从 Windows PowerShell 调用；Windows 仅用于检查 WSL 状态和查看结果。使用 WSL 中的仓库路径（例如 `/mnt/f/mywork/chrome-finger`）、Linux 工具链和独立 Linux 输出/缓存，不能把 Windows 的 `C:/`、`D:/` 工具链路径或 PC 输出直接作为 Android 参数。
+- 启动 Android 构建前先只读确认 WSL 发行版处于 Running 状态、Linux `gn`/`ninja`/SDK/NDK/JDK 可用及版本，确认构建图和输出目录；WSL 未运行、虚拟化组件失败或工具链缺失时停止在环境检查，不改用 Windows 工具链、不自动安装工具、不伪造 Android 编译通过。
 
 # Chromium 编译参数强制锁（PC / Android 同等适用）
 

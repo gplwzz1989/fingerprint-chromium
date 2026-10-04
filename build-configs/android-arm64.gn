@@ -16,3 +16,8 @@ enable_rust = true
 # 告警不作为编译或链接失败；真正的错误仍然阻断构建。
 treat_warnings_as_errors = false
 fatal_linker_warnings = false
+
+# Android 编译统一在 WSL Linux 内执行，使用已核实的 Linux 工具链路径。
+android_sdk_root = "/home/gaoyang/Android/Sdk"
+android_ndk_root = "/home/gaoyang/Android/Sdk/ndk/28.0.13004108"
+android_ndk_version = "r28"

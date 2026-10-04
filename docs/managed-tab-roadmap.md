@@ -134,6 +134,6 @@
 2. 用 Release 局部目标编译验证桌面桥接，确认白名单页面能调用 Tab、存储和指纹，普通页面不能调用。
 3. 完成真实 PostgreSQL 集成、HTTP 部署和生产 HTTPS 边界测试。
 4. 完成文件与原生 HTTP 的权限撤销、审计、异常恢复和运行版验证；未接入的平台继续保持能力不可用。
-5. 配置 Android 独立 SDK/NDK 构建输出，验证已编码的消息宿主及加密挂接，继续实现 Tab/存储/指纹、SAF 文件、原生 HTTP 和 Keystore，再进行 APK 设备验收。现有 WSL 因虚拟化组件未启用而无法启动，不擅自修改系统功能或重启。
+5. 在 WSL Linux 内配置 Android 独立 SDK/NDK 构建输出，验证已编码的消息宿主及加密挂接，继续实现 Tab/存储/指纹、SAF 文件、原生 HTTP 和 Keystore，再进行 APK 设备验收；WSL 未运行或工具链缺失时先记录环境阻塞，不切换 Windows 编译链路。
 6. 决定 IndexedDB、Cache Storage、Service Worker 是否进入 SaaS 同步范围；在决定前保持明确不支持状态。
 7. 完成产品化安全项后，再申请 Windows 和 Android Release 整体编译与发布回归。

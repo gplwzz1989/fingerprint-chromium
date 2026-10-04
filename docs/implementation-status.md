@@ -1,5 +1,11 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-04 Android 编译宿主改为 WSL
+
+- 按用户要求，Android ARM64 的 GN/Ninja、SDK/NDK/JDK、Gradle 和 APK/AAB 编译统一改为在 WSL Linux 发行版内执行；Windows PowerShell 仅用于检查 WSL 状态和查看结果，不再作为 Android 编译入口。
+- WSL 编译使用 `/mnt/f/mywork/chrome-finger`、仓库现有 Linux GN/Ninja、`/home/gaoyang/Android/Sdk`、NDK 28.0.13004108、`/usr/lib/jvm/java-17-openjdk-amd64` 和独立 Android 输出/缓存；不得复用 Windows PC Release 输出或 C/D 盘 SDK/NDK/JDK 参数。启动前必须确认 WSL 发行版 Running、Linux 工具链版本和 Android 构建图。
+- 本次 Windows 侧尝试仅生成了 `build/src/out/AndroidArm64/args.gn`，随后因从 Windows 调用 GN 且未传入 Chromium 源码根目录而停止，未执行 Android 编译；该输出目录不代表 Android 构建图或 APK 已生成。
+
 ## 2026-10-04 PC 仅保留 Release 配置
 
 - 按用户明确要求移除 `build-configs/development.gn`，原文件放入 Windows 回收站；`prepare_build_mode.ps1` 移除 `development` 模式，`build-roots.json` 移除 PC 开发版活跃路径，保留 Release 与 Android 独立配置。

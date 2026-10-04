@@ -46,7 +46,9 @@ $out = Join-Path $src 'out\Release'
 - 独立 `target_os = "android"`、`target_cpu = "arm64"`
 - 独立 `out/AndroidArm64` 输出目录
 - 不导入 Windows PC 的 `common.gn`
-- 独立 D 盘 SDK、NDK、JDK、临时目录和缓存路径见 `build-configs/build-roots.json`
+- WSL Linux 独立 SDK、NDK、JDK、临时目录和缓存路径已登记在 `build-configs/build-roots.json`；当前使用 `/home/gaoyang/Android/Sdk`、NDK 28.0.13004108 和 `/usr/lib/jvm/java-17-openjdk-amd64`
+
+Android 构建必须从 WSL Linux 仓库路径执行，不能从 Windows PowerShell 使用 `gn.exe`、`ninja.exe`、Windows SDK/NDK/JDK 或 PC 输出。开始前先确认 WSL 发行版、Linux 工具链、SDK/NDK/JDK、构建图和独立缓存；缺失时停止在环境检查。
 
 仅准备配置文件时可使用：
 
@@ -54,4 +56,4 @@ $out = Join-Path $src 'out\Release'
 & (Join-Path $repo 'utils\prepare_build_mode.ps1') -Mode android-arm64
 ```
 
-该命令只创建配置目录并复制 `args.gn`，不会执行 `gn gen`、Ninja、SDK/NDK 安装或 APK 编译。Android 完整构建须另行确认工具链、ABI 和设备验收范围。
+该命令只创建配置目录并复制 `args.gn`，不会执行 `gn gen`、Ninja、SDK/NDK 安装或 APK 编译；该 PowerShell 入口只用于配置文件准备，不是 Android 编译入口。Android 完整构建须在 WSL 内另行确认工具链、ABI 和设备验收范围。

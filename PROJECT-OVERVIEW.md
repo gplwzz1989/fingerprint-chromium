@@ -174,7 +174,7 @@ Android：同一 saas-web → bridge-contract.js → 主框架原生消息端口
 | 安全存储 | 当前 `secureStorage` 未接入，不能声称具有 Android Keystore 保护 | `SaasSecureStorage.java` 使用 AndroidKeyStore 与应用私有密文；不导出密钥、不保存 SaaS 业务规则 |
 | 原生 HTTP | 桌面桥的真实原生网络处理 | `saas_native_http.h` / JNI / SimpleURLLoader 与账号分区；独立 JVM `SaasHttpClient` 不是 Android 后端 |
 | 生命周期 | 浏览器窗口/Tab/WebContents 关闭、页面导航、渲染进程退出等 | 还须覆盖端口更换、Activity 生命周期、进程被系统回收、冻结恢复、SAF 撤权、设备密钥失效；不能只靠前台常驻 |
-| 编译与产物 | 已有 `build/src/out/Development`、`Release`，程序/动态库及 `publish/` 运行目录 | 需要独立 Android 输出与目标架构、Java/JNI/C++ 编译、Android 原生库、APK/AAB 打包签名；现场尚无已验收的 Android 输出 |
+| 编译与产物 | 已有 `build/src/out/Development`、`Release`，程序/动态库及 `publish/` 运行目录 | Android 编译统一走 WSL Linux，仍需要独立输出与目标架构、Java/JNI/C++ 编译、Android 原生库、APK/AAB 打包签名；现场尚无已验收的 Android 输出 |
 | 验证要求 | 对包含最新源码的 PC 程序验证白名单、Tab、隔离、网络、指纹及系统文件 | 独立 JVM/协议检查之后还须完整 Android 编译与真机/模拟器测试，包括权限、网络、存储及生命周期；PC 通过不能替代 Android 通过 |
 
 两端契约一致指字段、语义和错误边界一致，不要求系统机制或能力额度完全相同。文件路径模型、文件/HTTP 容量限制、`secureStorage` 支持情况等差异见 `docs/saas-bridge-contract.md`。前端依据真实能力声明分支，不仅按设备名称或 UA 判断；新增可选能力不要求未实现端伪造支持。
@@ -196,6 +196,7 @@ Android：同一 saas-web → bridge-contract.js → 主框架原生消息端口
 #### 平台源码与构建约束
 
 - Android Java 宿主在 `android-bridge/src/chromium/java/` 保存，对应展开源码在 `build/src/chrome/android/java/src/org/chromium/chrome/browser/saas/`；平台无关加密/来源/分发代码从 `android-bridge/src/main/` 对应到展开源码的 `com/fingerprint/saas/bridge/`。原生头文件对应 `chrome/browser/ui/android/tab_model/`；挂接点还包括 `TabModelJniBridge.java`、`TabModelImpl.java`、`tab_model_jni_bridge.cc` 和 `chrome/android/java_sources.gni`。已有文件最小修改，保持模块副本、展开源码和持久补丁一致；本地缺少的上游文件不得伪造后宣称已编译。
+- Android 编译宿主固定为 WSL Linux：从 WSL 仓库路径执行 GN/Ninja、Java/JNI/C++、Gradle 和 APK/AAB，使用 Linux SDK/NDK/JDK 与独立 Android 输出/缓存；Windows PowerShell 的 GN/Ninja 和 Windows SDK/NDK/JDK 不用于 Android。先验证 WSL 运行状态、发行版、工具链和构建图，失败时记录环境阻塞，不切换到未经确认的 Windows 或 C/D 盘参数。
 - `build-configs/common.gn` 当前含 Windows/D 盘工具链配置和 `target_cpu="x64"`，`prepare_build_mode.ps1` 默认准备现有 PC 输出；不能直接复制这些参数作为 Android 配置。Android 构建须使用独立输出、明确 Android 目标与 ABI、SDK/NDK/Java 及可运行构建宿主，复用依赖但不覆盖 PC 输出。本次只写指引，不创建 Android 构建目录或修改 GN。
 - `utils/check_cpp_syntax.py` 当前仅用于 Windows 上已有 Chromium 构建规则；即使某个共享/Android C++ 文件借助桌面参数通过局部检查，也不能记作 Android 工具链编译通过。Java 语法解析、JNI 生成、JVM 通过同样不等于 Android 类型检查、链接或设备验收。
 - PC 变更记录注明配置、目标程序和运行验证；Android 记录注明 ABI、Java/JNI/C++ 编译、APK/AAB 与设备验证。原生更新必须进入各端实际二进制才生效；`output/saas/fingerprint-saas.zip` 只发布 SaaS 服务与页面，不更新 PC 内核或 Android APK。
