@@ -12,6 +12,7 @@
     accounts: [],
     accountsLoadState: 'idle',
     accountsLoadError: '',
+    runtimeTabs: [],
     bridge: null,
     currentView: 'overview',
     selectedAccountIds: new Set(),
@@ -113,7 +114,7 @@
       catch (_) { showToast('网页会话缓存不可用，请检查存储权限', true); }
     }
     if (!session) {
-      state.workspaces = []; state.accounts = []; state.workspaceId = '';
+      state.workspaces = []; state.accounts = []; state.workspaceId = ''; state.runtimeTabs = [];
       state.accountsLoadState = 'idle'; state.accountsLoadError = '';
       if (typeof accountOpenFlights !== 'undefined') accountOpenFlights.clear();
       elements.accountDetailModal?.close();
@@ -256,6 +257,7 @@
   async function loadAccounts() {
     if (!state.workspaceId) {
       state.accounts = [];
+      state.runtimeTabs = [];
       state.accountsLoadState = 'ready';
       state.accountsLoadError = '';
       render();
@@ -279,6 +281,7 @@
       } while (pageToken);
       if (state.workspaceId !== workspaceId || !state.session) return;
       state.accounts = accounts;
+      await refreshRuntimeTabs();
       state.accountsLoadState = 'ready';
       state.accountsLoadError = '';
       const available = new Set(accounts.map((account) => account.account_id));
@@ -292,6 +295,22 @@
       }
       throw error;
     }
+  }
+
+  async function refreshRuntimeTabs() {
+    if (!state.bridge?.available || state.bridge.capabilities?.tabs !== true || !state.workspaceId) {
+      state.runtimeTabs = [];
+      return;
+    }
+    const generation = state.sessionGeneration;
+    const workspaceId = state.workspaceId;
+    const allowed = new Set(state.accounts
+      .filter((account) => account.workspace_id === workspaceId)
+      .map((account) => account.account_id));
+    const tabs = await global.saasBridgeClient.tabs.list();
+    if (!Array.isArray(tabs)) throw new Error('客户端返回的 Tab 列表无效');
+    if (state.sessionGeneration !== generation || state.workspaceId !== workspaceId || !state.session) return;
+    state.runtimeTabs = tabs.filter((tab) => allowed.has(tab.account_id));
   }
 
   async function createWorkspace(name) {
@@ -337,6 +356,11 @@
   async function inspectBridge() {
     state.bridge = await global.saasBridgeClient.describe();
     renderBridge();
+    if (state.session && state.workspaceId && state.accountsLoadState === 'ready') {
+      try { await refreshRuntimeTabs(); }
+      catch (error) { showToast(userMessage(error), true); }
+      renderAccounts();
+    }
     const wasEnabled = sessionPersistence.isEnabled();
     if (!sessionPersistence.configure(state.bridge) || wasEnabled) return;
     try { sessionStorage.removeItem(sessionStorageKey); }
@@ -375,6 +399,8 @@
       const existing = tabs.find((tab) => tab.account_id === account.account_id);
       if (existing) {
         await global.saasBridgeClient.tabs.activate(existing.id);
+        await refreshRuntimeTabs();
+        renderAccounts();
         showToast(`已切换到账号 ${account.name} 的隔离 Tab`);
         return;
       }
@@ -384,6 +410,8 @@
       const created = (await global.saasBridgeClient.tabs.list())
         .find((tab) => tab.account_id === account.account_id);
       if (created) await global.saasBridgeClient.tabs.activate(created.id);
+      await refreshRuntimeTabs();
+      renderAccounts();
       showToast(`已打开账号 ${account.name} 的隔离 Tab`);
     })();
     accountOpenFlights.set(account.account_id, flight);
@@ -495,6 +523,13 @@
       }
       labelsCell.append(labels);
 
+      const runtimeTab = state.runtimeTabs.find((tab) => tab.account_id === account.account_id);
+      const runtimeCell = document.createElement('td');
+      const runtimeBadge = document.createElement('span');
+      runtimeBadge.className = `runtime-badge ${runtimeTab ? 'is-running' : ''}`;
+      runtimeBadge.textContent = runtimeTab ? '运行中' : (state.bridge?.available ? '未运行' : '未连接');
+      runtimeCell.append(runtimeBadge);
+
       const revisionCell = document.createElement('td');
       revisionCell.className = 'revision';
       revisionCell.textContent = `r${account.revision ?? 0}`;
@@ -507,7 +542,7 @@
       const action = document.createElement('button');
       action.type = 'button';
       action.className = 'table-action';
-      action.textContent = '打开隔离 Tab';
+      action.textContent = runtimeTab ? '切换 Tab' : '打开环境';
       action.addEventListener('click', () => openAccount(account));
       actionCell.append(detail, action);
       if (account.role !== 'viewer') {
@@ -517,7 +552,7 @@
         actionCell.append(edit);
       }
       global.saasConsoleOperations.appendAccountActions(actionCell, account);
-      row.append(nameCell, labelsCell, revisionCell, dateCell, actionCell);
+      row.append(nameCell, labelsCell, runtimeCell, revisionCell, dateCell, actionCell);
       elements.accountTableBody.append(row);
     }
     renderAccountSelection(visibleAccounts);

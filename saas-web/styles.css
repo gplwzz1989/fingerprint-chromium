@@ -175,6 +175,10 @@ button { cursor: pointer; }
 .tag-list { display: flex; gap: 4px; }
 .tag { padding: 4px 7px; color: var(--cyan); background: rgba(117, 215, 208, .08); border-radius: 3px; font-size: 10px; }
 .tag-empty { color: var(--text-faint); }
+.runtime-badge { display: inline-flex; padding: 4px 8px; gap: 6px; align-items: center; color: var(--text-faint); background: #fafafa; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; }
+.runtime-badge::before { width: 5px; height: 5px; background: var(--text-faint); border-radius: 50%; content: ''; }
+.runtime-badge.is-running { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+.runtime-badge.is-running::before { background: #15803d; }
 .revision { color: var(--amber); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .table-action { padding: 6px 9px; color: var(--cyan); background: transparent; border: 1px solid rgba(117, 215, 208, .25); border-radius: 4px; font-size: 10px; }
 .table-action:hover { background: rgba(117, 215, 208, .1); border-color: var(--cyan); }
