@@ -1,10 +1,12 @@
 # 指纹云控项目总览
 
-> 2026-10-05 Android 工具链修复验证：用户已确认独立配置与路径登记方案；Android 模板/实际参数不再导入 PC 配置，WSL 检查入口通过，JDK 登记为实际 23.0.2。原地 GN 重生成后 1,203 项生效参数和 56,547 条构建命令完全不变；真实 Android ARM64/API35 源文件编译成功。本次仅证明编译入口和工具链可工作，完整 APK 与设备验收仍待完成，详见 `docs/build-modes.md` 和阶段记录。PowerShell 不再写入旧 Android 输出，全部历史缓存保留。
+> 2026-10-05 Android ARM64 修复后构建验证：补齐 Android Safe Browsing 资源依赖、JNI `jboolean` 签名、ManagedTabContext 用户数据键和 Chromium 144.0.7559.132 的 `chrome/android/proguard/main.flags`，未修改编译参数、ABI、工具链或输出目录。WSL 既有输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 使用 `ninja -j 4 chrome_public_apk` 成功生成 `apks/ChromePublic.apk`（376,929,667 字节，SHA-256=`cb26e45ec73444063ac5447390944cbe5e4657dadbbba6b6c0bbbc76d20d4704`）。设备安装、权限/生命周期、网络、SAF、Keystore 和运行效果仍待独立验收，详见阶段记录；全部构建缓存保留。
 
 > 2026-10-04 Android 续编入口更新：已核实 WSL Linux 工具链可执行，并将 Android 活跃输出登记为已有缓存的 `/home/gaoyang/chromium-build/AndroidDevelopment`。保留该目录原 `args.gn`，原地 GN 重生成通过；每 5 分钟监控已启用。新 `out/AndroidArm64` 的工具路径不匹配预检失败，不能当作正在编译的输出。实际编译、APK 和设备验收结果见 `docs/implementation-status.md` 的本次续编记录。
 
 更新日期：2026-10-04。本文件是后续开发的统一阅读入口，汇总目标、进度、目录关系、开发定位、构建和整理规则。详细协议与历史验证记录仍保留在原文档中；其中旧状态与本次现场核对不一致时，以本文件的日期和验证边界为准。
+
+长期约束集中维护在 [开发规则](docs/development-rules.md)，下一轮任务、依赖及验收条件集中维护在 [开发计划](docs/development-plan.md)。第 2 节区分源码、局部检查与运行产物，第 10 节记录本次项目分析和优先风险；历史阶段记录不作为最新运行状态的替代。
 
 ## 1. 项目目标与边界
 
@@ -16,6 +18,14 @@
 
 本地基线由 `chromium_version.txt` 固定为 `144.0.7559.132`。根目录上游 README 的发布版本表不能代替本地源码版本，也不能作为本项目 SaaS 功能已发布的依据。
 
+### 1.1 本轮确认的产品范围
+
+- 首个可交付版本覆盖 **Windows 桌面端 + Android**；Linux/macOS 进入后续路线，当前不宣称已经支持。
+- 优先打通两端真实多账号隔离与云端同步闭环，再推进商业运营能力与新存储类别。Android 的环境准备和平台适配可与 Windows/SaaS 准备交错推进，不等待 Windows 全部交付才开始。
+- 跨平台恢复须按原值复现全部所选指纹参数；用户进一步明确 PC/Android 参数不应不兼容，字段、范围和恢复语义统一，某端缺失须补齐实现，不提供静默降级。合法参数不受 Worker 验收标记阻断；参数格式、真实桥能力与应用后配置回读是业务检查，页面/请求/Worker 实际效果独立验收。
+- 每账号最多一个活跃环境指同一客户端范围，云端编辑租约约束快照写入，不代表全球设备运行独占。
+- 退出 SaaS、设备会话撤销或账号失权后，停止使用旧身份进行 SaaS 云端业务操作，已打开的本机账号 Tab 保留并可继续正常浏览、导航和访问网站；不自动关闭 Tab 或清空分区。这里的“云端操作”指 SaaS 控制面，不包括账号网页的正常网络访问。同步/恢复在途操作停止后续云端业务请求及相关恢复副作用，必要退出撤销与租约清理按实际结果处理；远端撤权须在设备获知后生效，不能宣称离线立即感知。
+
 ## 2. 当前进度
 
 总体处于“主要功能源码及局部回归已完成，最新浏览器集成与发布验收待完成”阶段，不记录缺少验收依据的完成百分比。
@@ -23,11 +33,11 @@
 | 目标模块 | 已有实现 | 当前验证边界与缺口 |
 | --- | --- | --- |
 | 单父窗口与账号环境 | 持久分区、账号代理/指纹、单账号 Tab、控制台关闭保护、幂等打开 | 旧 Development 有历史隔离测试；最新 SaaS 源码的完整运行回归未完成 |
-| 独立 SaaS Web | 登录/邀请、工作区、账号搜索筛选与编辑删除、批量同步恢复、冲突、权限、设备、真实运行 Tab 条、移动布局 | 本次 36 项网页测试与全部业务 JS 语法检查通过；最新原生桥和真实移动端仍待联调 |
+| 独立 SaaS Web | 登录/邀请、工作区、账号搜索筛选与编辑删除、批量同步恢复、冲突、权限、设备、真实运行 Tab 条、移动布局、统一指纹参数校验/回读和恢复类别选择 | 最新 41 项网页测试与业务 JS 语法检查通过；最新原生桥和真实移动端仍待联调 |
 | Go 控制面 | 会话、角色、账号授权、目录、加密快照、条件版本、租约、审计、静态托管、限流、初始化用户 | 本次 `go test -v ./...`、`go vet ./...` 通过；独立 PostgreSQL 集成因未配置测试库跳过，历史通过记录保留 |
 | 快照同步 | Cookie、LocalStorage、SessionStorage、指纹、代理、页面地址；PBKDF2 / AES-GCM；合并/覆盖版本校验 | 网页真实加密回归通过；原生与云端多设备运行闭环、其他存储类别未验收 |
 | 桌面原生桥 | `tabs/storage/fingerprint/files/http/crypto`、精确来源校验、固定宿主通信 | 已有局部 C++ / TypeScript 验证记录；最新 Chrome 未链接，不能把源码能力视为当前二进制能力 |
-| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | 历史 JVM/协议累计 667 项通过；完整 Java/C++ 编译、APK/AAB、设备生命周期/权限/网络未验收，本次未复跑 |
+| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | WSL 活跃输出已完成 GN 图和单 Android ARM64 编译单元验证；完整 Java/C++ 编译、APK/AAB、设备生命周期/权限/网络仍未验收 |
 | Worker 指纹 | Dedicated / 嵌套 / Shared / Service Worker 硬件快照传递，Service Worker UA / UA-CH | 已编码并保存补丁；`worker_fingerprint_verified=false`，实际请求头和运行一致性待验证 |
 | 产品化与发布 | 商业界面首轮、头像入口隐藏补丁、单进程限流 | HTTPS 部署、多实例限流、配额/保留/计费、安装升级、完整发布验收待完成 |
 
@@ -37,15 +47,16 @@
 - Development 的 `chrome.exe` / `chrome.dll` 最近写入日期仍为 **2026-10-02**；Release 与 `publish/` 对应二进制为 **2026-09-30**。本次没有编译或重新链接 Chromium，不能声称最新补丁已经进入这些运行文件。
 - 两套输出均保留 `args.gn`、`.ninja_deps`、`.ninja_log`、对象与生成文件；本次不执行 GN、Ninja 清理、源码重解包或系统环境变更。
 - PC / Android 编译参数已在 `AGENTS.md` 设置强制锁：任何参数、工具链或输出/缓存路径变更，必须先给出旧值/新值、预计重编译源文件/编译单元数量及依据，取得用户针对本次变更的明确确认。现有参数与缓存不因设置规则而改变；规则不等于操作系统文件权限锁。
-- 参数已纳入 Git：PC 仅保留 Release 活跃模板和路径清单，另跟踪 Release 实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。Development 模板已移入回收站，其原输出、`args.gn` 和缓存作为历史构建状态保留，实际参数不再由 Git 跟踪。其余构建产物与缓存不提交，Android 独立配置保留，暂无实际输出参数文件。
+- 参数已纳入 Git：PC 仅保留 Release 活跃模板和路径清单，另跟踪 Release 实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。Development 模板已移入回收站，其原输出、`args.gn` 和缓存作为历史构建状态保留，实际参数不再由 Git 跟踪。其余构建产物与缓存不提交。Android 活跃输出当前登记为 WSL 的 `/home/gaoyang/chromium-build/AndroidDevelopment`，其原地 GN 图已生成；Windows 侧 `build/src/out/AndroidArm64` 是预检失败的独立输出，不作为活跃 Android 构建入口。两者均不能仅凭构建图宣称 Android 编译或 APK 通过。
 - 用户本次已确认告警处理变更：共享编译配置添加 C/C++ `-w`、Rust `-Awarnings`；PC/Android 关闭告警转错误和链接告警阻断，实际错误继续失败。源码、补丁和配置已同步，10 项编译器/链接器独立探针及配置语法检查通过；对应构建图尚未重生成，旧 Ninja 命令仍保留原告警配置。本次不执行 GN 重生成、Ninja 或全量构建，详见阶段记录。
-- 旧记录中的 WSL 启动错误 `HCS_E_HYPERV_NOT_INSTALLED` 和组件入口加载失败本次没有复验，仅作为后续构建排障线索。已知 Visual Studio / Windows SDK 位于 D 盘，不能把旧失败笼统归因为 SDK 未安装。
+- 本次只读复核 WSL Ubuntu 为 **Running / WSL2**，Linux 内核为 `6.18.40.1-microsoft-standard-WSL2`。SDK `/home/gaoyang/Android/Sdk`、NDK `28.0.13004108` 和 JDK 路径存在；Ninja `1.11.1`、OpenJDK `17.0.20.1` 可执行。常用源码路径 `build/src/buildtools/linux64/gn` 缺失，`/home/gaoyang/depot_tools/gn` 只是启动脚本，真实 Linux GN 与整套 Android 调用链尚未确认可用；未安装工具、生成构建图或编译。历史 WSL 启动错误不再作为当前环境结论。
+- Release `build.ninja` 为 **7,008,931 字节**，写入时间 **2026-09-30 23:44:49**；实际 `args.gn` 写入时间 **2026-10-04 21:54:04**。时间信息与既有阶段记录说明需核对图/参数差异，不证明增量构建已可直接运行。历史组件入口加载问题本次未复验；Visual Studio / Windows SDK 已知位于 D 盘，不能把旧失败笼统归因为 SDK 未安装。
 
 ## 3. 文件夹结构与职责
 
 ```text
 chrome-finger/
-├─ PROJECT-OVERVIEW.md          统一项目入口：目标、进度、结构、整理和开发规则
+├─ PROJECT-OVERVIEW.md          统一项目入口：目标、架构、当前状态与资料导航
 ├─ AGENTS.md                   本项目任务边界；开发还须遵守用户提供的全局规则
 ├─ saas-web/                   独立 HTML/CSS/JS 业务前端与 .test.cjs 回归
 ├─ saas-server/                独立 Go 控制面
@@ -68,7 +79,7 @@ chrome-finger/
 ├─ build-configs/              PC/Android GN 参数与独立输出、缓存、工具链路径清单
 ├─ utils/                      下载、裁剪、域替换、补丁应用、局部 C++ 检查及 SaaS 打包
 ├─ devutils/                   补丁/配置校验与维护工具
-├─ docs/                       进度、路线、契约、设计、历史测试及上游说明
+├─ docs/                       开发规则、开发计划、进度、契约、设计及历史说明
 │  └─ design/                 桌面/移动高保真 SVG/PNG；不是生产业务入口
 ├─ build/                      受保护的本地 Chromium 工作区及缓存，整目录保留
 │  ├─ src/                    已展开并应用补丁的 Chromium 源码
@@ -244,15 +255,22 @@ pwsh -File utils/package_saas.ps1 -OutputPath 'output/saas/fingerprint-saas.zip'
 
 ## 8. 后续优先顺序
 
-1. 在保留现有缓存的前提下核对 Release 构建图、工具链和实际增量范围，安排最新 Chrome 链接；历史 Development 状态不作为新构建入口。
-2. 对最新 PC 二进制做常驻控制台、来源白名单、同账号幂等 Tab、单页跳转、跨账号隔离、文件/HTTP、Worker 请求头与硬件实际效果验收。
-3. 联调真实 HTTPS 服务、PostgreSQL 与多设备加密同步，覆盖租约、权限、版本冲突、失权和断网恢复。
-4. 准备 Android 可运行构建环境，完成完整 Java/C++ 类型检查、APK/AAB 和设备测试，重点验证 SAF、Keystore、分区网络与生命周期撤权。
-5. 独立设计其他存储类别同步、配额/保留/计费与生产部署边界；异常关闭自动恢复继续按已有记录保持低优先级。
-6. 完成整体功能验收后再执行 Release 发版编译、安装升级与发布回归。此次整理和 SaaS 归档不代表上述步骤已完成。
+当前执行入口为 [开发计划](docs/development-plan.md)，以里程碑依赖和真实验收条件安排工作：
+
+1. M0：明确全部指纹严格复现与退出/撤权语义，核对补丁/源码副本，收口版本覆盖和权限竞争风险。
+2. M1/M2/M3：交错推进 Windows 最新原生实现、Android WSL 工具链/平台实现和真实 HTTPS/PostgreSQL 环境；必要编码先完成局部验证，构建节点分别遵守参数锁与全量构建审批。
+3. M4：在两端各自通过必要运行项后，完成 Windows → Android → Windows 的真实加密同步、指纹兼容、隔离、冲突、失权和故障验收；不兼容拒绝恢复。
+4. M5：完成安装升级、签名/版本追溯、备份恢复、容量基线与发布回归，才记录首版可发布。
+5. M6：再推进商业配额/保留/计费、扩展存储同步与 Linux/macOS。异常关闭自动批量恢复继续保持低优先级；Android 必要生命周期安全不能因此延期。
+
+制定计划不授权立即全量编译、改参数、部署或发版。本次文档分析不代表任何后续运行节点已完成。
 
 ## 9. 详细资料入口
 
+- [长期开发规则与交付门槛](docs/development-rules.md)
+- [下一步开发计划与真实验收矩阵](docs/development-plan.md)
+- [浏览器控制方案一：保留 postMessage，增加 Socket.IO](docs/browser-control-hybrid-plan.md)
+- [浏览器控制方案二：统一使用 Socket.IO](docs/browser-control-socketio-plan.md)（2026-10-05 两份备选计划，尚未选择或实施）
 - [项目进度与历次局部验证](docs/implementation-status.md)
 - [目标与分阶段路线](docs/managed-tab-roadmap.md)
 - [快照、权限、同步与恢复契约](docs/saas-account-sync.md)
@@ -264,3 +282,58 @@ pwsh -File utils/package_saas.ps1 -OutputPath 'output/saas/fingerprint-saas.zip'
 - [构建模式](docs/build-modes.md)、[常驻启动地址](docs/resident-saas-startup.md)
 - [商业页面设计](docs/saas-product-design.md)、[浏览器壳计划](docs/saas-browser-shell-plan.md)
 - [2026-10-02 旧 Development 隔离报告](docs/fingerprint-tab-test-report.md)
+
+## 10. 2026-10-04 项目整体分析与技术风险
+
+### 10.1 系统架构与真实数据路径
+
+```text
+普通浏览器 / Windows 客户端 / Android 客户端
+                    ↓ 同一 saas-web
+     登录、工作区、目录、权限界面、快照加密及同步编排
+          ├─ HTTP API → Go 鉴权/授权/事务 → PostgreSQL
+          │                          目录、设备会话、密文版本、租约、审计
+          └─ 可信页面原生桥（普通浏览器无此能力）
+              ├─ Windows：固定 WebUI 宿主 → C++ Tab/分区/引擎/系统能力
+              └─ Android：主框架消息端口 → Java TabModel → JNI/C++/SAF/Keystore
+```
+
+SaaS 与原生共享账号身份和契约，各自拥有状态：云端掌握业务授权及快照版本，原生掌握实际运行对象和本地数据。云端设备会话不证明账号 Tab 正在运行；原生来源授权不证明 SaaS 用户有账号权限；编辑租约不禁止另一个设备打开已有本地环境。
+
+| 对象 | 当前存放与处理 | 关键边界 |
+| --- | --- | --- |
+| 登录/刷新凭据 | Go 会话校验；Web 内存/现有 SessionStorage 过渡；Android 可选 Keystore 安全存储 | 不跨设备复制刷新凭据；桌面新桥没有 `secureStorage` |
+| 账号目录/角色/分配 | PostgreSQL 与 Go API | 账号无显式成员时向工作区开放；最后显式成员移除会恢复开放 |
+| 环境明文 | 本机账号分区 → 原生快照 → Web 当前内存 | 不进入 Go 普通字段或日志；本地分区并未因此获得全盘加密 |
+| 环境密文 | WebCrypto/原生加密 → Go 信封校验 → `account_snapshots` | PBKDF2-HMAC-SHA-256、AES-256-GCM；Web 当前新信封为 600000 次派生，绑定账号；密码遗失恢复机制尚未产品化 |
+| 提交一致性 | 本机单账号队列 + 5 分钟云端编辑租约 + 数据库账号行锁/版本 | Web/API 均要求具体版本提交；`If-Match: *` 已拒绝；恢复本地数据不是整体原子事务 |
+| 运行指纹/代理 | 账号创建配置、原生网络、渲染器、Blink 与 Worker 注入 | 各平台实际效果独立验收，不能只看输入表单、种子或 UA 回读 |
+
+账号删除当前会删除对应快照/租约等关联记录；审计的账号外键在迁移中已移除以保留对象标识。业务删除不是文件回收站规则的等价物，数据保留和恢复策略仍须另行设计；本次不执行任何删除。
+
+### 10.2 模块分析结论
+
+**SaaS：** 无需另起业务框架。静态 HTML/CSS/JS 与 Go/PostgreSQL 已覆盖主要目录、成员、设备、加密同步、冲突和批量操作；应优先联调真实客户端、并发授权、失败恢复和审计。当前单进程限流及启动迁移不证明多实例生产能力；套餐、配额、保留和计费仍为后续功能。
+
+**Windows：** 原生 Tab、持久分区和桥实现已有源码与历史局部验证。关键入口包括 `browser_tab_strip_model_delegate.cc` 中的 `ManagedTabContext`、`chrome/browser/managed_tab/` 声明、WebUI 消息处理与 browser/views、网络/渲染器接入。最新改动尚未进入 Release/publish 运行文件，先核对局部源码、补丁和构建图，再安排批准范围的产物更新及实际效果验收。旧 WebUI 业务和已有补丁保留作为兼容资产，不继续扩展第二套业务。
+
+**Android：** 不是空白设计，也不是已交付客户端。已有消息宿主、真实 TabModel 调用、固定账号分区、存储、配置、SimpleURLLoader、SAF 和 Keystore 源码；JVM/协议历史验证不能替代 Java 类型检查、JNI/C++ 链接、APK 安装与生命周期。现场 `TabImpl.java` 已存在，其既有保护是否进入源码仍需核对；WSL 当前可运行，Linux GN 和工具调用链未完成确认。应与 Windows 准备交错推进，避免把 Windows 完成后才开始 Android 作为默认依赖。
+
+**共享指纹引擎：** 两端使用统一参数模型，当前账号接口支持种子、UA 和硬件并发数，合法输入同范围恢复并回读核对。基础补丁另涉及 Canvas、WebGL、Audio、字体、时区等，尚需逐项完成账号参数化及两端真实效果验证。某端缺失应补齐实现，不定义为正常的平台不兼容；Worker 未验收标记保留为真实状态，但不阻断参数恢复。
+
+### 10.3 优先风险与实施入口
+
+| 优先级 | 现场依据与风险 | 计划入口 |
+| --- | --- | --- |
+| 最高 | 最新源码与 Windows 运行产物脱节；Android 没有完整构建/设备结果 | T04～T08，逐端最新产物验收 |
+| 最高 | Linux GN 常用实际路径缺失，只有 depot_tools 启动脚本证据；SDK/NDK/JDK 目录存在不证明兼容 | T06，只读核实调用链与版本 |
+| 最高 | Git 补丁格式检查：`build-compatibility.patch` 第 1601 行和 `missing-dependencies.patch` 第 108 行失败；后者含已有未提交修改 | T02，先局部核对，不删上下文、不回退他人改动；独立重放未通过前不承诺可复现 |
+| 最高 | Go `parseIfMatch` 允许 `*` 绕过版本比较，而 Web 明确覆盖使用具体版本 | T03，服务端例外与旧接口兼容收口；前端回归通过不能证明直调 API 安全 |
+| 最高 | `logout()` 未关闭本机 Tab 符合已确认保留策略；仍须完整核对退出/撤权后旧身份云端操作与在途同步是否停止；Origin 桥不等于账号业务授权 | T10，验证停止云端业务、保留本机浏览；离线撤权有可达性限制 |
+| 高 | 快照事务提交后另写审计，失败只记日志；本地导出/恢复不具完整统一结果审计 | T11，明确审计覆盖、失败处理与可追溯性 |
+| 高 | 恢复需加载网页存储来源，写入前可能已有网站请求；Cookie 与网页存储非整体事务 | T11/T12，实测首请求、受控刷新、部分失败及真实登录态 |
+| 高 | 全部指纹参数化与两端效果矩阵未完整验收；曾误用 Worker 标记阻断参数恢复，现已改为统一参数校验/回读 | T01/T12，两端同字段/范围/原值，漏写补齐实现，独立验收页面/网络/Worker |
+| 高 | 默认地址仍为 `http://127.0.0.1:8787/`，Android 回环指设备自身 | T09，真实可达 HTTPS、CSP/API/两端 Origin 配置一致；参数修改另审 |
+| 后续 | 配额/保留、密码遗失恢复、安装升级/签名、多实例限流和容量尚未闭环 | T13/M6；核心技术闭环不等于公网运营准备完成 |
+
+项目分析采用仓库源码、协议、配置、产物元数据及只读 WSL 核对；最新 2026-10-05 Web 41 项回归通过，Go 最近非缓存测试与静态检查通过，独立 PostgreSQL 专项因缺少测试库跳过。本次 SaaS 指纹恢复修正未重新执行 Android/JVM、原生编译、桥运行、多设备联调或发布；其他 Android 构建任务的独立验证见阶段记录。GitHub 现有 tag 工作流仅创建空 Release，不构成本项目自动构建与发布流水线。

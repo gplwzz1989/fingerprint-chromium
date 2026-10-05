@@ -1,6 +1,10 @@
 # 项目任务边界
 
 - 后续开发先阅读 `PROJECT-OVERVIEW.md`，统一了解目标、进度、模块关系及验证边界；阶段总结写入 `docs/implementation-status.md`，涉及整体状态时同步更新总览。
+- 长期开发与交付约束见 `docs/development-rules.md`，当前任务依赖、优先级和验收条件见 `docs/development-plan.md`；开始目标任务前读取对应契约，阶段记录保留历史事实，最新状态注明验证对象与日期。
+- 首版范围为 Windows + Android，Linux/macOS 后续规划；优先真实多账号隔离与双向加密同步闭环。跨平台恢复须严格复现全部指纹参数，不兼容则拒绝恢复，不静默降级；计划和文档不自动授权编译参数修改、全量构建、安装或发布。
+- PC 与 Android 的指纹参数契约、范围与恢复语义必须统一，某端缺失属于待修复实现问题，不设平台专属降级方案。Worker 运行验收标记不作为参数恢复门槛；选中指纹恢复时按原值应用并回读核对，未选类别保留本地配置。真实页面/请求/Worker 效果独立验收。
+- 退出 SaaS、设备会话撤销或账号失权后停止旧身份的 SaaS 云端业务，保留已打开的本机账号 Tab 继续浏览和访问网站，不自动关闭或清空分区；在途同步/恢复停止后续相关动作，原生来源及系统权限校验保持有效。
 - 修改归属按总览第 5 节判断：页面和业务流程在 `saas-web/`，鉴权/权限/目录/密文版本/租约等在 `saas-server/`；原生 Tab、账号隔离、指纹/代理实际效果、系统能力及桥来源安全在指纹 Chromium / `android-bridge/`。已有桥能力足够时只改 SaaS，不扩展历史 WebUI 业务、不编译 Chromium。
 - 新增或改变原生能力须联动 Web 桥契约、PC/Android 实现、能力声明与协议文档；未实现平台明确不可用。原生来源授权不能代替 Go 业务鉴权，服务端 CORS 也不能授予原生桥权限。
 - Chromium 修改同步 `build/src/` 对应源码和可重放补丁，Android 实现与对应补丁保持一致，新增补丁登记 `patches/series`；源码/局部测试通过不等于最新二进制或设备验收通过。
@@ -16,6 +20,14 @@
 - Android 构建、编译、GN/Ninja、SDK/NDK 配置、平台适配和测试不属于逆向任务，不读取逆向工具说明，也不调用 JADX、APKTool、Frida 或其他逆向流程。
 - Android 构建统一在 WSL Linux 发行版内执行：Android 的 GN/Ninja、SDK/NDK/JDK、Gradle 和 APK/AAB 命令不得从 Windows PowerShell 调用；Windows 仅用于检查 WSL 状态和查看结果。使用 WSL 中的仓库路径（例如 `/mnt/f/mywork/chrome-finger`）、Linux 工具链和独立 Linux 输出/缓存，不能把 Windows 的 `C:/`、`D:/` 工具链路径或 PC 输出直接作为 Android 参数。
 - 启动 Android 构建前先只读确认 WSL 发行版处于 Running 状态、Linux `gn`/`ninja`/SDK/NDK/JDK 可用及版本，确认构建图和输出目录；WSL 未运行、虚拟化组件失败或工具链缺失时停止在环境检查，不改用 Windows 工具链、不自动安装工具、不伪造 Android 编译通过。
+
+# 日常开发标准作业流（SOP）
+
+- 需求先分类：业务、界面、鉴权或逻辑优先修改 `saas-web/` / `saas-server/`，不触发 GN 或 Chromium 编译。
+- 确实必须修改 Chromium 原生实现时，默认只改受影响的 `.cc` 文件，不改公共 `.h`，不修改 `args.gn`、`common.gn` 或其他公共编译参数；若任务确需例外，先按编译参数强制锁说明原因、影响范围和预计重编译量并取得本次明确确认。
+- 单文件修改后先运行 `utils/check_cpp_syntax.py` 做局部语法检查，不以此替代目标构建或运行验收。
+- 构建前对受影响的明确目标运行 `ninja -n` 做范围预检：超过 10 步立即排查头文件依赖泄露，必要时回滚本次重构；仅 1～5 步视为范围安全通过。预检结果异常、无法确认目标或出现生成器动作时停止并重新核对范围。
+- 确认范围后执行构建时显式限制并发为 `ninja -j 4`，避免占满物理内存；Android 仍必须在 WSL Linux 的独立输出目录执行。
 
 # Chromium 编译参数强制锁（PC / Android 同等适用）
 

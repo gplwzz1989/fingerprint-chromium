@@ -98,9 +98,9 @@ func TestParseIfMatch(t *testing.T) {
 		t.Fatalf("parseIfMatch() = (%d, %t, %v), want (12, false, nil)",
 			revision, force, err)
 	}
-	if revision, force, err := parseIfMatch("*"); err != nil ||
-		!force || revision != 0 {
-		t.Fatalf("parseIfMatch(*) = (%d, %t, %v), want (0, true, nil)",
+	if revision, force, err := parseIfMatch("*"); err == nil ||
+		force || revision != 0 {
+		t.Fatalf("parseIfMatch(*) = (%d, %t, %v), want (0, false, error)",
 			revision, force, err)
 	}
 	if _, _, err := parseIfMatch(""); err == nil {

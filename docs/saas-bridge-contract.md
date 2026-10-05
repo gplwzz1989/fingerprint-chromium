@@ -6,6 +6,8 @@
 
 PC 与 Android 共用本契约，分别实现桌面 WebUI 宿主与 Android 主框架消息端口/Java/JNI 适配；平台入口、差异、修改范围和独立验收规则见 [项目总览第 5.4 节](../PROJECT-OVERVIEW.md#54-pc-与-android-的分工差异和联动)。契约一致不表示路径、额度、可选能力或系统机制完全相同，前端以真实能力声明为准。
 
+2026-10-04 已确认业务策略：退出 SaaS、设备会话撤销或账号失权后停止旧身份的 SaaS 云端业务，已打开本机账号 Tab 保留使用，不自动关闭或清空分区。在途同步/恢复停止相关后续动作；账号网页独立浏览和网站网络访问可以继续。此策略不放宽原生 Origin、文档代次或系统授权，完整行为仍须按开发计划 T10/A11 验收。
+
 ## 版本与来源校验
 
 - 当前契约主版本为 `1`，破坏性变更必须递增主版本。
@@ -79,7 +81,7 @@ Android 编码的首版使用 Chromium `WebContents.createMessageChannel()`，�
 
 安卓存储请求使用非阻塞 UI 发起与异步 JNI 完成；原生操作上限 30 秒，宿主等待 35 秒。输入/输出 JSON 上限 14 MiB，Cookie 最多 5000 条，每类网页存储最多 10000 键、UTF-8 总量 10 MiB、键 1024 字节、值 1 MiB。同账号操作不交叉执行，Profile 内最多 8 个未释放操作；超时释放大数据，但未结束的 IPC 仍占操作额度。
 
-`getSnapshot` 可携带 `cookies/local_storage/session_storage` 布尔选项；未选类别不读取。`writeSnapshot` 按快照 `sync_options` 处理，未选类别不清空。网页存储要求已加载的同来源 HTTP/HTTPS 文档；Cookie-only 可在空白账号环境操作。指纹快照须先通过 `fingerprint.set` 应用，写入存储时核对 UA、硬件并发数和种子，不能悄悄忽略不匹配配置。
+`getSnapshot` 可携带 `cookies/local_storage/session_storage` 布尔选项；未选类别不读取。`writeSnapshot` 按快照 `sync_options` 处理，未选类别不清空。网页存储要求已加载的同来源 HTTP/HTTPS 文档；Cookie-only 可在空白账号环境操作。指纹快照须先通过 `fingerprint.set` 应用，写入存储时核对 UA、硬件并发数和种子，不能悄悄忽略不匹配配置。PC/Android 使用统一参数契约；Web 应用后通过 `fingerprint.get` 回读确认，在网站导航及写入存储前拒绝漏写、错账号或静默改值。Worker 验收标记和旧 `fingerprint_contract` 仅为诊断信息，不作为合法参数恢复的门槛。
 
 安卓 `fingerprint.set` 支持 `user_agent` 与 `hardware_concurrency` 的部分更新，拒绝未知字段；UA 为至多 512 字节可打印 ASCII，空字符串清除覆盖，硬件值为 0～64 整数，0 表示恢复种子驱动的页面行为。种子/代理由创建环境确定，不能当作在线字段假装切换。存储操作未释放时拒绝指纹修改。
 

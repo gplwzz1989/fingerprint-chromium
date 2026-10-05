@@ -7,7 +7,8 @@ const fs = require('node:fs');
 const fixture = () => ({schema_version: 1, account_id: 'test-account', cookies: [],
   local_storage: {label: '中文测试'}, session_storage: {session: '测试'},
   storage_url: 'https://example.test/account', fingerprint_seed: '12345', proxy_rules: '',
-  fingerprint: {user_agent: '', hardware_concurrency: 4}, sync_options: {...sync.defaults}});
+  fingerprint: {user_agent: '', hardware_concurrency: 4},
+  sync_options: {...sync.defaults}});
 
 test('真实加密往返、随机盐与账号绑定', async () => {
   const key = await sync.passwordKey('test-encryption-passphrase');
@@ -165,7 +166,7 @@ test('恢复读取 Tab 期间会话变化后不能写入本地或创建新 Tab',
     bridge: {tabs: {
       list: async () => { session = 'new-session'; return []; },
       create: async () => { writes++; },
-    }, storage: {writeSnapshot: async () => { writes++; }}}});
+    }, fingerprint: {get: async () => ({}), set: async () => true}, storage: {writeSnapshot: async () => { writes++; }}}});
   await assert.rejects(controller.restore({account_id: 'test-account'}), /操作已停止/);
   assert.equal(writes, 0);
 });
@@ -211,12 +212,109 @@ test('恢复先创建空白环境并应用指纹，再发起网站导航', async
       list: async () => tab ? [tab] : [],
       create: async (options) => {
         events.push(['create', options.url]); assert.deepEqual(options.fingerprint, data.fingerprint);
-        tab = {id: 'test-tab', account_id: 'test-account', url: options.url, load_progress: 1}; return tab;
+        tab = {id: 'test-tab', account_id: 'test-account', url: options.url, load_progress: 1,
+          fingerprint_seed: options.fingerprintSeed, ...options.fingerprint}; return tab;
       },
       navigate: async (_id, url) => { events.push(['navigate', url]); tab.url = url; return true; },
       activate: async () => { events.push(['activate']); },
-    }, fingerprint: {set: async () => { events.push(['fingerprint']); }},
+    }, fingerprint: {set: async () => { events.push(['fingerprint']); },
+      get: async () => { events.push(['verify']); return tab; }},
       storage: {writeSnapshot: async () => { events.push(['storage']); return true; }}}});
   await controller.restore({account_id: 'test-account'});
-  assert.deepEqual(events, [['create', 'about:blank'], ['fingerprint'], ['navigate', data.storage_url], ['storage'], ['activate']]);
+  assert.deepEqual(events, [['create', 'about:blank'], ['fingerprint'], ['verify'], ['navigate', data.storage_url], ['storage'], ['activate']]);
+});
+
+test('Worker 验收标记不阻断两端统一参数恢复，旧元数据无需伪造通过', async () => {
+  // 仅测试桥返回值边界，网页加解密真实执行，不声称 Worker 或设备验收通过。
+  const key = await sync.passwordKey('strict-fingerprint-compatibility');
+  const data = {...fixture(), fingerprint_contract: {
+    version: 1, worker_fingerprint_verified: false,
+  }};
+  const envelope = await sync.encrypt(key, 'test-account', data);
+  let applied = false, written = false;
+  const tab = {id: 'test-tab', account_id: 'test-account', fingerprint_seed: data.fingerprint_seed,
+    proxy_rules: data.proxy_rules, ...data.fingerprint, url: data.storage_url, load_progress: 1,
+    worker_fingerprint_verified: false};
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => sync.defaults,
+    request: async () => ({account_id: 'test-account', schema_version: 1, revision: 1, envelope}),
+    bridge: {describe: async () => ({available: true, capabilities: {fingerprint: true}}), tabs: {
+      list: async () => [tab], navigate: async () => true, activate: async () => true,
+    }, fingerprint: {set: async () => { applied = true; }, get: async () => tab},
+    storage: {writeSnapshot: async () => { written = true; return true; }}}});
+  await controller.restore({account_id: 'test-account'});
+  assert.equal(applied, true);
+  assert.equal(written, true);
+});
+
+test('统一指纹参数校验拒绝未知字段、控制字符和越界种子', () => {
+  for (const seed of ['4294967296', '-1', '12x', '00000000001', 12345]) {
+    assert.throws(() => sync.validate({...fixture(), fingerprint_seed: seed}, 'test-account'), /指纹种子/);
+  }
+  for (const fingerprint of [
+    {...fixture().fingerprint, unexpected_field: 1},
+    {...fixture().fingerprint, user_agent: 'UA\r\nInjected: true'},
+    {...fixture().fingerprint, user_agent: '中文'},
+    {...fixture().fingerprint, hardware_concurrency: 65},
+  ]) assert.throws(() => sync.validate({...fixture(), fingerprint}, 'test-account'), /指纹字段或参数/);
+  assert.doesNotThrow(() => sync.validate({...fixture(), fingerprint_seed: '4294967295',
+    fingerprint: {user_agent: '', hardware_concurrency: 64}}, 'test-account'));
+});
+
+test('目标原生能力不可用时先停止，不创建账号环境', async () => {
+  const key = await sync.passwordKey('target-capability-test');
+  const envelope = await sync.encrypt(key, 'test-account', fixture());
+  let created = false;
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => sync.defaults,
+    request: async () => ({account_id: 'test-account', schema_version: 1, revision: 1, envelope}),
+    bridge: {describe: async () => ({available: true, capabilities: {fingerprint: false}}),
+    fingerprint: {get: async () => ({}), set: async () => true}, tabs: {
+      list: async () => [],
+      create: async () => { created = true; },
+    }, storage: {writeSnapshot: async () => true}}});
+  await assert.rejects(controller.restore({account_id: 'test-account'}), /指纹能力不可用/);
+  assert.equal(created, false);
+});
+
+test('指纹回读不一致或目标账号错误时不能继续导航和写入存储', async () => {
+  const key = await sync.passwordKey('fingerprint-readback-test');
+  const data = fixture(), envelope = await sync.encrypt(key, 'test-account', data);
+  const actual = {account_id: 'test-account', fingerprint_seed: data.fingerprint_seed,
+    proxy_rules: data.proxy_rules, ...data.fingerprint};
+  for (const mismatch of [{account_id: 'other-account'}, {fingerprint_seed: '23456'},
+    {user_agent: 'different-UA'}, {hardware_concurrency: 2}]) {
+    const events = [];
+    const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+      getSession: () => 'test-session', getOptions: () => sync.defaults,
+      request: async () => ({account_id: 'test-account', schema_version: 1, revision: 1, envelope}),
+      bridge: {tabs: {list: async () => [{id: 'test-tab', ...actual}],
+        navigate: async () => { events.push('navigate'); }, activate: async () => { events.push('activate'); }},
+      fingerprint: {set: async () => true, get: async () => ({...actual, ...mismatch})},
+      storage: {writeSnapshot: async () => { events.push('storage'); }}}});
+    await assert.rejects(controller.restore({account_id: 'test-account'}), /未完整应用账号指纹参数/);
+    assert.deepEqual(events, []);
+  }
+});
+
+test('恢复使用开始时的页面勾选与云端类别交集，未选指纹不改本地配置', async () => {
+  const key = await sync.passwordKey('restore-category-selection');
+  const data = fixture(), envelope = await sync.encrypt(key, 'test-account', data);
+  const options = {...sync.defaults, fingerprint: false, proxy: false};
+  let written;
+  const controller = sync.createController({deviceId: () => 'test-device', getKey: () => key,
+    getSession: () => 'test-session', getOptions: () => options,
+    request: async () => {
+      options.fingerprint = true;
+      return {account_id: 'test-account', schema_version: 1, revision: 1, envelope};
+    }, bridge: {tabs: {list: async () => [{id: 'test-tab', account_id: 'test-account',
+      fingerprint_seed: '67890', url: data.storage_url, load_progress: 1}],
+      navigate: async () => true, activate: async () => true},
+    fingerprint: {set: async () => assert.fail('未选指纹不能写入'), get: async () => assert.fail('未选指纹无需回读')},
+    storage: {writeSnapshot: async (_id, snapshot) => { written = snapshot; return true; }}}});
+  await controller.restore({account_id: 'test-account'});
+  assert.equal(written.sync_options.fingerprint, false);
+  assert.equal(written.fingerprint, undefined);
+  assert.equal(written.fingerprint_seed, undefined);
+  assert.deepEqual(written.local_storage, data.local_storage);
 });

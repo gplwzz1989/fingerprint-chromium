@@ -133,4 +133,4 @@ pwsh -File android-bridge/tests/run-jvm-tests.ps1 -KotlinCompilerDirectory D:\co
 
 JVM/协议复测 489 项通过；`tests/storage-script-source.cc` 编译和链接实际原生脚本生成器，`tests/storage-script-selftest.cjs` 使用明确的存储探针验证 23 项边界，包括保留键、类别过滤、文档标记、配额失败和回滚；不模拟原生 CookieManager 或 Android 设备。网页 12 项、JNI 生成、Java 解析、原生引擎和桌面修复局部 C++ 检查通过；尚无 Android 类型检查、完整 IPC 或设备验收。
 
-现有 WSL 的 Linux 发行版因虚拟化组件未启用而无法启动，尚无可运行的 Android Chromium 构建环境。本轮没有修改 Windows 系统功能、启用虚拟化或重启，也没有安装新工具。生产默认地址仍需由唯一 C++ 常量设置为设备可访问的真实 SaaS 服务；Android 的 `127.0.0.1` 指向设备自身，不会自动访问 PC 服务。
+历史阶段中 WSL 的 Linux 发行版曾因虚拟化组件未启用而无法启动；当时没有修改 Windows 系统功能、启用虚拟化、重启或安装新工具。2026-10-04 最新只读核对已是 Ubuntu Running，SDK/NDK/JDK 路径存在，Ninja/Java 可执行；真实 Linux GN 与完整 Android 调用链仍未确认可用，输出只有参数文件、没有构建图或本次验收 APK，不能记作平台构建通过。当前环境和后续入口见 [项目总览](../PROJECT-OVERVIEW.md) 与 [开发计划](../docs/development-plan.md)。生产默认地址仍需由唯一 C++ 常量设置为设备可访问的真实 SaaS 服务；Android 的 `127.0.0.1` 指向设备自身，不会自动访问 PC 服务。

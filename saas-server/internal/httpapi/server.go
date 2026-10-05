@@ -1695,7 +1695,7 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "登录设备无效")
 		return
 	}
-	expectedRevision, forceOverwrite, err := parseIfMatch(
+	expectedRevision, _, err := parseIfMatch(
 		r.Header.Get("If-Match"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "缺少有效的 If-Match 版本")
@@ -1761,7 +1761,7 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "lease_conflict", "该账号正在被其他设备编辑")
 		return
 	}
-	if currentRevision != expectedRevision && !forceOverwrite {
+	if currentRevision != expectedRevision {
 		_ = tx.Rollback()
 		writeJSON(w, http.StatusConflict, snapshotConflictResponse{
 			Code:            "snapshot_revision_conflict",
@@ -1797,7 +1797,7 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auditAction := "snapshot_written"
-	if forceOverwrite || request.Overwrite {
+	if request.Overwrite {
 		auditAction = "snapshot_overwritten"
 	}
 	if err := s.writeAudit(r.Context(), userID, auditAction, accountID, deviceID); err != nil {
@@ -2215,7 +2215,7 @@ func parseIfMatch(value string) (int64, bool, error) {
 		return 0, false, fmt.Errorf("缺少 If-Match")
 	}
 	if value == "*" {
-		return 0, true, nil
+		return 0, false, fmt.Errorf("If-Match 必须使用刚读取的具体版本")
 	}
 	revision, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || revision < 0 {

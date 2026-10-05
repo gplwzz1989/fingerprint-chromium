@@ -93,7 +93,7 @@ fingerprint-saas
 - `GET /api/v1/accounts/{account_id}/audit-events`
 - `GET /healthz`
 
-快照接口只接受客户端加密信封，并使用 `If-Match` 做乐观并发控制。版本不匹配时普通版本号会返回冲突；只有客户端明确选择覆盖时才允许使用 `If-Match: *`，该操作记录为 `snapshot_overwritten` 审计事件。
+快照接口只接受客户端加密信封，并使用具体版本的 `If-Match` 做乐观并发控制。版本不匹配时返回冲突；服务端拒绝 `If-Match: *`，客户端明确选择覆盖时仍须提交刚读取的具体版本，该操作记录为 `snapshot_overwritten` 审计事件。
 
 独立网页的明确覆盖使用刚读取的具体版本并携带 `overwrite: true`，不会使用通配符；云端再次变化时仍返回冲突，同样记录覆盖审计。账号列表返回 `role` 有效权限，账号查看者不能写入快照，显式账号编辑权限也不能提升工作区查看者。
 

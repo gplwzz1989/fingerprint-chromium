@@ -45,6 +45,10 @@
     }
   }
 
+  function validFingerprintSeed(seed) {
+    return typeof seed === 'string' && /^[0-9]{1,10}$/.test(seed) && Number(seed) <= 0xffffffff;
+  }
+
   function validate(snapshot, accountId) {
     if (!record(snapshot) || snapshot.account_id !== accountId || snapshot.schema_version !== 1 ||
         !Array.isArray(snapshot.cookies) || !record(snapshot.local_storage) ||
@@ -71,12 +75,18 @@
     if ((options.local_storage || options.session_storage) && !/^https?:\/\//i.test(snapshot.storage_url || '')) {
       fail('网页存储快照缺少有效的来源页面');
     }
-    if (options.fingerprint && snapshot.fingerprint !== undefined &&
-        (!record(snapshot.fingerprint) || typeof snapshot.fingerprint.user_agent !== 'string' ||
-         snapshot.fingerprint.user_agent.length > 512 ||
-         !Number.isInteger(snapshot.fingerprint.hardware_concurrency) ||
-         snapshot.fingerprint.hardware_concurrency < 0 || snapshot.fingerprint.hardware_concurrency > 64)) {
-      fail('账号指纹配置无效');
+    if (options.fingerprint) {
+      if (snapshot.fingerprint_seed !== undefined && snapshot.fingerprint_seed !== '' &&
+          !validFingerprintSeed(snapshot.fingerprint_seed)) fail('账号指纹种子必须是有效的无符号 32 位整数');
+      if (snapshot.fingerprint !== undefined &&
+          (!record(snapshot.fingerprint) ||
+           Object.keys(snapshot.fingerprint).some((field) => !['user_agent', 'hardware_concurrency'].includes(field)) ||
+           typeof snapshot.fingerprint.user_agent !== 'string' ||
+           snapshot.fingerprint.user_agent.length > 512 || !/^[\x20-\x7e]*$/.test(snapshot.fingerprint.user_agent) ||
+           !Number.isInteger(snapshot.fingerprint.hardware_concurrency) ||
+           snapshot.fingerprint.hardware_concurrency < 0 || snapshot.fingerprint.hardware_concurrency > 64)) {
+        fail('账号指纹字段或参数无效，请使用两端统一支持的指纹配置');
+      }
     }
     return options;
   }
@@ -106,6 +116,7 @@
     if (options.fingerprint) {
       snapshot.fingerprint_seed = raw.fingerprint_seed || '';
       if (raw.fingerprint) snapshot.fingerprint = raw.fingerprint;
+      if (record(raw.fingerprint_contract)) snapshot.fingerprint_contract = raw.fingerprint_contract;
     }
     validate(snapshot, accountId);
     return snapshot;
@@ -135,7 +146,8 @@
     for (const name of ['local_storage', 'session_storage']) {
       merged[name] = {...(remoteOptions[name] ? remote[name] || {} : {}), ...(localOptions[name] ? local[name] || {} : {})};
     }
-    for (const [name, option] of [['fingerprint', 'fingerprint'], ['fingerprint_seed', 'fingerprint'], ['proxy_rules', 'proxy']]) {
+    for (const [name, option] of [['fingerprint', 'fingerprint'], ['fingerprint_seed', 'fingerprint'],
+      ['fingerprint_contract', 'fingerprint'], ['proxy_rules', 'proxy']]) {
       const selected = localOptions[option] ? local : remote;
       if (selected[name] !== undefined) merged[name] = selected[name];
     }
@@ -244,6 +256,30 @@
       if (!Array.isArray(values)) fail('客户端返回的 Tab 列表无效');
       return values;
     }
+    async function requireFingerprintBridge(snapshot, key, session) {
+      if (typeof bridge.fingerprint?.get !== 'function' ||
+          (snapshot.fingerprint && typeof bridge.fingerprint?.set !== 'function')) {
+        fail('当前客户端未提供完整的指纹读写能力，请更新客户端');
+      }
+      if (typeof bridge.describe === 'function') {
+        const details = await bridge.describe();
+        checkContext(key, session);
+        if (!details?.available || details.capabilities?.fingerprint !== true) {
+          fail('当前客户端的指纹能力不可用，请检查原生桥连接或更新客户端');
+        }
+      }
+    }
+    async function verifyFingerprint(tabId, snapshot, key, session) {
+      const actual = await bridge.fingerprint.get(tabId);
+      checkContext(key, session);
+      if (!record(actual) || actual.account_id !== snapshot.account_id ||
+          !validFingerprintSeed(actual.fingerprint_seed) ||
+          (snapshot.fingerprint_seed && actual.fingerprint_seed !== snapshot.fingerprint_seed) ||
+          (snapshot.fingerprint && (actual.user_agent !== snapshot.fingerprint.user_agent ||
+            actual.hardware_concurrency !== snapshot.fingerprint.hardware_concurrency))) {
+        fail('客户端未完整应用账号指纹参数，恢复已停止，请检查客户端实现');
+      }
+    }
     async function waitForPage(tabId, url, key, session) {
       const expected = new URL(url).origin;
       const deadline = Date.now() + 15000;
@@ -351,11 +387,16 @@
         return exclusive(account.account_id, async () => {
           const session = getSession(), key = getKey();
           if (!key) fail('请先解锁加密快照');
+          const requested = optionsFor({sync_options: getOptions()});
           const response = await request(path(account.account_id) + '/snapshot');
           if (response.account_id !== account.account_id || response.schema_version !== 1) fail('云端快照标识或版本无效');
-          const snapshot = await decrypt(key, account.account_id, response.envelope);
+          const source = await decrypt(key, account.account_id, response.envelope);
           checkContext(key, session);
-          const options = optionsFor(snapshot);
+          const savedOptions = optionsFor(source);
+          const options = optionsFor({sync_options: Object.fromEntries(
+            optionKeys.map((name) => [name, savedOptions[name] && requested[name]]))});
+          const snapshot = select(source, account.account_id, options);
+          if (options.fingerprint) await requireFingerprintBridge(snapshot, key, session);
           let tab = (await tabs()).find((value) => value.account_id === account.account_id);
           checkContext(key, session);
           const proxyAddress = snapshot.proxy_config?.address ?? snapshot.proxy_rules ?? '';
@@ -372,6 +413,7 @@
           checkContext(key, session);
           if (options.fingerprint && snapshot.fingerprint) await bridge.fingerprint.set(tab.id, snapshot.fingerprint);
           checkContext(key, session);
+          if (options.fingerprint) await verifyFingerprint(tab.id, snapshot, key, session);
           if (options.page && snapshot.storage_url) {
             if (await bridge.tabs.navigate(tab.id, url) === false) fail('无法导航到账号页面');
             if (/^https?:/i.test(url)) await waitForPage(tab.id, url, key, session);

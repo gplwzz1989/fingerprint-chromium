@@ -167,11 +167,11 @@ func TestPostgresAccountSyncIntegration(t *testing.T) {
 	if saved.Revision != 1 || saved.Envelope != envelope {
 		t.Fatal("跨设备读取内容或版本不一致")
 	}
-	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "*", http.StatusOK)
-	// 明确覆盖仍采用具体版本进行条件写入，防止覆盖尚未读取的更新。
+	// 通配版本不能绕过条件写入；明确覆盖仍采用具体版本进行条件写入。
+	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "*", http.StatusBadRequest)
 	body.Overwrite = true
+	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "1", http.StatusOK)
 	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "1", http.StatusConflict)
-	expect("PUT", accountPath+"/snapshot", a.AccessToken, body, "2", http.StatusOK)
 	expect("DELETE", accountPath+"/leases/"+lease.LeaseID, a.AccessToken, nil, "", http.StatusNoContent)
 	// 两台设备并发首次抢占租约：一个成功，一个返回冲突，不能返回内部错误。
 	var group sync.WaitGroup
