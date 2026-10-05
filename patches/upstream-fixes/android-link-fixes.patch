@@ -1,0 +1,17 @@
+--- a/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
++++ b/chrome/browser/ui/android/tab_model/tab_model_jni_bridge.cc
+@@ -171,3 +171,3 @@
+ static void JNI_TabModelJniBridge_StartSaasStorageRequest(
+-    JNIEnv* env, const JavaParamRef<jobject>& java_contents, bool write,
++    JNIEnv* env, const JavaParamRef<jobject>& java_contents, jboolean write,
+     std::string& snapshot, const JavaParamRef<jobject>& java_request) {
+--- a/chrome/browser/managed_tab/managed_tab_context_android.cc
++++ b/chrome/browser/managed_tab/managed_tab_context_android.cc
+@@ -10,5 +10,7 @@
+ #include "content/public/browser/web_contents.h"
+ 
+ namespace chrome {
+ 
++WEB_CONTENTS_USER_DATA_KEY_IMPL(ManagedTabContext);
++
+ std::vector<ManagedTabContext*> ManagedTabContext::GetAll() {

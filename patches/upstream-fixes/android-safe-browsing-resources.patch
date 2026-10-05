@@ -1,0 +1,19 @@
+--- a/components/resources/BUILD.gn
++++ b/components/resources/BUILD.gn
+@@ -96,4 +96,4 @@ grit("components_resources") {
+-  if (safe_browsing_mode > 0) {
++  if (safe_browsing_mode > 0 || is_android) {
+     deps += [
+       "//components/safe_browsing/content/resources:make_file_types_protobuf",
+     ]
+--- a/components/resources/safe_browsing_resources.grdp
++++ b/components/resources/safe_browsing_resources.grdp
+@@ -3,7 +3,7 @@
+   <if expr="is_android and safe_browsing_mode == '2'">
+     <include name="IDR_REAL_TIME_URL_CHECKS_ALLOWLIST_PB" file="${root_gen_dir}\components\safe_browsing\content\resources\real_time_url_checks_allowlist\real_time_url_checks_allowlist.pb" use_base_dir="false" type="BINDATA" />
+   </if>
+-  <if expr="safe_browsing_mode != 0">
++  <if expr="safe_browsing_mode != 0 or is_android">
+     <include name="IDR_DOWNLOAD_FILE_TYPES_PB" file="${root_gen_dir}\components\safe_browsing\content\resources\download_file_types.pb" use_base_dir="false" type="BINDATA" compress="gzip" />
+   </if>
+ </grit-part>
