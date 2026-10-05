@@ -17,6 +17,7 @@
     bridge: null,
     currentView: 'overview',
     selectedAccountIds: new Set(),
+    accountLabelFilter: '',
   };
   let refreshFlight = null;
   let sessionRecoveryAttempted = false;
@@ -62,6 +63,9 @@
     accountEmptyCopy: document.querySelector('#account-empty-copy'),
     accountSearch: document.querySelector('#account-search'),
     accountFilter: document.querySelector('#account-filter'),
+    accountLabelFilters: document.querySelector('#account-label-filters'),
+    workspaceAccountCount: document.querySelector('#workspace-account-count'),
+    workspaceRuntimeCount: document.querySelector('#workspace-runtime-count'),
     metricAccounts: document.querySelector('#metric-accounts'),
     metricRevisions: document.querySelector('#metric-revisions'),
     metricBridge: document.querySelector('#metric-bridge'),
@@ -488,6 +492,9 @@
       : '添加真实账号目录后，才能从浏览器创建隔离 Tab。这里不会填充演示数据。';
     document.querySelector('#empty-new-account-button').hidden = loading || failed || hasFilter;
     elements.metricAccounts.textContent = String(state.accounts.length);
+    if (elements.workspaceAccountCount) elements.workspaceAccountCount.textContent = `${state.accounts.length} 个账号`;
+    if (elements.workspaceRuntimeCount) elements.workspaceRuntimeCount.textContent = `${state.runtimeTabs.length} 个运行环境`;
+    renderAccountLabelFilters();
     const revisionTotal = state.accounts.reduce((total, account) => total + Number(account.revision || 0), 0);
     elements.metricRevisions.textContent = state.accounts.length ? String(revisionTotal) : '—';
     for (const account of visibleAccounts) {
@@ -579,8 +586,32 @@
       const matchesQuery = !query || haystack.includes(query);
       const matchesFilter = filter === 'all' || (filter === 'editable' && account.role !== 'viewer') ||
         (filter === 'viewer' && account.role === 'viewer');
-      return matchesQuery && matchesFilter;
+      const matchesLabel = !state.accountLabelFilter ||
+        (Array.isArray(account.labels) && account.labels.includes(state.accountLabelFilter));
+      return matchesQuery && matchesFilter && matchesLabel;
     });
+  }
+
+  function renderAccountLabelFilters() {
+    if (!elements.accountLabelFilters) return;
+    const labels = [...new Set(state.accounts.flatMap((account) =>
+      Array.isArray(account.labels) ? account.labels.filter(Boolean) : []))]
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    elements.accountLabelFilters.replaceChildren();
+    const all = document.createElement('button');
+    all.type = 'button'; all.className = `label-filter ${state.accountLabelFilter ? '' : 'is-active'}`;
+    all.textContent = `所有标签 · ${state.accounts.length}`;
+    all.addEventListener('click', () => { state.accountLabelFilter = ''; renderAccounts(); });
+    elements.accountLabelFilters.append(all);
+    for (const labelValue of labels) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `label-filter ${state.accountLabelFilter === labelValue ? 'is-active' : ''}`;
+      item.textContent = `${labelValue} · ${state.accounts.filter((account) =>
+        Array.isArray(account.labels) && account.labels.includes(labelValue)).length}`;
+      item.addEventListener('click', () => { state.accountLabelFilter = labelValue; renderAccounts(); });
+      elements.accountLabelFilters.append(item);
+    }
   }
 
   async function openAccountDetail(account) {
@@ -852,6 +883,7 @@
     state.accounts = [];
     state.accountsLoadState = 'loading'; state.accountsLoadError = '';
     state.selectedAccountIds.clear();
+    state.accountLabelFilter = '';
     render();
     sessionStorage.setItem('fingerprint-saas.workspace-id.v1', state.workspaceId);
     try {

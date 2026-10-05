@@ -43,6 +43,35 @@
         </div>
       </aside>
 
+      <aside class="workspace-sidebar" aria-label="账号筛选">
+        <div class="workspace-sidebar-heading">
+          <div class="panel-kicker">当前工作区</div>
+          <strong>账号管理</strong>
+          <span id="workspace-account-count">0 个账号</span>
+        </div>
+        <label class="search-field workspace-search" for="account-search">
+          <span class="search-symbol">⌕</span><span class="sr-only">搜索账号</span>
+          <input id="account-search" type="search" placeholder="搜索账号、标签" autocomplete="off">
+        </label>
+        <div class="workspace-filter-block">
+          <div class="workspace-filter-label">权限</div>
+          <label class="sr-only" for="account-filter">账号权限筛选</label>
+          <select class="table-filter" id="account-filter">
+            <option value="all">全部账号</option>
+            <option value="editable">可编辑账号</option>
+            <option value="viewer">只读账号</option>
+          </select>
+        </div>
+        <div class="workspace-filter-block">
+          <div class="workspace-filter-label">标签分组</div>
+          <div id="account-label-filters" class="label-filter-list"></div>
+        </div>
+        <div class="workspace-sidebar-foot">
+          <div><span class="status-dot is-success"></span><span>SaaS 首页 · 固定</span></div>
+          <div><span class="status-dot is-accent"></span><span id="workspace-runtime-count">0 个运行环境</span></div>
+        </div>
+      </aside>
+
       <main class="main-content">
         <header class="topbar">
           <div class="breadcrumb"><span>工作区</span><span class="breadcrumb-separator">/</span><strong id="workspace-breadcrumb">未登录</strong></div>
@@ -166,10 +195,6 @@
                 <div class="table-actions"><button class="secondary-button" id="selected-sync-button" type="button">批量同步</button><button class="secondary-button" id="selected-restore-button" type="button">批量恢复</button></div>
               </div>
               <div class="table-wrap">
-                <div class="account-table-toolbar">
-                  <label class="search-field" for="account-search"><span class="search-symbol">⌕</span><span class="sr-only">搜索账号</span><input id="account-search" type="search" placeholder="搜索账号名称、标识或标签" autocomplete="off"></label>
-                  <label class="sr-only" for="account-filter">账号权限筛选</label><select class="table-filter" id="account-filter"><option value="all">全部账号</option><option value="editable">可编辑账号</option><option value="viewer">只读账号</option></select>
-                </div>
                 <table class="account-table" id="account-table" aria-busy="false">
                   <thead>
                     <tr><th><input id="account-select-all" type="checkbox" aria-label="选择全部账号"> 账号</th><th>标签</th><th>运行状态</th><th>修订</th><th>更新时间</th><th><span class="sr-only">操作</span></th></tr>

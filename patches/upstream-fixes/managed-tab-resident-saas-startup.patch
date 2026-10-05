@@ -178,8 +178,10 @@ diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
 +          for (int i = 0; i < tabs->count(); ++i) {
 +            if (tabs->GetWebContentsAt(i)->GetVisibleURL().host() ==
 +                chrome::kChromeUIFingerprintManagerHost) {
-+              if (!tabs->IsTabPinned(i)) {
-+                tabs->SetTabPinned(i, true);
++              // 管理器保持普通宽度以显示完整标题；关闭保护由
++              // TabStripModel::PolicyAllowsTabClosing 独立负责。
++              if (tabs->IsTabPinned(i)) {
++                tabs->SetTabPinned(i, false);
 +              }
 +              return;
 +            }
@@ -187,9 +189,7 @@ diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
 +          content::WebContents* control = chrome::AddSelectedTabWithURL(
 +              browser.get(), GURL("chrome://fingerprint-manager/"),
 +              ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
-+          if (control) {
-+            tabs->SetTabPinned(tabs->GetIndexOfWebContents(control), true);
-+          }
++          (void)control;
 +        }, AsWeakPtr()));
 +  }
 +
@@ -198,6 +198,21 @@ diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
 diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/tab_strip_model.cc
 --- a/chrome/browser/ui/tabs/tab_strip_model.cc
 +++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -1386,8 +1386,14 @@ int TabStripModel::SetTabPinned(int index, bool pinned) {
+   ReentrancyCheck reentrancy_check(&reentrancy_guard_);
+   CHECK(ContainsIndex(index));
+
++  if (pinned && GetWebContentsAt(index)->GetVisibleURL().SchemeIs("chrome") &&
++      GetWebContentsAt(index)->GetVisibleURL().host() ==
++          chrome::kChromeUIFingerprintManagerHost) {
++    // 管理器使用普通宽度展示完整标题；关闭保护不依赖 pinned 状态。
++    return index;
++  }
+
+   if (IsTabPinned(index) == pinned) {
+     return index;
+   }
+
 @@ -5149,6 +5149,14 @@ bool TabStripModel::PolicyAllowsTabClosing(
      return true;
    }
@@ -213,6 +228,24 @@ diff --git a/chrome/browser/ui/tabs/tab_strip_model.cc b/chrome/browser/ui/tabs/
    web_app::WebAppProvider* provider =
        web_app::WebAppProvider::GetForWebContents(contents);
    // Can be null if there is no tab helper or app id.
+diff --git a/chrome/browser/ui/views/tabs/tab.cc b/chrome/browser/ui/views/tabs/tab.cc
+--- a/chrome/browser/ui/views/tabs/tab.cc
++++ b/chrome/browser/ui/views/tabs/tab.cc
+@@ -55,3 +55,4 @@
+ #include "chrome/browser/ui/views/tabs/tab_style_views.h"
+ #include "chrome/common/chrome_features.h"
++#include "chrome/common/webui_url_constants.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -1254,5 +1255,9 @@
+ 
+ bool Tab::ShouldRenderAsNormalTab() const {
++  if (data_.visible_url.SchemeIs("chrome") &&
++      data_.visible_url.host() == chrome::kChromeUIFingerprintManagerHost) {
++    return true;
++  }
+   return !data().pinned || (width() >= (GetTabSizeInfo().pinned_tab_width +
+                                         kPinnedTabExtraWidthToRenderAsNormal));
+ }
 diff --git a/chrome/browser/ui/browser_navigator.cc b/chrome/browser/ui/browser_navigator.cc
 --- a/chrome/browser/ui/browser_navigator.cc
 +++ b/chrome/browser/ui/browser_navigator.cc
