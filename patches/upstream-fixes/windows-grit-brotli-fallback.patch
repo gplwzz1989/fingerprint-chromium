@@ -1,0 +1,25 @@
+diff --git a/tools/grit/grit/node/brotli_util.py b/tools/grit/grit/node/brotli_util.py
+index 000000000000..111111111111 100644
+--- a/tools/grit/grit/node/brotli_util.py
++++ b/tools/grit/grit/node/brotli_util.py
+@@ -5,3 +5,4 @@
+ """Framework for compressing resources using Brotli."""
+ 
++import os
+ import subprocess
+@@ -20,6 +20,13 @@ def BrotliCompress(data):
+   if not __brotli_executable:
+     raise Exception('Add "use_brotli = true" to you GN grit(...) target ' +
+                     'if you want to use brotli.')
+-  compress = subprocess.Popen(__brotli_executable + ['-', '-f'],
+-                              stdin=subprocess.PIPE, stdout=subprocess.PIPE)
++  try:
++    compress = subprocess.Popen(__brotli_executable + ['-', '-f'],
++                                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
++  except OSError:
++    fallback = os.environ.get('CHROMIUM_BROTLI_FALLBACK')
++    if not fallback:
++      raise
++    compress = subprocess.Popen([fallback, '-', '-f'],
++                                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+   return compress.communicate(data)[0]
