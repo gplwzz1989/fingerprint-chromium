@@ -1,0 +1,12 @@
+diff --git a/build/toolchain/win/rc/rc.py b/build/toolchain/win/rc/rc.py
+--- a/build/toolchain/win/rc/rc.py
++++ b/build/toolchain/win/rc/rc.py
+@@ -136,3 +136,8 @@ def Preprocess(rc_file_data, flags):
+   if sys.platform == 'win32':
+     clang += '.exe'
++  if not os.path.exists(clang):
++    clang = shutil.which('clang-cl.exe') or shutil.which('clang-cl')
++  if not clang:
++    print('rc.py: error: clang-cl not found', file=sys.stderr)
++    sys.exit(1)
+   temp_handle, temp_file = tempfile.mkstemp(suffix='.i')
