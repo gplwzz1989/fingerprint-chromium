@@ -37,7 +37,7 @@
 | Go 控制面 | 会话、角色、账号授权、目录、加密快照、条件版本、租约、审计、静态托管、限流、初始化用户 | 本次 `go test -v ./...`、`go vet ./...` 通过；独立 PostgreSQL 集成因未配置测试库跳过，历史通过记录保留 |
 | 快照同步 | Cookie、LocalStorage、SessionStorage、指纹、代理、页面地址；PBKDF2 / AES-GCM；合并/覆盖版本校验 | 网页真实加密回归通过；原生与云端多设备运行闭环、其他存储类别未验收 |
 | 桌面原生桥 | `tabs/storage/fingerprint/files/http/crypto`、精确来源校验、固定宿主通信 | 已有局部 C++ / TypeScript 验证记录；最新 Chrome 未链接，不能把源码能力视为当前二进制能力 |
-| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | WSL 活跃输出已完成 GN 图和单 Android ARM64 编译单元验证；完整 Java/C++ 编译、APK/AAB、设备生命周期/权限/网络仍未验收 |
+| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | WSL 活跃输出已完成 `chrome_public_apk`，APK 376,929,667 字节且 SHA-256 已记录；设备安装、权限、生命周期、网络、SAF、Keystore 和运行效果仍未验收 |
 | Worker 指纹 | Dedicated / 嵌套 / Shared / Service Worker 硬件快照传递，Service Worker UA / UA-CH | 已编码并保存补丁；`worker_fingerprint_verified=false`，实际请求头和运行一致性待验证 |
 | 产品化与发布 | 商业界面首轮、头像入口隐藏补丁、单进程限流 | HTTPS 部署、多实例限流、配额/保留/计费、安装升级、完整发布验收待完成 |
 
@@ -325,8 +325,8 @@ SaaS 与原生共享账号身份和契约，各自拥有状态：云端掌握业
 
 | 优先级 | 现场依据与风险 | 计划入口 |
 | --- | --- | --- |
-| 最高 | 最新源码与 Windows 运行产物脱节；Android 没有完整构建/设备结果 | T04～T08，逐端最新产物验收 |
-| 最高 | Linux GN 常用实际路径缺失，只有 depot_tools 启动脚本证据；SDK/NDK/JDK 目录存在不证明兼容 | T06，只读核实调用链与版本 |
+| 最高 | 最新源码与 Windows 运行产物脱节；Android 已有 APK 但没有设备运行结果 | T04/T05/T08，逐端最新产物验收 |
+| 最高 | Android 工具链和 APK 已有证据，设备权限、生命周期、网络及分区运行效果仍未知 | T08，真实设备验收 |
 | 最高 | Git 补丁格式检查：`build-compatibility.patch` 第 1601 行和 `missing-dependencies.patch` 第 108 行失败；后者含已有未提交修改 | T02，先局部核对，不删上下文、不回退他人改动；独立重放未通过前不承诺可复现 |
 | 最高 | Go `parseIfMatch` 允许 `*` 绕过版本比较，而 Web 明确覆盖使用具体版本 | T03，服务端例外与旧接口兼容收口；前端回归通过不能证明直调 API 安全 |
 | 最高 | `logout()` 未关闭本机 Tab 符合已确认保留策略；仍须完整核对退出/撤权后旧身份云端操作与在途同步是否停止；Origin 桥不等于账号业务授权 | T10，验证停止云端业务、保留本机浏览；离线撤权有可达性限制 |

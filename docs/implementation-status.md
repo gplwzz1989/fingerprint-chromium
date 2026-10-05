@@ -27,8 +27,9 @@
 
 - M0：T01 与 T03 已完成局部实现和回归；T02 的 `build-compatibility.patch` 已通过格式/当前源码反向检查，`missing-dependencies.patch` 仍因第 108 行损坏保持阻塞，未改动其既有用户修改。
 - M1：Windows Release 最新原生产物和壳/隔离运行验收仍待安排，当前程序日期早于最新 SaaS 代码。
-- M2：T06 已在 WSL 活跃 Android 输出完成 GN 重生成和 `base/check.cc` 单编译单元验证；T07 Java/JNI/C++ 完整集成、APK/AAB 与 T08 真机生命周期仍未完成。
+- M2：T06 工具链和 GN 图通过；T07 已完成 Android Java/JNI/C++ 集成、资源生成、链接和 `chrome_public_apk`，APK 为 376,929,667 字节、SHA-256 为 `cb26e45ec73444063ac5447390944cbe5e4657dadbbba6b6c0bbbc76d20d4704`；T08 真机安装、权限、生命周期、网络和运行效果仍未完成。
 - M3：真实 HTTPS、多设备 PostgreSQL、权限撤权和审计闭环仍待独立环境；本地 Go 集成测试未配置 `SAAS_TEST_DATABASE_URL` 时保持跳过。
+- 快照写入的 `snapshot_written`/`snapshot_overwritten` 审计已移入同一 PostgreSQL 事务；审计写入失败会回滚快照，避免出现快照成功但审计缺失。其他本地导出/恢复动作仍需真实服务审计验证。
 - M4/M5/M6：跨设备闭环、安装升级/发布、商业运营能力、扩展存储和 Linux/macOS 仍按依赖顺序保留，未因局部通过提前标记完成。
 
 ## 2026-10-05 安卓高保真图纳入开发计划参考

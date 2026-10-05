@@ -119,7 +119,7 @@ sync_options
 | `DELETE` | `/api/v1/accounts/{account_id}/leases/{lease_id}` | 释放设备编辑租约 |
 | `GET` | `/api/v1/accounts/{account_id}/audit-events` | 查询账号操作审计 |
 
-写入快照必须携带当前云端的具体版本。版本不匹配时默认拒绝覆盖，客户端提示用户选择“保留云端”或明确确认“覆盖云端”；服务端拒绝 `If-Match: *`，明确覆盖也必须使用刚读取的具体版本，避免不同设备丢失登录状态。明确覆盖会记录 `snapshot_overwritten` 审计事件。
+写入快照必须携带当前云端的具体版本。版本不匹配时默认拒绝覆盖，客户端提示用户选择“保留云端”或明确确认“覆盖云端”；服务端拒绝 `If-Match: *`，明确覆盖也必须使用刚读取的具体版本，避免不同设备丢失登录状态。快照写入与 `snapshot_written`/`snapshot_overwritten` 审计在同一数据库事务中提交，审计失败时快照回滚。
 
 ## 4. 加密和凭证边界
 

@@ -1791,17 +1791,20 @@ func (s *Server) handlePutSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "无法更新账号版本")
 		return
 	}
-	if err := tx.Commit(); err != nil {
-		s.logger.Error("提交账号快照失败", "error", err.Error())
-		writeError(w, http.StatusInternalServerError, "internal_error", "无法提交账号环境快照")
-		return
-	}
 	auditAction := "snapshot_written"
 	if request.Overwrite {
 		auditAction = "snapshot_overwritten"
 	}
-	if err := s.writeAudit(r.Context(), userID, auditAction, accountID, deviceID); err != nil {
-		s.logger.Error("写入快照审计失败", "error", err.Error())
+	if err := writeAuditTx(r.Context(), tx, userID, auditAction, accountID, deviceID); err != nil {
+		_ = tx.Rollback()
+		s.logger.Error("写入快照审计失败，已回滚快照事务", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法记录账号环境快照审计，快照未写入")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("提交账号快照失败", "error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "无法提交账号环境快照")
+		return
 	}
 	writeJSON(w, http.StatusOK, accountSnapshotResponse{
 		AccountID:     accountID,
@@ -2141,6 +2144,22 @@ func (s *Server) writeAudit(ctx context.Context, userID, action, accountID, devi
 		account = accountID
 	}
 	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO audit_events (event_id, user_id, account_id, action, device_id)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
+		eventID, userID, account, action, deviceID)
+	return err
+}
+
+func writeAuditTx(ctx context.Context, tx *sql.Tx, userID, action, accountID, deviceID string) error {
+	eventID, err := newUUID()
+	if err != nil {
+		return err
+	}
+	var account any
+	if accountID != "" {
+		account = accountID
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_events (event_id, user_id, account_id, action, device_id)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
 		eventID, userID, account, action, deviceID)
