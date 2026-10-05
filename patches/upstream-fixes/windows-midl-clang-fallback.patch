@@ -1,0 +1,13 @@
+diff --git a/build/toolchain/win/midl.py b/build/toolchain/win/midl.py
+index 000000000000..111111111111 100644
+--- a/build/toolchain/win/midl.py
++++ b/build/toolchain/win/midl.py
+@@ -319,2 +319,8 @@ def main(arch, gendir, outdir, dynamic_guids, tlb, h, dlldata, iid, proxy,
+          clang, idl, *flags):
++  if sys.platform == 'win32' and not os.path.exists(clang):
++    clang = shutil.which('clang-cl.exe') or shutil.which('clang-cl')
++  if not clang:
++    print('midl.py: error: clang-cl not found', file=sys.stderr)
++    return 1
++
+   # Copy checked-in outputs to final location.
