@@ -1,0 +1,17 @@
+diff --git a/testing/scripts/common.py b/testing/scripts/common.py
+--- a/testing/scripts/common.py
++++ b/testing/scripts/common.py
+@@ -8,5 +8,6 @@
+ import contextlib
+ import json
++import locale
+ import os
+ import logging
+ import platform
+@@ -68,4 +69,6 @@ def set_lpac_acls(acl_dir, is_test_script=False):
+     existing_acls = subprocess.check_output(['icacls', acl_dir],
+                                             stderr=subprocess.STDOUT,
++                                            encoding=locale.getencoding(),
++                                            errors='replace',
+                                             universal_newlines=True)
+   except subprocess.CalledProcessError as e:
