@@ -1,5 +1,11 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-05 `missing-dependencies.patch` 格式修复
+
+- 工作区曾在已提交补丁末尾追加 189 行 Safe Browsing、Android JNI 和 `ManagedTabContext` 相关内容；该追加段与独立 Android 补丁重复，hunk 计数/上下文不完整，Git 在第 107 行报告损坏。
+- 已保留临时备份，并将补丁恢复到已提交的 8 个依赖修复 hunk。`git apply --numstat -- patches/upstream-fixes/missing-dependencies.patch` 通过；当前 `build/src` 已包含其他补丁改动，`git apply --reverse --check` 在 8 个依赖上下文处失败，不能据此宣称独立重放通过。
+- 本次仅收口补丁文件和状态记录，未运行 GN/Ninja、未修改编译参数、未清理构建输出；后续需在干净源树按 `patches/series` 独立重放。
+
 ## 2026-10-05 指纹统一契约修正后的当前状态
 
 - PC 与 Android 的账号指纹参数按统一契约处理：`fingerprint_seed`、`fingerprint.user_agent`、`fingerprint.hardware_concurrency` 使用相同字段、范围和默认语义。平台缺失能力作为实现缺陷，不作为正常兼容差异。
@@ -25,7 +31,7 @@
 
 ## 2026-10-05 计划状态核对
 
-- M0：T01 与 T03 已完成局部实现和回归；T02 的 `build-compatibility.patch` 已通过格式/当前源码反向检查，`missing-dependencies.patch` 仍因第 108 行损坏保持阻塞，未改动其既有用户修改。
+- M0：T01 与 T03 已完成局部实现和回归；T02 的 `build-compatibility.patch` 已通过格式/当前源码反向检查，`missing-dependencies.patch` 已恢复并通过格式检查，独立重放仍待干净源树验证。
 - M1：Windows Release 最新原生产物和壳/隔离运行验收仍待安排，当前程序日期早于最新 SaaS 代码。
 - M2：T06 工具链和 GN 图通过；T07 已完成 Android Java/JNI/C++ 集成、资源生成、链接和 `chrome_public_apk`，APK 为 376,929,667 字节、SHA-256 为 `cb26e45ec73444063ac5447390944cbe5e4657dadbbba6b6c0bbbc76d20d4704`；T08 真机安装、权限、生命周期、网络和运行效果仍未完成。
 - M3：真实 HTTPS、多设备 PostgreSQL、权限撤权和审计闭环仍待独立环境；本地 Go 集成测试未配置 `SAAS_TEST_DATABASE_URL` 时保持跳过。
