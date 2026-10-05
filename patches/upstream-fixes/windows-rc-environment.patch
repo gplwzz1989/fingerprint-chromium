@@ -1,11 +1,13 @@
 diff --git a/build/toolchain/win/tool_wrapper.py b/build/toolchain/win/tool_wrapper.py
 --- a/build/toolchain/win/tool_wrapper.py
 +++ b/build/toolchain/win/tool_wrapper.py
-@@ -167,4 +167,7 @@ class WinTool(object):
+@@ -167,4 +167,9 @@ class WinTool(object):
    def ExecRcWrapper(self, arch, *args):
      """Converts .rc files to .res files."""
      env = self._GetEnv(arch)
 +    for k, v in os.environ.items():
-+      if k not in env:
++      if k == 'PATH':
++        env[k] = v + os.pathsep + env.get(k, '')
++      elif k not in env:
 +        env[k] = v
      args = list(args)
