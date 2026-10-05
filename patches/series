@@ -198,6 +198,7 @@ upstream-fixes/build-compatibility.patch
 upstream-fixes/ignore-compiler-warnings.patch
 upstream-fixes/windows-acl-output-encoding.patch
 upstream-fixes/windows-rc-clang-fallback.patch
+upstream-fixes/windows-rc-environment.patch
 upstream-fixes/managed-tab-saas-bridge-core.patch
 upstream-fixes/managed-tab-saas-bridge-ui.patch
 upstream-fixes/managed-tab-saas-bridge-host.patch
