@@ -27,7 +27,7 @@ android_sdk_platform_version = "36"
 android_sdk_build_tools_version = "36.0.0"
 android_ndk_root = "/home/gaoyang/Android/Sdk/ndk/28.0.13004108"
 android_ndk_version = "r28"
-android_ndk_api_level = 35
+android_ndk_api_level = 29
 android_sdk_tools_bundle_aapt2_dir =
     "/home/gaoyang/Android/Sdk/build-tools/36.0.0"
 clang_base_path = "/home/gaoyang/chromium-tools/clang"
