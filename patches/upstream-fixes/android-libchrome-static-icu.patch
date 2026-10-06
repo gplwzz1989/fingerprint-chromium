@@ -1,0 +1,9 @@
+diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
+--- a/chrome/android/BUILD.gn
++++ b/chrome/android/BUILD.gn
+@@ -3341,5 +3341,4 @@ if (_is_default_toolchain) {
+   }
+   libchrome_impl("libchrome") {
+-    libs = [ "icu" ]
+     define_unwind_table_target =
+         add_unwind_tables_in_chrome_32bit_apk && target_cpu == "arm"

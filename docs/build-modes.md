@@ -81,3 +81,9 @@ python3 utils/prepare_android_build.py
 此入口验证已登记的 Linux 可执行文件、版本、SDK/NDK、Rust Android 标准库、构建图的 GN/源码根目录及模板一致性。以后参数变更经明确确认后，可用 `python3 utils/prepare_android_build.py --apply` 原地同步；内容不变不写入，不改变环境变量，也不自动执行 GN 或编译。
 
 本次原地 GN 重生成成功（57,663 个目标、4,068 个输入文件）。前后 1,203 项生效参数与 56,547 条完整构建命令完全相同，命令图 SHA-256 为 `e22394ba302831fd3628a793c90eb967f075bbe01a5569f681153b33b793144f`，验证本次配置修复没有新增命令变化导致的源码重编译。使用 Ninja 图中的完整 Android ARM64/API35 参数实际编译 `base/check.cc` 成功，独立验证产物为同一输出对象目录内的 `check.toolchain-validation.o`（30,520 字节，AArch64 ELF），原对象不覆盖。本次证明工具链及实际源码编译可开始，不代表完整 APK、链接或设备验收通过。
+
+### 2026-10-06 Android ICU 链接修复与参数记录
+
+- `chrome/android/BUILD.gn` 原有 `libs = [ "icu" ]` 会在 Android ARM64 的 `libchrome__combined.so` 链接命令中生成 `-licu`；当前构建图实际提供 `libicui18n.a` 与 `libicuuc.a`，因此最终链接失败。已删除该冗余系统库声明，补丁为 `patches/upstream-fixes/android-libchrome-static-icu.patch`，并登记到 `patches/series`。
+- 本次未修改 `build-configs/android-arm64.gn`、活跃 `args.gn`、ABI、工具链、SDK/NDK/JDK、Rust/bindgen、优化/功能开关或输出目录；GN 仅因 BUILD.gn 链接描述变化原地重生成。用户明确将构建执行并发从 `-j4` 调整为 `-j8`，不将该执行并发变化记作 GN 参数变更。
+- `ninja -j 8 chrome_public_apk` 退出码 0，APK 大小 376,929,667 字节，SHA-256 为 `4fcef918767a26d91ea6562f7fb89bdd53442be5e05a48425b4a3964dc8dad9e`。设备安装、签名/升级和运行验收仍按 T08/T13 执行。

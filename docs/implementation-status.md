@@ -1,5 +1,12 @@
 # 指纹 SaaS 浏览器阶段总结
 
+## 2026-10-06 Android ARM64 ICU 链接修复与 APK 构建完成
+
+- 首次 Android ARM64 续编在最终链接阶段因 `chrome/android/BUILD.gn` 中冗余的 `libs = [ "icu" ]` 生成 `-licu` 而失败；当前 Android 构建图实际已提供 `libicui18n.a` 与 `libicuuc.a`，不存在 `libicu.a`。已删除该冗余系统库声明，保留现有 Chromium ICU 静态依赖，并登记为 `patches/upstream-fixes/android-libchrome-static-icu.patch`。
+- 修复已加入 `patches/series`。WSL 原地 GN 重生成成功；未修改 `args.gn`、ABI、SDK/NDK/JDK、Rust/bindgen、优化/功能参数或输出目录。用户明确将执行并发从 `-j4` 调整为 `-j8`，本次使用 `ninja -j 8 chrome_public_apk` 从断点续编。
+- 实际构建退出码为 0。APK：`/home/gaoyang/chromium-build/AndroidDevelopment/apks/ChromePublic.apk`；大小 376,929,667 字节；SHA-256：`4fcef918767a26d91ea6562f7fb89bdd53442be5e05a48425b4a3964dc8dad9e`。
+- 本次结论仅覆盖 WSL 工具链、源码编译、链接和 APK 产物；设备安装、签名/升级、权限、生命周期、网络、SAF、Keystore、指纹效果和运行验收仍未完成。
+
 ## 2026-10-05 `missing-dependencies.patch` 格式修复
 
 - 工作区曾在已提交补丁末尾追加 189 行 Safe Browsing、Android JNI 和 `ManagedTabContext` 相关内容；该追加段与独立 Android 补丁重复，hunk 计数/上下文不完整，Git 在第 107 行报告损坏。

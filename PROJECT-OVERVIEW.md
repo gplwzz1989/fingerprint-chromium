@@ -1,6 +1,6 @@
 # 指纹云控项目总览
 
-> 2026-10-05 Android ARM64 修复后构建验证：补齐 Android Safe Browsing 资源依赖、JNI `jboolean` 签名、ManagedTabContext 用户数据键和 Chromium 144.0.7559.132 的 `chrome/android/proguard/main.flags`，未修改编译参数、ABI、工具链或输出目录。WSL 既有输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 使用 `ninja -j 4 chrome_public_apk` 成功生成 `apks/ChromePublic.apk`（376,929,667 字节，SHA-256=`cb26e45ec73444063ac5447390944cbe5e4657dadbbba6b6c0bbbc76d20d4704`）。设备安装、权限/生命周期、网络、SAF、Keystore 和运行效果仍待独立验收，详见阶段记录；全部构建缓存保留。
+> 2026-10-06 Android ARM64 ICU 链接修复后构建验证：移除 `chrome/android/BUILD.gn` 中冗余的 `-licu` 系统库声明，未修改 `args.gn`、ABI、工具链、SDK/NDK/JDK、Rust/bindgen、优化/功能参数或输出目录。WSL 既有输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 使用用户确认的 `ninja -j 8 chrome_public_apk` 成功生成 `apks/ChromePublic.apk`（376,929,667 字节，SHA-256=`4fcef918767a26d91ea6562f7fb89bdd53442be5e05a48425b4a3964dc8dad9e`）。设备安装、权限/生命周期、网络、SAF、Keystore 和运行效果仍待独立验收，详见阶段记录；全部构建缓存保留。
 
 > 2026-10-04 Android 续编入口更新：已核实 WSL Linux 工具链可执行，并将 Android 活跃输出登记为已有缓存的 `/home/gaoyang/chromium-build/AndroidDevelopment`。保留该目录原 `args.gn`，原地 GN 重生成通过；每 5 分钟监控已启用。新 `out/AndroidArm64` 的工具路径不匹配预检失败，不能当作正在编译的输出。实际编译、APK 和设备验收结果见 `docs/implementation-status.md` 的本次续编记录。
 
@@ -37,7 +37,7 @@
 | Go 控制面 | 会话、角色、账号授权、目录、加密快照、条件版本、租约、审计、静态托管、限流、初始化用户 | 本次 `go test -v ./...`、`go vet ./...` 通过；独立 PostgreSQL 集成因未配置测试库跳过，历史通过记录保留 |
 | 快照同步 | Cookie、LocalStorage、SessionStorage、指纹、代理、页面地址；PBKDF2 / AES-GCM；合并/覆盖版本校验 | 网页真实加密回归通过；原生与云端多设备运行闭环、其他存储类别未验收 |
 | 桌面原生桥 | `tabs/storage/fingerprint/files/http/crypto`、精确来源校验、固定宿主通信 | 已有局部 C++ / TypeScript 验证记录；最新 Chrome 未链接，不能把源码能力视为当前二进制能力 |
-| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | WSL 活跃输出已完成 `chrome_public_apk`，APK 376,929,667 字节且 SHA-256 已记录；设备安装、权限、生命周期、网络、SAF、Keystore 和运行效果仍未验收 |
+| Android 桥 | 消息端口与 JNI、真实 TabModel、固定分区、存储、指纹、SimpleURLLoader、SAF、Keystore | WSL 活跃输出已完成 `chrome_public_apk`，APK 376,929,667 字节，SHA-256 为 `4fcef918767a26d91ea6562f7fb89bdd53442be5e05a48425b4a3964dc8dad9e`；设备安装、权限、生命周期、网络、SAF、Keystore 和运行效果仍未验收 |
 | Worker 指纹 | Dedicated / 嵌套 / Shared / Service Worker 硬件快照传递，Service Worker UA / UA-CH | 已编码并保存补丁；`worker_fingerprint_verified=false`，实际请求头和运行一致性待验证 |
 | 产品化与发布 | 商业界面首轮、头像入口隐藏补丁、单进程限流 | HTTPS 部署、多实例限流、配额/保留/计费、安装升级、完整发布验收待完成 |
 
@@ -47,6 +47,7 @@
 - Development 的 `chrome.exe` / `chrome.dll` 最近写入日期仍为 **2026-10-02**；Release 与 `publish/` 对应二进制为 **2026-09-30**。本次没有编译或重新链接 Chromium，不能声称最新补丁已经进入这些运行文件。
 - 两套输出均保留 `args.gn`、`.ninja_deps`、`.ninja_log`、对象与生成文件；本次不执行 GN、Ninja 清理、源码重解包或系统环境变更。
 - PC / Android 编译参数已在 `AGENTS.md` 设置强制锁：任何参数、工具链或输出/缓存路径变更，必须先给出旧值/新值、预计重编译源文件/编译单元数量及依据，取得用户针对本次变更的明确确认。现有参数与缓存不因设置规则而改变；规则不等于操作系统文件权限锁。
+- 2026-10-06 Android 本次 ICU 链接修复只删除冗余 `-licu` 链接声明；Android 模板与活跃 `args.gn` 内容未变，用户单独确认构建执行并发由 `-j4` 调整为 `-j8`。GN 重生成后从断点续编，未清理对象、依赖、缓存或输出。
 - 参数已纳入 Git：PC 仅保留 Release 活跃模板和路径清单，另跟踪 Release 实际 `args.gn` 及 `build/src/build-configs/common.gn`；实际参数与模板的现有差异原样保存。Development 模板已移入回收站，其原输出、`args.gn` 和缓存作为历史构建状态保留，实际参数不再由 Git 跟踪。其余构建产物与缓存不提交。Android 活跃输出当前登记为 WSL 的 `/home/gaoyang/chromium-build/AndroidDevelopment`，其原地 GN 图已生成；Windows 侧 `build/src/out/AndroidArm64` 是预检失败的独立输出，不作为活跃 Android 构建入口。两者均不能仅凭构建图宣称 Android 编译或 APK 通过。
 - 用户本次已确认告警处理变更：共享编译配置添加 C/C++ `-w`、Rust `-Awarnings`；PC/Android 关闭告警转错误和链接告警阻断，实际错误继续失败。源码、补丁和配置已同步，10 项编译器/链接器独立探针及配置语法检查通过；对应构建图尚未重生成，旧 Ninja 命令仍保留原告警配置。本次不执行 GN 重生成、Ninja 或全量构建，详见阶段记录。
 - 本次只读复核 WSL Ubuntu 为 **Running / WSL2**，Linux 内核为 `6.18.40.1-microsoft-standard-WSL2`。SDK `/home/gaoyang/Android/Sdk`、NDK `28.0.13004108` 和 JDK 路径存在；Ninja `1.11.1`、OpenJDK `17.0.20.1` 可执行。常用源码路径 `build/src/buildtools/linux64/gn` 缺失，`/home/gaoyang/depot_tools/gn` 只是启动脚本，真实 Linux GN 与整套 Android 调用链尚未确认可用；未安装工具、生成构建图或编译。历史 WSL 启动错误不再作为当前环境结论。

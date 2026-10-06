@@ -26,7 +26,7 @@
 | SaaS Web | 最新 41 项回归通过；指纹恢复采用统一参数校验/能力检查/应用后回读，页面选择可控制恢复范围 | 从真实客户端联调入手，无需重建业务架构 |
 | Go | `go test -v ./...`、`go vet ./...` 通过；包测试含缓存；独立 PostgreSQL 专项跳过 | 真实数据库复测是闭环前置条件，历史通过不替代 |
 | Windows | Release 图存在；程序/动态库与 publish 为 2026-09-30 产物 | 需要使最新实现进入运行产物后再验收 |
-| Android | WSL Ubuntu Running；活跃输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 已完成 `chrome_public_apk`，APK 376,929,667 字节，SHA-256 为 `cb26e45ec73444063ac5447390944cbe5e4657dadbbba6b6c0bbbc76d20d4704`；设备仍未验收 | 从 APK 构建转入安装、权限、生命周期、网络/存储和指纹运行效果，保留独立输出与缓存 |
+| Android | WSL Ubuntu Running；活跃输出 `/home/gaoyang/chromium-build/AndroidDevelopment` 已完成 `chrome_public_apk`，APK 376,929,667 字节，SHA-256 为 `4fcef918767a26d91ea6562f7fb89bdd53442be5e05a48425b4a3964dc8dad9e`；设备仍未验收 | 从 APK 构建转入安装、权限、生命周期、网络/存储和指纹运行效果，保留独立输出与缓存 |
 | Linux 工具 | Ninja 1.11.1、OpenJDK 17.0.20.1；depot_tools GN 启动器存在，常用源码 `buildtools/linux64/gn` 缺失 | 尚不能宣称 GN 可用，核实真正可执行工具，不自动下载 |
 | 补丁 | `build-compatibility.patch` 已通过格式/当前源码反向检查；`missing-dependencies.patch` 已恢复到提交版本，`git apply --numstat` 通过，但当前展开源码反向检查仍受源树漂移影响 | 在干净源树独立重放并核对补丁顺序；格式已收口，不能把当前展开源码反向失败记作补丁格式失败 |
 | 同步并发 | Web 与 Go 均要求具体版本，服务端已拒绝 `If-Match: *` | 继续补充真实 PostgreSQL 竞争、撤权和审计验证 |
@@ -124,7 +124,7 @@ M1 出口：最新 Windows 单端打开—隔离—读取/恢复—关闭可运�
 - 界面交付：对照本节高保真图，分别记录 SaaS 移动页面与 Android 原生外壳的已实现、待实现和实际差异；复用已有启动与标签逻辑，原生修改同步模块副本、展开源码及对应补丁。
 - 验收：真实 Android 工具链完成 Java/JNI/C++ 编译及链接/打包；未绑定平台声明能力不可用；不引用桌面专属实现或用 Windows C++ 检查代替 Android 结果。
 - 依赖：T02、T06；整体构建需要专门指令。
-- 当前结果：真实 Java/JNI/C++ 集成、资源生成、链接和 `ninja -j 4 chrome_public_apk` 已完成，APK 来源、大小和哈希已记录在阶段总结；T07 仍需补充安装/签名策略与设备运行验收，不能把 APK 构建等同于设备通过。
+- 当前结果：真实 Java/JNI/C++ 集成、资源生成、链接和用户确认的 `ninja -j 8 chrome_public_apk` 已完成；已修复冗余 `-licu` 链接声明并登记 Android 补丁，未改变 Android 编译参数。APK 来源、大小和哈希已记录在阶段总结；T07 仍需补充安装/签名策略与设备运行验收，不能把 APK 构建等同于设备通过。
 
 ### T08 Android 真机与生命周期
 
