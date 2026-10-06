@@ -202,6 +202,7 @@ upstream-fixes/windows-rc-environment.patch
 upstream-fixes/windows-midl-clang-fallback.patch
 upstream-fixes/windows-grit-brotli-fallback.patch
 upstream-fixes/windows-tflite-disabled-notification-model.patch
+upstream-fixes/windows-resource-allowlist-llvm-fallback.patch
 upstream-fixes/managed-tab-saas-bridge-core.patch
 upstream-fixes/managed-tab-saas-bridge-ui.patch
 upstream-fixes/managed-tab-saas-bridge-host.patch

@@ -1,0 +1,41 @@
+diff --git a/tools/resources/generate_resource_allowlist.py b/tools/resources/generate_resource_allowlist.py
+--- a/tools/resources/generate_resource_allowlist.py
++++ b/tools/resources/generate_resource_allowlist.py
+@@ -12,6 +12,7 @@
+ import argparse
+ import os
++import shutil
+ import subprocess
+ import sys
+@@ -29,6 +30,18 @@
+                            'bin')
+ 
+ 
++def _FindLlvmTool(name):
++  candidates = [
++      os.path.join(llvm_bindir, name),
++      os.path.join(llvm_bindir, name + '.exe'),
++      shutil.which(name),
++      shutil.which(name + '.exe'),
++  ]
++  for candidate in candidates:
++    if candidate and os.path.isfile(candidate):
++      return candidate
++  raise FileNotFoundError('Unable to find LLVM tool: ' + name)
++
++
+ def ExtractAllowlistFromFile(path, resource_ids):
+@@ -60,7 +73,7 @@
+   # to extract the resource identifier.
+   pdbutil = subprocess.Popen(
+-      [os.path.join(llvm_bindir, 'llvm-pdbutil'), 'dump', '-publics', path],
++      [_FindLlvmTool('llvm-pdbutil'), 'dump', '-publics', path],
+       stdout=subprocess.PIPE)
+@@ -80,7 +93,7 @@
+   if exit_code != 0:
+     raise Exception('llvm-pdbutil exited with exit code %d' % exit_code)
+ 
+-  undname = subprocess.Popen([os.path.join(llvm_bindir, 'llvm-undname')],
++  undname = subprocess.Popen([_FindLlvmTool('llvm-undname')],
+                              stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE)
